@@ -16,9 +16,12 @@ android {
         versionName = "1.0"
     }
     buildTypes { release { isMinifyEnabled = false } }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // ИСПРАВЛЕНО: Включаем поддержку java.time на старых Android (minSdk 24)
+        isCoreLibraryDesugaringEnabled = true 
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
@@ -39,7 +42,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // ИСПРАВЛЕНО: Обновляем Room до 2.7.1 для поддержки Kotlin 2.0 и KSP2
     val roomVersion = "2.7.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
@@ -50,4 +52,7 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // ИСПРАВЛЕНО: Добавлена библиотека для десугаринга
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
