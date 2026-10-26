@@ -395,6 +395,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var showRecurringManager by remember { mutableStateOf(false) }; var showCategoryManager by remember { mutableStateOf(false) }
     var showGoalManager by remember { mutableStateOf(false) }; var showSettings by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }; var showRestoreConfirm by remember { mutableStateOf(false) }
+    var showMonthPicker by remember { mutableStateOf(false) } // Для выбора месяца
     var pendingRestoreJson by remember { mutableStateOf("") }
     var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }; var showImportConfirm by remember { mutableStateOf(false) }
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
@@ -536,7 +537,24 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 title = {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, "Prev") }
-                        Text(month.format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() }, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                        
+                        // ПУНКТ 3: Кликабельный месяц с выпадающим списком
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            Text(
+                                month.format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() },
+                                modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp),
+                                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium
+                            )
+                            DropdownMenu(expanded = showMonthPicker, onDismissRequest = { showMonthPicker = false }) {
+                                (1..12).forEach { m ->
+                                    DropdownMenuItem(
+                                        text = { Text(YearMonth.of(month.year, m).format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() }) },
+                                        onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false }
+                                    )
+                                }
+                            }
+                        }
+                        
                         IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, "Next") }
                     }
                 },
@@ -562,7 +580,22 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
             item {
-                OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth(), placeholder = { Text(t("search")) }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true)
+                // ПУНКТ 2: Крестик для очистки поиска
+                OutlinedTextField(
+                    value = searchQuery, 
+                    onValueChange = { searchQuery = it }, 
+                    modifier = Modifier.fillMaxWidth(), 
+                    placeholder = { Text(t("search")) }, 
+                    leadingIcon = { Icon(Icons.Default.Search, null) }, 
+                    singleLine = true,
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Очистить")
+                            }
+                        }
+                    }
+                )
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text(t("all")) })
@@ -594,7 +627,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
             if (goals.isNotEmpty()) {
                 item {
-                    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    // ПУНКТ 4: Кликабельная карточка Копилки
+                    Card(Modifier.fillMaxWidth().clickable { showGoalManager = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                         Column(Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Savings, null, tint = MaterialTheme.colorScheme.onSecondaryContainer); Spacer(Modifier.width(8.dp)); Text(t("goals"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                             Spacer(Modifier.height(12.dp))
@@ -614,7 +648,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             }
 
             if (budgets.isNotEmpty()) item {
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                // ПУНКТ 5: Кликабельная карточка Бюджетов
+                Card(Modifier.fillMaxWidth().clickable { showBudgetManager = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                     Column(Modifier.padding(16.dp)) {
                         Text(t("budgets_month"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(12.dp))
                         budgets.forEach { budget ->
@@ -648,7 +683,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     }
 
     if (adding || editing != null) {
-        TxDialog(initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories, currentLang = currentLang.value, isPendingSms = isPendingSms, rates = rates,
+        // ПУНКТ 8: Передаем vm в TxDialog, чтобы создавать категории
+        TxDialog(initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories, currentLang = currentLang.value, isPendingSms = isPendingSms, rates = rates, vm = vm,
             onDismiss = { if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
             onSave = { vm.save(it); if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
             onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = "Удалено", actionLabel = "Отменить", duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
@@ -695,7 +731,7 @@ fun AnalyticsDialog(txs: List<Tx>, allTxs: List<Tx>, currentLang: AppLanguage, o
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<String>, incomeCategories: List<String>, currentLang: AppLanguage, isPendingSms: Boolean = false, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit, onSave: (Tx) -> Unit, onDelete: (() -> Unit)?) {
+fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<String>, incomeCategories: List<String>, currentLang: AppLanguage, isPendingSms: Boolean = false, rates: List<ExchangeRateEntity>, vm: VM, onDismiss: () -> Unit, onSave: (Tx) -> Unit, onDelete: (() -> Unit)?) {
     val context = LocalContext.current
     val zone = ZoneId.systemDefault()
     val initDt = initial?.let { Instant.ofEpochMilli(it.timestamp).atZone(zone) } ?: ZonedDateTime.now(zone)
@@ -712,6 +748,12 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var error by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     val t = { key: String -> Translations.t(key, currentLang) }
+
+    // Состояния для выпадающих списков (ПУНКТЫ 6, 7, 8)
+    var showTypeMenu by remember { mutableStateOf(false) }
+    var showCategoryMenu by remember { mutableStateOf(false) }
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
 
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -780,7 +822,28 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
 
     LaunchedEffect(type) {
         val currentList = if (type == TxType.INCOME) incomeCategories else expenseCategories
-        if (!currentList.contains(category)) category = currentList.lastOrNull() ?: "📦 Другое"
+        if (!currentList.contains(category) && !showAddCategoryDialog) category = currentList.lastOrNull() ?: "📦 Другое"
+    }
+
+    // ПУНКТ 8: Мини-диалог для создания новой категории
+    if (showAddCategoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddCategoryDialog = false },
+            title = { Text("Новая категория") },
+            text = { OutlinedTextField(value = newCategoryName, onValueChange = { newCategoryName = it }, label = { Text("Название") }) },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newCategoryName.isNotBlank()) {
+                        val newCat = CategoryEntity(name = newCategoryName.trim(), type = if (type == TxType.INCOME) TxType.INCOME else TxType.EXPENSE)
+                        vm.saveCategory(newCat)
+                        category = newCat.name
+                        newCategoryName = ""
+                        showAddCategoryDialog = false
+                    }
+                }) { Text("Добавить") }
+            },
+            dismissButton = { TextButton(onClick = { showAddCategoryDialog = false }) { Text("Отмена") } }
+        )
     }
 
     AlertDialog(
@@ -790,23 +853,40 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (isPendingSms) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(12.dp)) { Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold); Text(t("sms_title"), style = MaterialTheme.typography.bodySmall) } } }
                 
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    TxType.values().forEachIndexed { i, tt -> SegmentedButton(type == tt, { type = tt }, SegmentedButtonDefaults.itemShape(i, TxType.values().size)) { Text(if(tt == TxType.INCOME) t("income") else if(tt == TxType.EXPENSE) t("expense") else "→") } }
+                // ПУНКТ 6: Выпадающий список типов операций
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(type.label)
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(expanded = showTypeMenu, onDismissRequest = { showTypeMenu = false }) {
+                        TxType.values().forEach { tt ->
+                            DropdownMenuItem(text = { Text(tt.label) }, onClick = { type = tt; showTypeMenu = false })
+                        }
+                    }
                 }
 
+                // ПУНКТ 1: Горизонтальные кнопки
                 if (!isPendingSms) {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
                             file.parentFile?.mkdirs()
                             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
                             tempCameraUri = uri
                             cameraLauncher.launch(uri)
-                        }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(4.dp)); Text(t("take_photo")) }
+                        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { 
+                            Icon(Icons.Default.CameraAlt, contentDescription = "Фото") 
+                        }
                         
-                        Button(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.PhotoLibrary, null); Spacer(Modifier.width(4.dp)); Text(t("choose_photo")) }
+                        Button(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { 
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = "Галерея") 
+                        }
 
-                        Button(onClick = { qrLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.QrCodeScanner, null); Spacer(Modifier.width(4.dp)); Text(t("scan_qr")) }
+                        Button(onClick = { qrLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { 
+                            Icon(Icons.Default.QrCodeScanner, contentDescription = "QR") 
+                        }
                     }
                 }
 
@@ -827,10 +907,21 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     }
                 }
 
-                Text(t("category") + ":", style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val currentCategories = if (type == TxType.INCOME) incomeCategories else expenseCategories
-                    currentCategories.forEach { c -> FilterChip(selected = category == c, onClick = { category = c }, label = { Text(Translations.translateCategory(c, currentLang)) }) }
+                // ПУНКТ 7 и 8: Выпадающий список категорий + кнопка создания новой
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(category)
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
+                        val currentCategories = if (type == TxType.INCOME) incomeCategories else expenseCategories
+                        currentCategories.forEach { c ->
+                            DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; showCategoryMenu = false })
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text("+ Новая категория", color = MaterialTheme.colorScheme.primary) }, onClick = { showAddCategoryDialog = true; showCategoryMenu = false })
+                    }
                 }
 
                 Text(t("account") + ":", style = MaterialTheme.typography.labelMedium)
@@ -864,7 +955,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
             TextButton({
                 var amountMinor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                 
-                // Если выбрана не UZS валюта, конвертируем в UZS для хранения, если карта UZS
                 if (currency != "UZS" && amountMinor != null) {
                     val rateEntity = rates.find { it.currency == currency }
                     if (rateEntity != null) {
@@ -986,7 +1076,6 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     return result
 }
 
-// ЭТА ФУНКЦИЯ И КЛАСС ДОБАВЛЕНЫ СЮДА
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
 fun parseSmsText(text: String): ParsedSms? {
@@ -1113,7 +1202,7 @@ fun SumRow(label: String, v: Long, color: Color, bold: Boolean = false) {
 fun TxRow(t: Tx, lang: AppLanguage, onClick: () -> Unit) {
     val (sign, color) = when (t.type) { TxType.INCOME -> "+" to GREEN; TxType.EXPENSE -> "−" to RED; TxType.TRANSFER -> "→" to BLUE }
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { val icon = when (t.source) { "AUTO" -> "🔄 "; "SMS" -> "✉️ "; "SAVINGS" -> "🏦 "; "IMPORT" -> "📥 "; else -> "" }; Text("$icon${Translations.translateCategory(t.category, lang)}  ${t.description}".trim(), maxLines = 2); val time = Instant.ofEpochMilli(t.timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm")); val cardText = if (t.cardId.isNullOrEmpty()) Translations.t("cash", lang) else "*${t.cardId.split("_")[0]} (${t.cardId.split("_")[1]})"; Text(listOfNotNull(time, cardText).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Color.Gray) }
+        Column(Modifier.weight(1f)) { val icon = when (t.source) { "AUTO" -> "🔄 "; "SMS" -> "✉️ "; "SAVINGS" -> "🏦 "; "IMPORT" -> "📥 "; else -> "" }; Text("$icon${Translations.translateCategory(t.category, lang)}  ${t.description}".trim(), maxLines = 2); val time = Instant.ofEpochMilli(t.timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm")); val cardText = if (t.cardId.isNullOrEmpty()) Translations.t("cash", lang) else "*${t.cardId.split("_")[0]} (${t.cardId.split("_").getOrElse(1) { "" }})"; Text(listOfNotNull(time, cardText).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Color.Gray) }
         Text("$sign${t.amountMinor.money()}", color = color, fontWeight = FontWeight.Medium)
     }
 }
