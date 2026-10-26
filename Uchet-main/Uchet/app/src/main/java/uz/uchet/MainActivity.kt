@@ -194,7 +194,7 @@ fun Long.money(): String {
     return "$sign$whole.%02d".format(frac)
 }
 
-// ПУНКТ 13: Функция ручного сканирования СМС
+// ИСПРАВЛЕННЫЙ ПАРСЕР СМС
 fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) -> Unit) {
     val result = mutableListOf<Tx>()
     val cursor = context.contentResolver.query(Uri.parse("content://sms/inbox"), null, null, null, "date DESC")
@@ -208,7 +208,11 @@ fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) ->
             
             val parsed = parseSmsText(body)
             if (parsed != null) {
-                val amountMinor = BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLongOrNull()
+                // ИСПРАВЛЕНО: используем runCatching вместо toLongOrNull для BigDecimal
+                val amountMinor = runCatching { 
+                    BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() 
+                }.getOrNull()
+                
                 if (amountMinor != null && amountMinor > 0) {
                     val isDuplicate = existingTxs.any { tx -> tx.amountMinor == amountMinor && kotlin.math.abs(tx.timestamp - date) < 60000 }
                     if (!isDuplicate) {
@@ -612,7 +616,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                // ПУНКТ 13: Кнопка сканирования СМС
                                 DropdownMenuItem(text = { Text("Сканировать СМС (100)") }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = { 
                                     showMenu = false
                                     scanInboxSms(context, allTxs) { found ->
@@ -1137,11 +1140,9 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
-// ПУНКТ 16: Улучшенный парсер PDF (Капиталбанк)
 fun parseImportedFile(text: String): List<Tx> {
     val result = mutableListOf<Tx>()
     val lines = text.lines()
-    // Ищем дату (дд.мм.гггг) и сумму (может быть с минусом или без, с копейками)
     val kapitalPdfRegex = Regex("""^(\d{2}\.\d{2}\.\d{4})\s*(-?[\d\s]+,\d{2})\s*(.*)$""")
     
     for (line in lines) {
@@ -1153,7 +1154,6 @@ fun parseImportedFile(text: String): List<Tx> {
             val description = match.groupValues[3].trim()
             
             val amountDouble = amountStr.replace(" ", "").replace(",", ".").toDoubleOrNull() ?: continue
-            // Если есть минус или слово "Списание" - это расход. Иначе - доход.
             val isExpense = amountStr.contains("-") || description.contains("Списание", true) || description.contains("Перевод с VISA", true)
             val isIncome = !isExpense
             
@@ -1168,17 +1168,14 @@ fun parseImportedFile(text: String): List<Tx> {
     return result
 }
 
-// ПУНКТ 14: Улучшенный парсер карт (без обязательных копеек)
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
-    // Ищем числа (возможно с копейками, возможно без) перед словом сум/uzs
     val cardRegex = Regex("""([\d\s]{3,}(?:[.,]\d{2})?)\s*(?:сум|uzs|so'm|so`m)""", RegexOption.IGNORE_CASE)
     val matches = cardRegex.findAll(text)
     for (match in matches) {
         val balanceStr = match.groupValues[1].replace(" ", "").replace(",", ".")
         val balanceMinor = balanceStr.toDoubleOrNull()?.toBigDecimal()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
         
-        // Ищем 4 цифры карты рядом с найденной суммой (в пределах 30 символов)
         val start = maxOf(0, match.range.first - 30)
         val end = minOf(text.length, match.range.last + 30)
         val contextText = text.substring(start, end)
@@ -1194,19 +1191,16 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
 
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
-// ПУНКТ 15: Улучшенный парсер чеков (игнорируем QQS и проценты)
 fun parseSmsText(text: String): ParsedSms? {
     val lowerText = text.lowercase()
     val lines = text.lines()
     var amountStr: String? = null
     
-    // Ищем итоговую сумму по ключевым словам
     val totalRegex = Regex("""(?:jami|итого|total|сумма|к оплате)[:\s]*=?([\d\s]+[.,]?\d{0,2})""", RegexOption.IGNORE_CASE)
     val match = totalRegex.find(text)
     if (match != null) {
         amountStr = match.groupValues[1].replace(" ", "").replace(",", ".")
     } else {
-        // Если ключевых слов нет, ищем первое число, игнорируя строки с процентами/НДС
         for (line in lines) {
             val lowerLine = line.lowercase()
             if (lowerLine.contains("баланс") || lowerLine.contains("кешбэк") || lowerLine.contains("qoldiq") || lowerLine.contains("%") || lowerLine.contains("qqs")) continue
