@@ -7,7 +7,8 @@ import kotlinx.coroutines.flow.Flow
 enum class TxType(val label: String) {
     INCOME("Доход"),
     EXPENSE("Расход"),
-    TRANSFER("Перевод")
+    TRANSFER("Перевод себе"),
+    ADJUSTMENT("Корректировка")
 }
 
 @Entity(tableName = "txs")
@@ -16,6 +17,7 @@ data class Tx(
     val amountMinor: Long,
     val type: TxType,
     val cardId: String? = null,
+    val toCardId: String? = null, // ПУНКТ 9: Куда переводим
     val description: String = "",
     val category: String = "",
     val timestamp: Long,
@@ -71,7 +73,6 @@ data class ExchangeRateEntity(
     val rateToUzs: Double
 )
 
-// ИСПРАВЛЕНО: Dao переименован в AppDao, чтобы не конфликтовать с аннотацией @Dao
 @Dao
 interface AppDao {
     @Query("SELECT * FROM txs WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp DESC")
@@ -161,11 +162,10 @@ interface AppDao {
 
 @Database(
     entities = [Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class, CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class],
-    version = 1,
+    version = 2, // ПОДНЯЛИ ВЕРСИЮ ДЛЯ ОБНОВЛЕНИЯ БД
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
-    // ИСПРАВЛЕНО: теперь возвращает AppDao
     abstract fun dao(): AppDao
 
     companion object {
