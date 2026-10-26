@@ -11,7 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import androidx.activity.compose.BackHandler // ДОБАВЛЕНО для кнопки Назад
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -192,6 +192,35 @@ fun Long.money(): String {
     val frac = abs % 100
     val sign = if (this < 0) "-" else ""
     return "$sign$whole.%02d".format(frac)
+}
+
+// ПУНКТ 13: Функция ручного сканирования СМС
+fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) -> Unit) {
+    val result = mutableListOf<Tx>()
+    val cursor = context.contentResolver.query(Uri.parse("content://sms/inbox"), null, null, null, "date DESC")
+    cursor?.use {
+        val bodyIdx = it.getColumnIndex("body")
+        val dateIdx = it.getColumnIndex("date")
+        var count = 0
+        while (it.moveToNext() && count < 100) {
+            val body = it.getString(bodyIdx) ?: continue
+            val date = it.getLong(dateIdx)
+            
+            val parsed = parseSmsText(body)
+            if (parsed != null) {
+                val amountMinor = BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLongOrNull()
+                if (amountMinor != null && amountMinor > 0) {
+                    val isDuplicate = existingTxs.any { tx -> tx.amountMinor == amountMinor && kotlin.math.abs(tx.timestamp - date) < 60000 }
+                    if (!isDuplicate) {
+                        val isIncome = body.lowercase().contains("пополнение") || body.lowercase().contains("зачисление") || body.lowercase().contains("поступление")
+                        result.add(Tx(amountMinor = amountMinor, type = if (isIncome) TxType.INCOME else TxType.EXPENSE, cardId = parsed.card?.let { c -> "${c}_UZS" }, description = parsed.description, category = parsed.category, timestamp = date, source = "SMS"))
+                    }
+                }
+            }
+            count++
+        }
+    }
+    onFound(result)
 }
 
 class VM(app: Application) : AndroidViewModel(app) {
@@ -427,6 +456,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     LaunchedEffect(Unit) {
         val permissions = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.RECEIVE_SMS)
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.READ_SMS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.CAMERA)
         if (permissions.isNotEmpty()) permissionLauncher.launch(permissions.toTypedArray())
@@ -516,10 +546,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     }
 
     if (showAnalytics) {
-        // ПУНКТ 3: Перехват системной кнопки "Назад" на экране Аналитики
-        BackHandler {
-            showAnalytics = false
-        }
+        BackHandler { showAnalytics = false }
         AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { showAnalytics = false })
     } else {
         if (showRestoreConfirm) {
@@ -585,6 +612,17 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                // ПУНКТ 13: Кнопка сканирования СМС
+                                DropdownMenuItem(text = { Text("Сканировать СМС (100)") }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = { 
+                                    showMenu = false
+                                    scanInboxSms(context, allTxs) { found ->
+                                        if (found.isNotEmpty()) {
+                                            importedTxs = found; showImportConfirm = true
+                                        } else {
+                                            scope.launch { snackbarHostState.showSnackbar("Новых СМС не найдено") }
+                                        }
+                                    }
+                                })
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
@@ -1099,50 +1137,54 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
+// ПУНКТ 16: Улучшенный парсер PDF (Капиталбанк)
 fun parseImportedFile(text: String): List<Tx> {
     val result = mutableListOf<Tx>()
     val lines = text.lines()
-    val kapitalPdfRegex = Regex("""^(\d{2}\.\d{2}\.\d{4})(-?)\s*([\d\s]+,\d{2})(.*)$""")
-    val generalDateRegex = Regex("""(\d{2}[./]\d{2}[./]\d{4}|\d{4}-\d{2}-\d{2})""")
-    val generalAmountRegex = Regex("""(-?\d[\d\s]*[.,]?\d{0,2})\s*(?:uzs|сум|rub|руб|\$|€)?$""", RegexOption.IGNORE_CASE)
-
+    // Ищем дату (дд.мм.гггг) и сумму (может быть с минусом или без, с копейками)
+    val kapitalPdfRegex = Regex("""^(\d{2}\.\d{2}\.\d{4})\s*(-?[\d\s]+,\d{2})\s*(.*)$""")
+    
     for (line in lines) {
         if (line.isBlank()) continue
-        val kapitalMatch = kapitalPdfRegex.find(line.trim())
-        if (kapitalMatch != null) {
-            val dateStr = kapitalMatch.groupValues[1]; val sign = kapitalMatch.groupValues[2]; val amountStr = kapitalMatch.groupValues[3].replace(" ", "").replace(",", "."); val description = kapitalMatch.groupValues[4].trim()
-            val amountDouble = amountStr.toDoubleOrNull() ?: continue
-            val isIncome = sign.isEmpty() && amountDouble > 0 && (description.contains("пополнение", true) || description.contains("зачисление", true))
+        val match = kapitalPdfRegex.find(line.trim())
+        if (match != null) {
+            val dateStr = match.groupValues[1]
+            val amountStr = match.groupValues[2]
+            val description = match.groupValues[3].trim()
+            
+            val amountDouble = amountStr.replace(" ", "").replace(",", ".").toDoubleOrNull() ?: continue
+            // Если есть минус или слово "Списание" - это расход. Иначе - доход.
+            val isExpense = amountStr.contains("-") || description.contains("Списание", true) || description.contains("Перевод с VISA", true)
+            val isIncome = !isExpense
+            
             val amountMinor = kotlin.math.abs(amountDouble).toBigDecimal().movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
+            
             if (amountMinor > 0) {
                 val timestamp = try { val parts = dateStr.split("."); LocalDate.of(parts[2].toInt(), parts[1].toInt(), parts[0].toInt()).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (e: Exception) { System.currentTimeMillis() }
                 result.add(Tx(amountMinor = amountMinor, type = if (isIncome) TxType.INCOME else TxType.EXPENSE, description = description.take(40), category = if (isIncome) "💵 Зарплата" else "📦 Другое", timestamp = timestamp, source = "IMPORT"))
-                continue
             }
-        }
-        val dateMatch = generalDateRegex.find(line); val amountMatch = generalAmountRegex.find(line.trim())
-        if (dateMatch != null && amountMatch != null) {
-            val dateStr = dateMatch.value.replace(".", "-").replace("/", "-"); val cleanAmountStr = amountMatch.groupValues[1].replace(" ", "").replace(",", ".")
-            val amountDouble = cleanAmountStr.toDoubleOrNull() ?: continue
-            val isIncome = !line.contains("-") && amountDouble > 0 && (line.contains("пополнение", true) || line.contains("зачисление", true) || line.contains("income", true))
-            val amountMinor = kotlin.math.abs(amountDouble).toBigDecimal().movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-            if (amountMinor <= 0) continue
-            val timestamp = try { val parts = dateStr.split("-"); val (year, month, day) = if (parts[0].length == 4) Triple(parts[0].toInt(), parts[1].toInt(), parts[2].toInt()) else Triple(parts[2].toInt(), parts[1].toInt(), parts[0].toInt()); LocalDate.of(year, month, day).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (e: Exception) { System.currentTimeMillis() }
-            val description = line.replace(dateMatch.value, "").replace(amountMatch.value, "").trim().replace("\\s+".toRegex(), " ").take(40)
-            result.add(Tx(amountMinor = amountMinor, type = if (isIncome) TxType.INCOME else TxType.EXPENSE, description = description.ifBlank { "Импорт" }, category = if (isIncome) "💵 Зарплата" else "📦 Другое", timestamp = timestamp, source = "IMPORT"))
         }
     }
     return result
 }
 
+// ПУНКТ 14: Улучшенный парсер карт (без обязательных копеек)
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
-    val cardRegex = Regex("""([\d\s]+[.,]\d{2})\s*(?:сум|uzs)[\s\S]*?(\d{4})""", RegexOption.IGNORE_CASE)
+    // Ищем числа (возможно с копейками, возможно без) перед словом сум/uzs
+    val cardRegex = Regex("""([\d\s]{3,}(?:[.,]\d{2})?)\s*(?:сум|uzs|so'm|so`m)""", RegexOption.IGNORE_CASE)
     val matches = cardRegex.findAll(text)
     for (match in matches) {
         val balanceStr = match.groupValues[1].replace(" ", "").replace(",", ".")
-        val last4 = match.groupValues[2]
         val balanceMinor = balanceStr.toDoubleOrNull()?.toBigDecimal()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
+        
+        // Ищем 4 цифры карты рядом с найденной суммой (в пределах 30 символов)
+        val start = maxOf(0, match.range.first - 30)
+        val end = minOf(text.length, match.range.last + 30)
+        val contextText = text.substring(start, end)
+        val last4Match = Regex("""\*?(\d{4})""").find(contextText)
+        val last4 = last4Match?.groupValues?.get(1) ?: UUID.randomUUID().toString().take(4)
+
         if (result.none { it.last4 == last4 }) {
             result.add(CardEntity(id = "${last4}_UZS", last4 = last4, name = "Импорт *$last4", currency = "UZS", initialBalanceMinor = balanceMinor))
         }
@@ -1152,17 +1194,28 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
 
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
+// ПУНКТ 15: Улучшенный парсер чеков (игнорируем QQS и проценты)
 fun parseSmsText(text: String): ParsedSms? {
     val lowerText = text.lowercase()
     val lines = text.lines()
     var amountStr: String? = null
-    for (line in lines) {
-        val lowerLine = line.lowercase()
-        if (lowerLine.contains("баланс") || lowerLine.contains("кешбэк") || lowerLine.contains("qoldiq")) continue
-        val regex = Regex("""(-?[\d\s]+[.,]\d{2})""")
-        val match = regex.find(line)
-        if (match != null) { amountStr = match.groupValues[1].replace(" ", "").replace(",", "."); break }
+    
+    // Ищем итоговую сумму по ключевым словам
+    val totalRegex = Regex("""(?:jami|итого|total|сумма|к оплате)[:\s]*=?([\d\s]+[.,]?\d{0,2})""", RegexOption.IGNORE_CASE)
+    val match = totalRegex.find(text)
+    if (match != null) {
+        amountStr = match.groupValues[1].replace(" ", "").replace(",", ".")
+    } else {
+        // Если ключевых слов нет, ищем первое число, игнорируя строки с процентами/НДС
+        for (line in lines) {
+            val lowerLine = line.lowercase()
+            if (lowerLine.contains("баланс") || lowerLine.contains("кешбэк") || lowerLine.contains("qoldiq") || lowerLine.contains("%") || lowerLine.contains("qqs")) continue
+            val regex = Regex("""(-?[\d\s]+[.,]\d{2})""")
+            val m = regex.find(line)
+            if (m != null) { amountStr = m.groupValues[1].replace(" ", "").replace(",", "."); break }
+        }
     }
+
     if (amountStr == null) return null
     val card = Regex("""(?:karta|карта|\*+|х)\s*\(?\*+(\d{4})\)?""", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.take(4)
     val description = text.take(50).replace("\n", " ").trim()
@@ -1365,7 +1418,6 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("add_temp") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             
-            // ПУНКТ 2: Выпадающий список типов (Доход/Расход) вместо кнопок со стрелками
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(type.label)
@@ -1385,7 +1437,6 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
             
             Text(t("category") + ":", style = MaterialTheme.typography.labelMedium)
             
-            // ПУНКТ 2: Выпадающий список категорий вместо горизонтальных кнопок
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(Translations.translateCategory(category, currentLang))
@@ -1420,7 +1471,6 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("set_limit") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             
-            // ПУНКТ 1: Выпадающий список категорий для бюджетов
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(Translations.translateCategory(selectedCategory, currentLang))
