@@ -547,7 +547,21 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         }
 
         if (showImportConfirm && importedTxs != null) {
-            val txsToImport = importedTxs!!
+                        confirmButton = { TextButton(onClick = { 
+                // АВТОСОЗДАНИЕ КАРТ: если в импортированных транзакциях есть новые карты, создаем их
+                val existingCardIds = cards.map { it.id }.toSet()
+                txsToImport.mapNotNull { it.cardId }.distinct().forEach { cardId ->
+                    if (!existingCardIds.contains(cardId)) {
+                        val last4 = cardId.split("_").firstOrNull() ?: "0000"
+                        val currency = cardId.split("_").getOrNull(1) ?: "UZS"
+                        vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "Импорт *$last4", currency = currency, initialBalanceMinor = 0))
+                    }
+                }
+                
+                vm.bulkSave(txsToImport)
+                scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }
+                showImportConfirm = false; importedTxs = null 
+            }) { Text(t("confirm"), color = GREEN) } },val txsToImport = importedTxs!!
             AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text("Импорт данных") },
                 text = { Text("${t("import_confirm")} ${txsToImport.size}") },
                 confirmButton = { TextButton(onClick = { vm.bulkSave(txsToImport); scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }; showImportConfirm = false; importedTxs = null }) { Text(t("confirm"), color = GREEN) } },
