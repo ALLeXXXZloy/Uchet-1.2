@@ -71,8 +71,9 @@ data class ExchangeRateEntity(
     val rateToUzs: Double
 )
 
+// ИСПРАВЛЕНО: Dao переименован в AppDao, чтобы не конфликтовать с аннотацией @Dao
 @Dao
-interface Dao {
+interface AppDao {
     @Query("SELECT * FROM txs WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp DESC")
     fun observe(start: Long, end: Long): Flow<List<Tx>>
 
@@ -160,11 +161,12 @@ interface Dao {
 
 @Database(
     entities = [Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class, CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class],
-    version = 1, // Откатили версию
+    version = 1,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
-    abstract fun dao(): Dao
+    // ИСПРАВЛЕНО: теперь возвращает AppDao
+    abstract fun dao(): AppDao
 
     companion object {
         @Volatile
