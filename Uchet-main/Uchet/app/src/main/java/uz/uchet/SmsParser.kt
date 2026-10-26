@@ -181,7 +181,8 @@ object SmsParser {
             val addrIdx = c.getColumnIndex("address")
             var n = 0
             while (c.moveToNext() && n < 500) {
-                val body = c.getString(bodyIdx) ?: run { n++; continue }
+                val body = c.getString(bodyIdx)
+                if (body == null) { n++; continue }
                 val date = c.getLong(dateIdx)
                 val sender = if (addrIdx >= 0) c.getString(addrIdx) ?: "" else ""
                 val (cat, tx) = classify(sender, body, date)
