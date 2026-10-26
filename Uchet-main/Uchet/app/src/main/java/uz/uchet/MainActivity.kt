@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -42,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -420,6 +422,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var pendingRestoreJson by remember { mutableStateOf("") }
     var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }; var showImportConfirm by remember { mutableStateOf(false) }
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
+    
+    var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
 
     var showAnalytics by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
@@ -474,28 +478,40 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         } }
     }
 
-    // ИСПРАВЛЕНО: Добавлено логирование в Logcat (OCR_DEBUG) и защита от null при загрузке
     val cardImagePicker = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { scope.launch {
             val bitmap = uriToBitmap(context, it)
             if (bitmap == null) {
-                snackbarHostState.showSnackbar("Ошибка: Не удалось открыть изображение")
+                ocrDebugInfo = "ОШИБКА: uriToBitmap вернул null.\nНе удалось открыть изображение по URI:\n$it"
                 return@launch
             }
+            
+            val imageInfo = "Размер картинки: ${bitmap.width}x${bitmap.height}"
             val image = InputImage.fromBitmap(bitmap, 0)
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            
             recognizer.process(image).addOnSuccessListener { visionText ->
-                android.util.Log.d("OCR_DEBUG", "Распознанный текст:\n${visionText.text}") 
-                val parsedCards = parseCardsFromScreenshot(visionText.text)
+                val rawText = visionText.text
+                val parsedCards = parseCardsFromScreenshot(rawText)
+                
                 if (parsedCards.isNotEmpty()) { 
                     importedCards = parsedCards
                     showCardImportConfirm = true 
                 } else { 
-                    scope.launch { snackbarHostState.showSnackbar("Не удалось распознать карты. Смотрите Logcat (OCR_DEBUG)") } 
+                    ocrDebugInfo = buildString {
+                        appendLine("--- РЕЖИМ ОТЛАДКИ OCR ---")
+                        appendLine(imageInfo)
+                        appendLine("\nНайдено карт регуляркой: 0")
+                        appendLine("\n--- ЧТО ПРОЧИТАЛ ML KIT ---")
+                        if (rawText.isBlank()) {
+                            appendLine("[ПУСТО!] ML Kit не увидел на картинке ни одной буквы или цифры. Возможно, картинка слишком темная, размытая или это не текст.")
+                        } else {
+                            appendLine(rawText)
+                        }
+                    }
                 }
             }.addOnFailureListener { e ->
-                android.util.Log.e("OCR_DEBUG", "Ошибка ML Kit", e)
-                scope.launch { snackbarHostState.showSnackbar("Ошибка распознавания: ${e.message}") }
+                ocrDebugInfo = "ОШИБКА ML KIT:\n${e.message}\n\n${e.stackTraceToString()}"
             }
         } }
     }
@@ -575,6 +591,29 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 text = { Text("Найдено карт: ${cardsToImport.size}") },
                 confirmButton = { TextButton(onClick = { cardsToImport.forEach { card -> vm.saveCard(card) }; scope.launch { snackbarHostState.showSnackbar("Карты добавлены!") }; showCardImportConfirm = false; importedCards = null }) { Text(t("confirm"), color = GREEN) } },
                 dismissButton = { TextButton(onClick = { showCardImportConfirm = false; importedCards = null }) { Text(t("cancel")) } })
+        }
+
+        if (ocrDebugInfo != null) {
+            AlertDialog(
+                onDismissRequest = { ocrDebugInfo = null },
+                title = { Text("Отладка импорта карт") },
+                text = { 
+                    Column(Modifier.verticalScroll(rememberScrollState())) { 
+                        SelectionContainer {
+                            Text(
+                                text = ocrDebugInfo!!, 
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace
+                            ) 
+                        }
+                    } 
+                },
+                confirmButton = { 
+                    TextButton(onClick = { ocrDebugInfo = null }) { 
+                        Text("Закрыть") 
+                    } 
+                }
+            )
         }
 
         if (showSettings) SettingsDialog(context, onDismiss = { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
@@ -1142,29 +1181,23 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
-// ИСПРАВЛЕНО: Построчный парсер, который связывает сумму с номером карты на следующей строке (как на скрине)
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
-    // Разбиваем на строки, убираем пустые
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
     
-    // Регулярка для поиска суммы (например: 19 850,95 сум или 0,01 сум)
     val amountRegex = Regex("""([\d\s\u00A0]+[.,]\d{2})\s*(?:сум|UZS|so['`]?m)""", RegexOption.IGNORE_CASE)
-    // Регулярка для поиска 4 цифр (карты) и названия банка
     val cardRegex = Regex("""(\d{4})\s*[•\.\-\*]?\s*(.+)""")
 
     var pendingAmount: Long? = null
 
     for (line in lines) {
-        // 1. Проверяем, есть ли в строке сумма
         val amtMatch = amountRegex.find(line)
         if (amtMatch != null) {
             val amtStr = amtMatch.groupValues[1].replace(" ", "").replace("\u00A0", "").replace(",", ".")
             pendingAmount = amtStr.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
-            continue // Переходим к следующей строке, где должен быть номер карты
+            continue 
         }
 
-        // 2. Проверяем, есть ли номер карты (и мы уже нашли сумму на предыдущих строках)
         val cardMatch = cardRegex.find(line)
         if (cardMatch != null && pendingAmount != null) {
             val last4 = cardMatch.groupValues[1]
@@ -1179,7 +1212,7 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
                     initialBalanceMinor = pendingAmount!!
                 ))
             }
-            pendingAmount = null // Сбрасываем, ищем следующую пару
+            pendingAmount = null 
         }
     }
     return result
