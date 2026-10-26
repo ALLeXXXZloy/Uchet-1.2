@@ -276,7 +276,6 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun saveGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.upsertGoal(goal) } }
     fun deleteGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.deleteGoal(goal) } }
 
-    // ПУНКТ 10: Функция корректировки баланса
     fun adjustBalance(cardId: String, diffMinor: Long) {
         if (diffMinor == 0L) return
         val tx = Tx(
@@ -489,14 +488,12 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val filteredTxs = txs.filter { tx -> (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) && (filterType == null || tx.type == filterType) }
     val byDay = filteredTxs.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
 
-    // ПУНКТ 9: Обновленный расчет баланса с учетом переводов
     val cardBalancesInUzs = cards.associate { card ->
         val cardTxs = allTxs.filter { it.cardId == card.id }
         val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
         val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
         val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
         
-        // Деньги, которые ПРИШЛИ на эту карту в результате переводов
         val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
 
         val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
@@ -586,6 +583,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
+                                // ВОЗВРАЩЕН ПУНКТ УПРАВЛЕНИЯ КАРТАМИ
+                                DropdownMenuItem(text = { Text("Управление картами") }, leadingIcon = { Icon(Icons.Default.CreditCard, null) }, onClick = { showMenu = false; showCardManager = true })
                                 HorizontalDivider()
                                 DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
                                 DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; jsonExportLauncher.launch("uchet_backup.json") })
@@ -761,7 +760,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var amount by remember { mutableStateOf(initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
     var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
     var selectedCardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
-    var toCardId by remember { mutableStateOf(initial?.toCardId) } // ПУНКТ 9
+    var toCardId by remember { mutableStateOf(initial?.toCardId) }
     var isCustomCard by remember { mutableStateOf(initial?.cardId?.let { !cards.map { c -> c.id }.contains(it) } ?: false) }
     var desc by remember { mutableStateOf(initial?.description ?: "") }
     var date by remember { mutableStateOf(initDt.format(DATE_FMT)) }
@@ -772,10 +771,16 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
 
     var showTypeMenu by remember { mutableStateOf(false) }
     var showCategoryMenu by remember { mutableStateOf(false) }
-    var showCardMenu by remember { mutableStateOf(false) } // ПУНКТ 9
-    var showToCardMenu by remember { mutableStateOf(false) } // ПУНКТ 9
+    var showCardMenu by remember { mutableStateOf(false) }
+    var showToCardMenu by remember { mutableStateOf(false) }
     var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var showAddCardDialog by remember { mutableStateOf(false) } // Для добавления карты
     var newCategoryName by remember { mutableStateOf("") }
+    
+    // Состояния для новой карты
+    var newCardName by remember { mutableStateOf("") }
+    var newCardLast4 by remember { mutableStateOf("") }
+    var newCardCurrency by remember { mutableStateOf("UZS") }
 
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -867,6 +872,45 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         )
     }
 
+    // Мини-диалог для быстрого добавления карты
+    if (showAddCardDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddCardDialog = false },
+            title = { Text("Новая карта") },
+            text = {
+                Column {
+                    OutlinedTextField(value = newCardName, onValueChange = { newCardName = it }, label = { Text("Название карты") }, singleLine = true)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = newCardLast4, onValueChange = { newCardLast4 = it.filter(Char::isDigit).take(4) }, label = { Text("4 цифры") }, singleLine = true)
+                    Spacer(Modifier.height(8.dp))
+                    Box {
+                        var expanded by remember { mutableStateOf(false) }
+                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("Валюта: $newCardCurrency") }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy ->
+                                DropdownMenuItem(text = { Text(ccy) }, onClick = { newCardCurrency = ccy; expanded = false })
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newCardName.isNotBlank() && newCardLast4.isNotBlank()) {
+                        val id = "${newCardLast4}_${newCardCurrency}"
+                        vm.saveCard(CardEntity(id = id, last4 = newCardLast4, name = newCardName, currency = newCardCurrency, initialBalanceMinor = 0))
+                        selectedCardId = id
+                        isCustomCard = false
+                        newCardName = ""
+                        newCardLast4 = ""
+                        showAddCardDialog = false
+                    }
+                }) { Text("Добавить") }
+            },
+            dismissButton = { TextButton(onClick = { showAddCardDialog = false }) { Text("Отмена") } }
+        )
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(when { isPendingSms -> t("sms_title"); initial == null -> t("new_tx"); else -> t("edit") }) },
@@ -942,7 +986,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     }
                 }
 
-                // ПУНКТ 9: Выбор карты (Откуда)
                 Box(Modifier.fillMaxWidth()) {
                     val cardName = cards.find { it.id == selectedCardId }?.let { "${it.name} (${it.currency})" } ?: t("cash")
                     OutlinedButton(onClick = { showCardMenu = true }, modifier = Modifier.fillMaxWidth()) {
@@ -952,12 +995,13 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     }
                     DropdownMenu(expanded = showCardMenu, onDismissRequest = { showCardMenu = false }) {
                         cards.forEach { c ->
-                            DropdownMenuItem(text = { Text("${c.name} (${c.currency})") }, onClick = { selectedCardId = c.id; showCardMenu = false })
+                            DropdownMenuItem(text = { Text("${c.name} (${c.currency})") }, onClick = { selectedCardId = c.id; isCustomCard = false; showCardMenu = false })
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text("+ Новая карта", color = MaterialTheme.colorScheme.primary) }, onClick = { showAddCardDialog = true; showCardMenu = false })
                     }
                 }
 
-                // ПУНКТ 9: Выбор карты (Куда) для перевода
                 if (type == TxType.TRANSFER) {
                     Box(Modifier.fillMaxWidth()) {
                         val toCardName = cards.find { it.id == toCardId }?.let { "${it.name} (${it.currency})" } ?: "Выберите карту"
@@ -994,7 +1038,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                 when {
                     amountMinor == null || amountMinor <= 0 -> error = "Error"
                     d == null -> error = "Error"
-                    type == TxType.TRANSFER && toCardId == null -> error = "Выберите куда перевести" // Валидация для перевода
+                    type == TxType.TRANSFER && toCardId == null -> error = "Выберите куда перевести"
                     else -> {
                         val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
                         onSave(Tx(id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, toCardId = toCardId, description = desc.trim(), category = category, timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath))
@@ -1365,7 +1409,7 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                 val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); 
                 if (actualMinor != null) { 
                     val diff = actualMinor - currentMathBalance
-                    onAdjustBalance(card.id, diff) // ПУНКТ 10: Создаем транзакцию
+                    onAdjustBalance(card.id, diff)
                     editingCard = null; actualBalanceInput = "" 
                 } 
             }) { Text(t("save")) } },
@@ -1379,26 +1423,4 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                     OutlinedTextField(value = last4, onValueChange = { last4 = it.uppercase() }, label = { Text(t("account")) }, modifier = Modifier.weight(1f), singleLine = true)
                     Box(Modifier.weight(0.5f)) {
                         var expanded by remember { mutableStateOf(false) }
-                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currency) }
-                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy -> DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false }) }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp)); OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
-                Button(onClick = { val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L; if (name.isNotBlank() && last4.isNotBlank()) { onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor)); name = ""; last4 = ""; initialBalance = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
-                Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                Text(t("my_accounts") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-                if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
-                cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; 
-                        // ПУНКТ 10: Разрешаем корректировку для всех карт
-                        IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.primary) }; 
-                        if (c.id != "CASH") {
-                            IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) } 
-                        }
-                    }
-                }
-            } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
-    }
-}
+                        Outlined
