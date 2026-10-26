@@ -474,17 +474,28 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         } }
     }
 
+    // ИСПРАВЛЕНО: Добавлено логирование в Logcat (OCR_DEBUG) и защита от null при загрузке
     val cardImagePicker = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { scope.launch {
             val bitmap = uriToBitmap(context, it)
-            bitmap?.let { bmp ->
-                val image = InputImage.fromBitmap(bmp, 0)
-                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                recognizer.process(image).addOnSuccessListener { visionText ->
-                    val parsedCards = parseCardsFromScreenshot(visionText.text)
-                    if (parsedCards.isNotEmpty()) { importedCards = parsedCards; showCardImportConfirm = true }
-                    else { scope.launch { snackbarHostState.showSnackbar("Не удалось распознать карты") } }
+            if (bitmap == null) {
+                snackbarHostState.showSnackbar("Ошибка: Не удалось открыть изображение")
+                return@launch
+            }
+            val image = InputImage.fromBitmap(bitmap, 0)
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            recognizer.process(image).addOnSuccessListener { visionText ->
+                android.util.Log.d("OCR_DEBUG", "Распознанный текст:\n${visionText.text}") 
+                val parsedCards = parseCardsFromScreenshot(visionText.text)
+                if (parsedCards.isNotEmpty()) { 
+                    importedCards = parsedCards
+                    showCardImportConfirm = true 
+                } else { 
+                    scope.launch { snackbarHostState.showSnackbar("Не удалось распознать карты. Смотрите Logcat (OCR_DEBUG)") } 
                 }
+            }.addOnFailureListener { e ->
+                android.util.Log.e("OCR_DEBUG", "Ошибка ML Kit", e)
+                scope.launch { snackbarHostState.showSnackbar("Ошибка распознавания: ${e.message}") }
             }
         } }
     }
@@ -530,7 +541,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
         }
 
-        // ИСПРАВЛЕННЫЙ БЛОК ИМПОРТА
         if (showImportConfirm && importedTxs != null) {
             val txsToImport = importedTxs!!
             AlertDialog(
@@ -539,7 +549,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 text = { Text("${t("import_confirm")} ${txsToImport.size}") },
                 confirmButton = {
                     TextButton(onClick = {
-                        // АВТОСОЗДАНИЕ КАРТ
                         val existingCardIds = cards.map { it.id }.toSet()
                         txsToImport.mapNotNull { it.cardId }.distinct().forEach { cardId ->
                             if (!existingCardIds.contains(cardId)) {
@@ -1133,22 +1142,44 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
+// ИСПРАВЛЕНО: Построчный парсер, который связывает сумму с номером карты на следующей строке (как на скрине)
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
-    val cardRegex = Regex("""([\d\s]{3,}(?:[.,]\d{2})?)\s*(?:сум|uzs|so'm|so`m)""", RegexOption.IGNORE_CASE)
-    val matches = cardRegex.findAll(text)
-    for (match in matches) {
-        val balanceStr = match.groupValues[1].replace(" ", "").replace(",", ".")
-        val balanceMinor = balanceStr.toDoubleOrNull()?.toBigDecimal()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
+    // Разбиваем на строки, убираем пустые
+    val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+    
+    // Регулярка для поиска суммы (например: 19 850,95 сум или 0,01 сум)
+    val amountRegex = Regex("""([\d\s\u00A0]+[.,]\d{2})\s*(?:сум|UZS|so['`]?m)""", RegexOption.IGNORE_CASE)
+    // Регулярка для поиска 4 цифр (карты) и названия банка
+    val cardRegex = Regex("""(\d{4})\s*[•\.\-\*]?\s*(.+)""")
 
-        val start = maxOf(0, match.range.first - 30)
-        val end = minOf(text.length, match.range.last + 30)
-        val contextText = text.substring(start, end)
-        val last4Match = Regex("""\*?(\d{4})""").find(contextText)
-        val last4 = last4Match?.groupValues?.get(1) ?: UUID.randomUUID().toString().take(4)
+    var pendingAmount: Long? = null
 
-        if (result.none { it.last4 == last4 }) {
-            result.add(CardEntity(id = "${last4}_UZS", last4 = last4, name = "Импорт *$last4", currency = "UZS", initialBalanceMinor = balanceMinor))
+    for (line in lines) {
+        // 1. Проверяем, есть ли в строке сумма
+        val amtMatch = amountRegex.find(line)
+        if (amtMatch != null) {
+            val amtStr = amtMatch.groupValues[1].replace(" ", "").replace("\u00A0", "").replace(",", ".")
+            pendingAmount = amtStr.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
+            continue // Переходим к следующей строке, где должен быть номер карты
+        }
+
+        // 2. Проверяем, есть ли номер карты (и мы уже нашли сумму на предыдущих строках)
+        val cardMatch = cardRegex.find(line)
+        if (cardMatch != null && pendingAmount != null) {
+            val last4 = cardMatch.groupValues[1]
+            val bankName = cardMatch.groupValues[2].replace("•", "").trim()
+            
+            if (result.none { it.last4 == last4 }) {
+                result.add(CardEntity(
+                    id = "${last4}_UZS", 
+                    last4 = last4, 
+                    name = "Импорт: $bankName", 
+                    currency = "UZS", 
+                    initialBalanceMinor = pendingAmount!!
+                ))
+            }
+            pendingAmount = null // Сбрасываем, ищем следующую пару
         }
     }
     return result
