@@ -194,38 +194,15 @@ fun Long.money(): String {
     return "$sign$whole.%02d".format(frac)
 }
 
-// ИСПРАВЛЕННЫЙ ПАРСЕР СМС
+// ============================================================
+// ОБЁРТКИ НАД SmsParser (реализация — в SmsParser.kt)
+// ============================================================
+
 fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) -> Unit) {
-    val result = mutableListOf<Tx>()
-    val cursor = context.contentResolver.query(Uri.parse("content://sms/inbox"), null, null, null, "date DESC")
-    cursor?.use {
-        val bodyIdx = it.getColumnIndex("body")
-        val dateIdx = it.getColumnIndex("date")
-        var count = 0
-        while (it.moveToNext() && count < 100) {
-            val body = it.getString(bodyIdx) ?: continue
-            val date = it.getLong(dateIdx)
-            
-            val parsed = parseSmsText(body)
-            if (parsed != null) {
-                // ИСПРАВЛЕНО: используем runCatching вместо toLongOrNull для BigDecimal
-                val amountMinor = runCatching { 
-                    BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() 
-                }.getOrNull()
-                
-                if (amountMinor != null && amountMinor > 0) {
-                    val isDuplicate = existingTxs.any { tx -> tx.amountMinor == amountMinor && kotlin.math.abs(tx.timestamp - date) < 60000 }
-                    if (!isDuplicate) {
-                        val isIncome = body.lowercase().contains("пополнение") || body.lowercase().contains("зачисление") || body.lowercase().contains("поступление")
-                        result.add(Tx(amountMinor = amountMinor, type = if (isIncome) TxType.INCOME else TxType.EXPENSE, cardId = parsed.card?.let { c -> "${c}_UZS" }, description = parsed.description, category = parsed.category, timestamp = date, source = "SMS"))
-                    }
-                }
-            }
-            count++
-        }
-    }
-    onFound(result)
+    onFound(SmsParser.scanInbox(context, existingTxs))
 }
+
+// ============================================================
 
 class VM(app: Application) : AndroidViewModel(app) {
     private val dao = AppDb.get(app).dao()
@@ -246,7 +223,7 @@ class VM(app: Application) : AndroidViewModel(app) {
     val rates = dao.observeRates().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ExchangeRateEntity>())
 
     init {
-        viewModelScope.launch { 
+        viewModelScope.launch {
             checkAndExecuteRecurring(); seedDefaultCategories(); ensureCashAccount(); updateRates()
         }
     }
@@ -377,20 +354,20 @@ class MainActivity : FragmentActivity() {
         currentTheme.value = try { AppTheme.valueOf(prefs.getString("app_theme", "SYSTEM") ?: "SYSTEM") } catch (e: Exception) { AppTheme.SYSTEM }
         currentLang.value = try { AppLanguage.valueOf(prefs.getString("app_lang", "RU") ?: "RU") } catch (e: Exception) { AppLanguage.RU }
 
-        setContent { 
+        setContent {
             val theme by currentTheme
             val lang by currentLang
             val colorScheme = when (theme) {
                 AppTheme.LIGHT -> lightColorScheme(); AppTheme.DARK -> darkColorScheme()
                 AppTheme.SYSTEM -> if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
             }
-            MaterialTheme(colorScheme = colorScheme) { 
+            MaterialTheme(colorScheme = colorScheme) {
                 Surface {
                     var isAuthenticated by remember { mutableStateOf(false) }
-                    if (isAuthenticated) App(pendingCheckTrigger = pendingCheckTrigger, currentTheme = currentTheme, currentLang = currentLang) 
+                    if (isAuthenticated) App(pendingCheckTrigger = pendingCheckTrigger, currentTheme = currentTheme, currentLang = currentLang)
                     else LockScreen(activity = this@MainActivity, lang = lang, onUnlocked = { isAuthenticated = true })
-                } 
-            } 
+                }
+            }
         }
     }
 
@@ -449,7 +426,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var pendingRestoreJson by remember { mutableStateOf("") }
     var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }; var showImportConfirm by remember { mutableStateOf(false) }
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
-    
+
     var showAnalytics by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
 
@@ -472,7 +449,17 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         val pendingJson = prefs.getString("pending", null) ?: return
         try {
             val obj = JSONObject(pendingJson)
-            val pendingTx = Tx(id = 0, amountMinor = obj.getLong("amountMinor"), type = TxType.valueOf(obj.getString("type")), cardId = if (obj.isNull("card")) null else obj.getString("card"), description = obj.optString("description"), category = obj.optString("category"), timestamp = obj.optLong("timestamp"), source = "SMS")
+            val pendingTx = Tx(
+                id = 0,
+                amountMinor = obj.getLong("amountMinor"),
+                type = TxType.valueOf(obj.getString("type")),
+                cardId = if (obj.isNull("card")) null else obj.getString("card"),
+                description = obj.optString("description"),
+                category = obj.optString("category"),
+                timestamp = obj.optLong("timestamp"),
+                source = "SMS",
+                currency = obj.optString("currency", "UZS")
+            )
             editing = pendingTx; isPendingSms = true
         } catch (e: Exception) { prefs.edit().remove("pending").apply() }
     }
@@ -490,14 +477,14 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? -> uri?.let { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }; scope.launch { snackbarHostState.showSnackbar("CSV OK!") } } catch (e: Exception) { } } }
     val jsonExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? -> uri?.let { vm.createBackup { j -> if (j.isNotEmpty()) { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(j.toByteArray()) }; scope.launch { snackbarHostState.showSnackbar("JSON OK!") } } catch (e: Exception) { } } } } }
     val jsonImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? -> uri?.let { try { context.contentResolver.openInputStream(it)?.use { s -> pendingRestoreJson = s.bufferedReader().readText(); showRestoreConfirm = true } } catch (e: Exception) { } } }
-    
+
     val fileImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { scope.launch {
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
                 val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
                 val parsedTxs = parseImportedFile(text)
-                if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true } 
+                if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true }
                 else { snackbarHostState.showSnackbar("Не найдено транзакций") }
             } catch (e: Exception) { snackbarHostState.showSnackbar("Ошибка чтения файла") }
         } }
@@ -511,7 +498,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                 recognizer.process(image).addOnSuccessListener { visionText ->
                     val parsedCards = parseCardsFromScreenshot(visionText.text)
-                    if (parsedCards.isNotEmpty()) { importedCards = parsedCards; showCardImportConfirm = true } 
+                    if (parsedCards.isNotEmpty()) { importedCards = parsedCards; showCardImportConfirm = true }
                     else { scope.launch { snackbarHostState.showSnackbar("Не удалось распознать карты") } }
                 }
             }
@@ -528,14 +515,14 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
         val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
         val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
-        
+
         val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
 
         val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
-        
+
         val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
         val balanceInUzs = (balanceInCardCurrency.toDouble() * rate).toLong()
-        
+
         card.id to balanceInUzs
     }
     val totalLiquidBalanceUzs = cardBalancesInUzs.values.sum()
@@ -561,7 +548,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
         if (showImportConfirm && importedTxs != null) {
             val txsToImport = importedTxs!!
-            AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text("Импорт данных") }, 
+            AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text("Импорт данных") },
                 text = { Text("${t("import_confirm")} ${txsToImport.size}") },
                 confirmButton = { TextButton(onClick = { vm.bulkSave(txsToImport); scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }; showImportConfirm = false; importedTxs = null }) { Text(t("confirm"), color = GREEN) } },
                 dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } })
@@ -569,7 +556,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
         if (showCardImportConfirm && importedCards != null) {
             val cardsToImport = importedCards!!
-            AlertDialog(onDismissRequest = { showCardImportConfirm = false; importedCards = null }, title = { Text("Импорт карт") }, 
+            AlertDialog(onDismissRequest = { showCardImportConfirm = false; importedCards = null }, title = { Text("Импорт карт") },
                 text = { Text("Найдено карт: ${cardsToImport.size}") },
                 confirmButton = { TextButton(onClick = { cardsToImport.forEach { card -> vm.saveCard(card) }; scope.launch { snackbarHostState.showSnackbar("Карты добавлены!") }; showCardImportConfirm = false; importedCards = null }) { Text(t("confirm"), color = GREEN) } },
                 dismissButton = { TextButton(onClick = { showCardImportConfirm = false; importedCards = null }) { Text(t("cancel")) } })
@@ -592,7 +579,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     title = {
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, "Prev") }
-                            
+
                             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                 Text(
                                     month.format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() },
@@ -608,7 +595,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                                     }
                                 }
                             }
-                            
+
                             IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, "Next") }
                         }
                     },
@@ -616,7 +603,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("Сканировать СМС (100)") }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = { 
+                                DropdownMenuItem(text = { Text("Сканировать СМС (100)") }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
                                     showMenu = false
                                     scanInboxSms(context, allTxs) { found ->
                                         if (found.isNotEmpty()) {
@@ -646,11 +633,11 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
                 item {
                     OutlinedTextField(
-                        value = searchQuery, 
-                        onValueChange = { searchQuery = it }, 
-                        modifier = Modifier.fillMaxWidth(), 
-                        placeholder = { Text(t("search")) }, 
-                        leadingIcon = { Icon(Icons.Default.Search, null) }, 
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(t("search")) },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
                         singleLine = true,
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
@@ -666,7 +653,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         FilterChip(selected = filterType == TxType.INCOME, onClick = { filterType = TxType.INCOME }, label = { Text(t("income")) })
                         FilterChip(selected = filterType == TxType.EXPENSE, onClick = { filterType = TxType.EXPENSE }, label = { Text(t("expense")) })
                     }
-                    
+
                     Spacer(Modifier.height(12.dp))
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -728,7 +715,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     }
                     Spacer(Modifier.height(16.dp))
                 }
-                
+
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp)) {
@@ -799,7 +786,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     val context = LocalContext.current
     val zone = ZoneId.systemDefault()
     val initDt = initial?.let { Instant.ofEpochMilli(it.timestamp).atZone(zone) } ?: ZonedDateTime.now(zone)
-    
+
     var type by remember { mutableStateOf(initial?.type ?: TxType.EXPENSE) }
     var category by remember { mutableStateOf(initial?.category ?: expenseCategories.lastOrNull() ?: "📦 Другое") }
     var amount by remember { mutableStateOf(initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
@@ -821,7 +808,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     var showAddCardDialog by remember { mutableStateOf(false) }
     var newCategoryName by remember { mutableStateOf("") }
-    
+
     var newCardName by remember { mutableStateOf("") }
     var newCardLast4 by remember { mutableStateOf("") }
     var newCardCurrency by remember { mutableStateOf("UZS") }
@@ -960,7 +947,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (isPendingSms) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(12.dp)) { Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold); Text(t("sms_title"), style = MaterialTheme.typography.bodySmall) } } }
-                
+
                 Box(Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(type.label)
@@ -982,16 +969,16 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
                             tempCameraUri = uri
                             cameraLauncher.launch(uri)
-                        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { 
-                            Icon(Icons.Default.CameraAlt, contentDescription = "Фото") 
-                        }
-                        
-                        Button(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { 
-                            Icon(Icons.Default.PhotoLibrary, contentDescription = "Галерея") 
+                        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) {
+                            Icon(Icons.Default.CameraAlt, contentDescription = "Фото")
                         }
 
-                        Button(onClick = { qrLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { 
-                            Icon(Icons.Default.QrCodeScanner, contentDescription = "QR") 
+                        Button(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) {
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = "Галерея")
+                        }
+
+                        Button(onClick = { qrLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) {
+                            Icon(Icons.Default.QrCodeScanner, contentDescription = "QR")
                         }
                     }
                 }
@@ -1060,7 +1047,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                         }
                     }
                 }
-                
+
                 OutlinedTextField(desc, { desc = it }, label = { Text(t("desc")) })
                 OutlinedTextField(date, { date = it }, label = { Text(t("date")) }, singleLine = true)
                 error?.let { Text(it, color = RED) }
@@ -1069,14 +1056,14 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         confirmButton = {
             TextButton({
                 var amountMinor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
-                
+
                 if (currency != "UZS" && amountMinor != null) {
                     val rateEntity = rates.find { it.currency == currency }
                     if (rateEntity != null) {
                         amountMinor = (amountMinor.toDouble() * rateEntity.rateToUzs).toBigDecimal().setScale(0, RoundingMode.HALF_UP).toLong()
                     }
                 }
-                
+
                 val d = runCatching { LocalDate.parse(date.trim(), DATE_FMT) }.getOrNull()
                 when {
                     amountMinor == null || amountMinor <= 0 -> error = "Error"
@@ -1140,33 +1127,7 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
-fun parseImportedFile(text: String): List<Tx> {
-    val result = mutableListOf<Tx>()
-    val lines = text.lines()
-    val kapitalPdfRegex = Regex("""^(\d{2}\.\d{2}\.\d{4})\s*(-?[\d\s]+,\d{2})\s*(.*)$""")
-    
-    for (line in lines) {
-        if (line.isBlank()) continue
-        val match = kapitalPdfRegex.find(line.trim())
-        if (match != null) {
-            val dateStr = match.groupValues[1]
-            val amountStr = match.groupValues[2]
-            val description = match.groupValues[3].trim()
-            
-            val amountDouble = amountStr.replace(" ", "").replace(",", ".").toDoubleOrNull() ?: continue
-            val isExpense = amountStr.contains("-") || description.contains("Списание", true) || description.contains("Перевод с VISA", true)
-            val isIncome = !isExpense
-            
-            val amountMinor = kotlin.math.abs(amountDouble).toBigDecimal().movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-            
-            if (amountMinor > 0) {
-                val timestamp = try { val parts = dateStr.split("."); LocalDate.of(parts[2].toInt(), parts[1].toInt(), parts[0].toInt()).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (e: Exception) { System.currentTimeMillis() }
-                result.add(Tx(amountMinor = amountMinor, type = if (isIncome) TxType.INCOME else TxType.EXPENSE, description = description.take(40), category = if (isIncome) "💵 Зарплата" else "📦 Другое", timestamp = timestamp, source = "IMPORT"))
-            }
-        }
-    }
-    return result
-}
+fun parseImportedFile(text: String): List<Tx> = SmsParser.parseImportedFile(text)
 
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
@@ -1175,7 +1136,7 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     for (match in matches) {
         val balanceStr = match.groupValues[1].replace(" ", "").replace(",", ".")
         val balanceMinor = balanceStr.toDoubleOrNull()?.toBigDecimal()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
-        
+
         val start = maxOf(0, match.range.first - 30)
         val end = minOf(text.length, match.range.last + 30)
         val contextText = text.substring(start, end)
@@ -1191,46 +1152,17 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
 
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
-fun parseSmsText(text: String): ParsedSms? {
-    val lowerText = text.lowercase()
-    val lines = text.lines()
-    var amountStr: String? = null
-    
-    val totalRegex = Regex("""(?:jami|итого|total|сумма|к оплате)[:\s]*=?([\d\s]+[.,]?\d{0,2})""", RegexOption.IGNORE_CASE)
-    val match = totalRegex.find(text)
-    if (match != null) {
-        amountStr = match.groupValues[1].replace(" ", "").replace(",", ".")
-    } else {
-        for (line in lines) {
-            val lowerLine = line.lowercase()
-            if (lowerLine.contains("баланс") || lowerLine.contains("кешбэк") || lowerLine.contains("qoldiq") || lowerLine.contains("%") || lowerLine.contains("qqs")) continue
-            val regex = Regex("""(-?[\d\s]+[.,]\d{2})""")
-            val m = regex.find(line)
-            if (m != null) { amountStr = m.groupValues[1].replace(" ", "").replace(",", "."); break }
-        }
-    }
-
-    if (amountStr == null) return null
-    val card = Regex("""(?:karta|карта|\*+|х)\s*\(?\*+(\d{4})\)?""", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.take(4)
-    val description = text.take(50).replace("\n", " ").trim()
-    val category = when {
-        lowerText.contains("atto") || lowerText.contains("market") || lowerText.contains("jami") -> "🍔 Еда"
-        lowerText.contains("uzumbank") -> "🚕 Транспорт"
-        lowerText.contains("самозанятому") -> "💵 Зарплата"
-        else -> "📦 Другое"
-    }
-    return ParsedSms(amountStr, card, description, category)
-}
+fun parseSmsText(text: String): ParsedSms? = SmsParser.parseForOcr(text)
 
 @Composable
 fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
     val daysInMonth = yearMonth.lengthOfMonth(); val zone = ZoneId.systemDefault()
     val dailyExpenses = (1..daysInMonth).associateWith { day -> txs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.dayOfMonth == day && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
     val maxExpense = (dailyExpenses.values.maxOrNull() ?: 1L).toFloat()
-    
+
     val barColor = MaterialTheme.colorScheme.primary
-    val selectedBarColor = MaterialTheme.colorScheme.secondary 
-    
+    val selectedBarColor = MaterialTheme.colorScheme.secondary
+
     var selectedDay by remember { mutableStateOf<Int?>(null) }
 
     Column {
@@ -1240,7 +1172,7 @@ fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
                 val clickedDay = (offset.x / step).toInt() + 1
                 selectedDay = if (selectedDay == clickedDay) null else clickedDay
             }
-        }) { 
+        }) {
             val width = size.width; val height = size.height; val barWidth = (width / daysInMonth) * 0.6f; val step = width / daysInMonth
             dailyExpenses.forEach { (day, amount) ->
                 if (amount > 0) {
@@ -1250,7 +1182,7 @@ fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
                     val x = (day - 1) * step + (step - barWidth) / 2
                     drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
                 }
-            } 
+            }
         }
         Spacer(Modifier.height(8.dp))
         if (selectedDay != null) {
@@ -1266,10 +1198,10 @@ fun MonthlyExpenseChart(allTxs: List<Tx>) {
     val currentYear = Year.now(); val zone = ZoneId.systemDefault()
     val monthlyExpenses = (1..12).associateWith { m -> allTxs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.year == currentYear.value && date.monthValue == m && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
     val maxExpense = (monthlyExpenses.values.maxOrNull() ?: 1L).toFloat()
-    
+
     val barColor = MaterialTheme.colorScheme.secondary
     val selectedBarColor = MaterialTheme.colorScheme.primary
-    
+
     var selectedMonth by remember { mutableStateOf<Int?>(null) }
 
     Column {
@@ -1279,7 +1211,7 @@ fun MonthlyExpenseChart(allTxs: List<Tx>) {
                 val clickedMonth = (offset.x / step).toInt() + 1
                 selectedMonth = if (selectedMonth == clickedMonth) null else clickedMonth
             }
-        }) { 
+        }) {
             val width = size.width; val height = size.height; val step = width / 12; val barWidth = step * 0.6f
             monthlyExpenses.forEach { (month, amount) ->
                 if (amount > 0) {
@@ -1289,7 +1221,7 @@ fun MonthlyExpenseChart(allTxs: List<Tx>) {
                     val x = (month - 1) * step + (step - barWidth) / 2
                     drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
                 }
-            } 
+            }
         }
         Spacer(Modifier.height(8.dp))
         if (selectedMonth != null) {
@@ -1344,9 +1276,9 @@ fun SettingsDialog(context: android.content.Context, onDismiss: () -> Unit, snac
                 FilterChip(selected = currentTheme.value == AppTheme.DARK, onClick = { currentTheme.value = AppTheme.DARK; settingsPrefs.edit().putString("app_theme", "DARK").apply() }, label = { Text(t("dark")) })
             }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-            
+
             Button(onClick = { vm.updateRates(); scope.launch { snackbarHostState.showSnackbar("Курсы обновлены") } }, modifier = Modifier.fillMaxWidth()) { Text(t("update_rates")) }
-            
+
             Spacer(Modifier.height(16.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("change_pin"), style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = oldPin, onValueChange = { oldPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
@@ -1355,7 +1287,7 @@ fun SettingsDialog(context: android.content.Context, onDismiss: () -> Unit, snac
             Button(onClick = { when { oldPin != savedPin -> scope.launch { snackbarHostState.showSnackbar(t("wrong_pin")) }; newPin.length != 4 -> scope.launch { snackbarHostState.showSnackbar("PIN: 4") }; newPin != confirmPin -> scope.launch { snackbarHostState.showSnackbar("PIN Error") }; else -> { prefs.edit().putString("pin", newPin).apply(); oldPin = ""; newPin = ""; confirmPin = ""; scope.launch { snackbarHostState.showSnackbar("PIN OK!") } } } }, modifier = Modifier.fillMaxWidth()) { Text(t("change_pin")) }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(t("biometric"), style = MaterialTheme.typography.titleSmall) }; Switch(checked = useBiometric, onCheckedChange = { useBiometric = it; prefs.edit().putBoolean("use_biometric", it).apply() }) }
-            
+
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(t("sms_debug"), style = MaterialTheme.typography.titleSmall) }; Switch(checked = smsDebug, onCheckedChange = { smsDebug = it; settingsPrefs.edit().putBoolean("sms_debug_mode", it).apply() }) }
         } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
@@ -1383,15 +1315,15 @@ fun SumRow(label: String, v: Long, color: Color, bold: Boolean = false) {
 fun TxRow(t: Tx, lang: AppLanguage, onClick: () -> Unit) {
     val (sign, color) = when (t.type) { TxType.INCOME -> "+" to GREEN; TxType.EXPENSE -> "−" to RED; TxType.TRANSFER -> "→" to BLUE; TxType.ADJUSTMENT -> "⚙️" to Color.Gray }
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { 
+        Column(Modifier.weight(1f)) {
             val icon = when (t.source) { "AUTO" -> "🔄 "; "SMS" -> "✉️ "; "SAVINGS" -> "🏦 "; "IMPORT" -> "📥 "; "ADJUSTMENT" -> "⚙️ "; else -> "" }
             Text("$icon${Translations.translateCategory(t.category, lang)}  ${t.description}".trim(), maxLines = 2)
-            
+
             val time = Instant.ofEpochMilli(t.timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))
             val cardText = if (t.cardId.isNullOrEmpty()) Translations.t("cash", lang) else "*${t.cardId.split("_")[0]}"
             val toCardText = if (t.toCardId != null) " -> *${t.toCardId.split("_")[0]}" else ""
-            
-            Text(listOfNotNull(time, cardText + toCardText).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Color.Gray) 
+
+            Text(listOfNotNull(time, cardText + toCardText).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
         Text("$sign${t.amountMinor.money()}", color = color, fontWeight = FontWeight.Medium)
     }
@@ -1403,7 +1335,7 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
     var type by remember { mutableStateOf(TxType.EXPENSE) }; var category by remember { mutableStateOf(expenseCategories.lastOrNull() ?: "📦 Другое") }
     var amount by remember { mutableStateOf("") }; var selectedCardId by remember { mutableStateOf("CASH") }; var desc by remember { mutableStateOf("") }; var dayOfMonth by remember { mutableStateOf("1") }
     val t = { key: String -> Translations.t(key, currentLang) }
-    
+
     var showTypeMenu by remember { mutableStateOf(false) }
     var showCategoryMenu by remember { mutableStateOf(false) }
 
@@ -1411,7 +1343,7 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("recurring")) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("add_temp") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-            
+
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(type.label)
@@ -1424,13 +1356,13 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
                     }
                 }
             }
-            
+
             Spacer(Modifier.height(8.dp)); OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = dayOfMonth, onValueChange = { dayOfMonth = it.filter(Char::isDigit).take(2) }, label = { Text(t("day")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)); Spacer(Modifier.height(8.dp))
-            
+
             Text(t("category") + ":", style = MaterialTheme.typography.labelMedium)
-            
+
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(Translations.translateCategory(category, currentLang))
@@ -1444,7 +1376,7 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
                     }
                 }
             }
-            
+
             Spacer(Modifier.height(8.dp)); Text(t("account") + ":", style = MaterialTheme.typography.labelMedium)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { cards.forEach { c -> FilterChip(selected = selectedCardId == c.id, onClick = { selectedCardId = c.id }, label = { Text("${c.name} (${c.currency})") }) } }
             Spacer(Modifier.height(8.dp)); Button(onClick = { val minor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); val day = dayOfMonth.toIntOrNull(); if (minor != null && minor > 0 && day != null && day in 1..31) { onSave(RecurringEntity(amountMinor = minor, type = type, cardId = if(selectedCardId == "CASH") null else selectedCardId, description = desc.trim(), category = category, dayOfMonth = day)); amount = ""; desc = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add_temp")) }
@@ -1460,11 +1392,11 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
     var selectedCategory by remember { mutableStateOf(expenseCategories.firstOrNull() ?: "📦 Другое") }; var limitInput by remember { mutableStateOf("") }
     var showCategoryMenu by remember { mutableStateOf(false) }
     val t = { key: String -> Translations.t(key, currentLang) }
-    
+
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("budgets")) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("set_limit") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-            
+
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(Translations.translateCategory(selectedCategory, currentLang))
@@ -1477,7 +1409,7 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
                     }
                 }
             }
-            
+
             Spacer(Modifier.height(8.dp)); OutlinedTextField(value = limitInput, onValueChange = { limitInput = it }, label = { Text(t("limit")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
             Button(onClick = { val limitMinor = runCatching { BigDecimal(limitInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); if (limitMinor != null && limitMinor > 0) { onSave(BudgetEntity(category = selectedCategory, limitMinor = limitMinor)); limitInput = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("set_limit")) }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
@@ -1496,48 +1428,19 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
     if (editingCard != null) {
         val card = editingCard!!; val currentMathBalance = cardBalances[card.id] ?: card.initialBalanceMinor
         AlertDialog(onDismissRequest = { editingCard = null }, title = { Text("${card.name} (${card.currency})") },
-            text = { Column { 
-                Text("Текущий расчетный баланс: ${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp)); 
-                Text("Введите фактический баланс для корректировки:", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp)); 
-                OutlinedTextField(value = actualBalanceInput, onValueChange = { actualBalanceInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth()) 
+            text = { Column {
+                Text("Текущий расчетный баланс: ${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp));
+                Text("Введите фактический баланс для корректировки:", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp));
+                OutlinedTextField(value = actualBalanceInput, onValueChange = { actualBalanceInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
             } },
-            confirmButton = { TextButton(onClick = { 
-                val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); 
-                if (actualMinor != null) { 
+            confirmButton = { TextButton(onClick = {
+                val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull();
+                if (actualMinor != null) {
                     val diff = actualMinor - currentMathBalance
                     onAdjustBalance(card.id, diff)
-                    editingCard = null; actualBalanceInput = "" 
-                } 
+                    editingCard = null; actualBalanceInput = ""
+                }
             }) { Text(t("save")) } },
             dismissButton = { TextButton(onClick = { editingCard = null }) { Text(t("cancel")) } })
     } else {
-        AlertDialog(onDismissRequest = onDismiss, title = { Text(t("my_accounts")) },
-            text = { Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(t("add") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = last4, onValueChange = { last4 = it.uppercase() }, label = { Text(t("account")) }, modifier = Modifier.weight(1f), singleLine = true)
-                    Box(Modifier.weight(0.5f)) {
-                        var expanded by remember { mutableStateOf(false) }
-                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currency) }
-                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy -> DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false }) }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp)); OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
-                Button(onClick = { val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L; if (name.isNotBlank() && last4.isNotBlank()) { onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor)); name = ""; last4 = ""; initialBalance = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
-                Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                Text(t("my_accounts") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-                if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
-                cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; 
-                        IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.primary) }; 
-                        if (c.id != "CASH") {
-                            IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) } 
-                        }
-                    }
-                }
-            } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
-    }
-}
+       
