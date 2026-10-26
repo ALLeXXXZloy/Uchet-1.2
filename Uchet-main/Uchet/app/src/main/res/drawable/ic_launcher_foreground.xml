@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Белый корпус кошелька -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,36 C31.58,36 28,39.58 28,44 L28,64 C28,68.42 31.58,72 36,72 L72,72 C76.42,72 80,68.42 80,64 L80,56 L70,56 C67.79,56 66,54.21 66,52 C66,49.79 67.79,48 70,48 L80,48 L80,44 C80,39.58 76.42,36 72,36 Z" />
+
+    <!-- Светло-зеленая застежка -->
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="M70,48 L80,48 C82.21,48 84,49.79 84,52 C84,54.21 82.21,56 80,56 L70,56 C67.79,56 66,54.21 66,52 C66,49.79 67.79,48 70,48 Z" />
+
+    <!-- Темно-зеленая кнопка на застежке -->
+    <path
+        android:fillColor="#2E7D32"
+        android:pathData="M78,52 m-2,0 a2,2 0 1 0 4,0 a2,2 0 1 0 -4,0" />
+
+    <!-- Карточка, выглядывающая сверху -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,28 L58,28 C59.1,28 60,28.9 60,30 L60,36 L40,36 L40,30 C40,28.9 40.9,28 42,28 Z" />
+        
+</vector>
