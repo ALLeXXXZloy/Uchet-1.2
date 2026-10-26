@@ -19,6 +19,7 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -37,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -395,7 +397,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var showRecurringManager by remember { mutableStateOf(false) }; var showCategoryManager by remember { mutableStateOf(false) }
     var showGoalManager by remember { mutableStateOf(false) }; var showSettings by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }; var showRestoreConfirm by remember { mutableStateOf(false) }
-    var showMonthPicker by remember { mutableStateOf(false) } // Для выбора месяца
+    var showMonthPicker by remember { mutableStateOf(false) }
     var pendingRestoreJson by remember { mutableStateOf("") }
     var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }; var showImportConfirm by remember { mutableStateOf(false) }
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
@@ -472,7 +474,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val filteredTxs = txs.filter { tx -> (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) && (filterType == null || tx.type == filterType) }
     val byDay = filteredTxs.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
 
-    // Подсчет общего баланса в UZS (с учетом валютных карт)
     val cardBalancesInUzs = cards.associate { card ->
         val cardTxs = allTxs.filter { it.cardId == card.id }
         val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
@@ -480,7 +481,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         val cardTransfer = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
         val balanceInCardCurrency = card.initialBalanceMinor + cardIncome - cardExpense - cardTransfer
         
-        // Конвертируем в UZS для общего баланса
         val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
         val balanceInUzs = (balanceInCardCurrency.toDouble() * rate).toLong()
         
@@ -497,236 +497,237 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         appWidgetManager.getAppWidgetIds(componentName).forEach { id -> BalanceWidget.updateWidget(context, appWidgetManager, id) }
     }
 
-    if (showRestoreConfirm) {
-        AlertDialog(onDismissRequest = { showRestoreConfirm = false }, title = { Text(t("restore")) }, text = { Text(t("restore") + "?") },
-            confirmButton = { TextButton(onClick = { vm.restoreBackup(pendingRestoreJson) { success -> if (success) scope.launch { snackbarHostState.showSnackbar("OK!") } else scope.launch { snackbarHostState.showSnackbar("Error") } }; showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } },
-            dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
-    }
+    // ПУНКТ 12: Навигация на отдельный экран аналитики
+    if (showAnalytics) {
+        AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { showAnalytics = false })
+    } else {
+        if (showRestoreConfirm) {
+            AlertDialog(onDismissRequest = { showRestoreConfirm = false }, title = { Text(t("restore")) }, text = { Text(t("restore") + "?") },
+                confirmButton = { TextButton(onClick = { vm.restoreBackup(pendingRestoreJson) { success -> if (success) scope.launch { snackbarHostState.showSnackbar("OK!") } else scope.launch { snackbarHostState.showSnackbar("Error") } }; showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } },
+                dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
+        }
 
-    if (showImportConfirm && importedTxs != null) {
-        val txsToImport = importedTxs!!
-        AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text("Импорт данных") }, 
-            text = { Text("${t("import_confirm")} ${txsToImport.size}") },
-            confirmButton = { TextButton(onClick = { vm.bulkSave(txsToImport); scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }; showImportConfirm = false; importedTxs = null }) { Text(t("confirm"), color = GREEN) } },
-            dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } })
-    }
+        if (showImportConfirm && importedTxs != null) {
+            val txsToImport = importedTxs!!
+            AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text("Импорт данных") }, 
+                text = { Text("${t("import_confirm")} ${txsToImport.size}") },
+                confirmButton = { TextButton(onClick = { vm.bulkSave(txsToImport); scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }; showImportConfirm = false; importedTxs = null }) { Text(t("confirm"), color = GREEN) } },
+                dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } })
+        }
 
-    if (showCardImportConfirm && importedCards != null) {
-        val cardsToImport = importedCards!!
-        AlertDialog(onDismissRequest = { showCardImportConfirm = false; importedCards = null }, title = { Text("Импорт карт") }, 
-            text = { Text("Найдено карт: ${cardsToImport.size}") },
-            confirmButton = { TextButton(onClick = { cardsToImport.forEach { card -> vm.saveCard(card) }; scope.launch { snackbarHostState.showSnackbar("Карты добавлены!") }; showCardImportConfirm = false; importedCards = null }) { Text(t("confirm"), color = GREEN) } },
-            dismissButton = { TextButton(onClick = { showCardImportConfirm = false; importedCards = null }) { Text(t("cancel")) } })
-    }
+        if (showCardImportConfirm && importedCards != null) {
+            val cardsToImport = importedCards!!
+            AlertDialog(onDismissRequest = { showCardImportConfirm = false; importedCards = null }, title = { Text("Импорт карт") }, 
+                text = { Text("Найдено карт: ${cardsToImport.size}") },
+                confirmButton = { TextButton(onClick = { cardsToImport.forEach { card -> vm.saveCard(card) }; scope.launch { snackbarHostState.showSnackbar("Карты добавлены!") }; showCardImportConfirm = false; importedCards = null }) { Text(t("confirm"), color = GREEN) } },
+                dismissButton = { TextButton(onClick = { showCardImportConfirm = false; importedCards = null }) { Text(t("cancel")) } })
+        }
 
-    if (showSettings) SettingsDialog(context, onDismiss = { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
-    if (showCategoryManager) CategoryManagerDialog(categories, currentLang.value, { vm.saveCategory(it) }, { vm.deleteCategory(it) }, { showCategoryManager = false })
-    if (showGoalManager) GoalManagerDialog(goals, cards, currentLang.value, { vm.saveGoal(it) }, { vm.deleteGoal(it) }, { g, c, a -> vm.depositToGoal(g, c, a) }, { showGoalManager = false })
-    if (showAnalytics) AnalyticsDialog(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onDismiss = { showAnalytics = false })
+        if (showSettings) SettingsDialog(context, onDismiss = { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
+        if (showCategoryManager) CategoryManagerDialog(categories, currentLang.value, { vm.saveCategory(it) }, { vm.deleteCategory(it) }, { showCategoryManager = false })
+        if (showGoalManager) GoalManagerDialog(goals, cards, currentLang.value, { vm.saveGoal(it) }, { vm.deleteGoal(it) }, { g, c, a -> vm.depositToGoal(g, c, a) }, { showGoalManager = false })
 
-    if (showBalanceDetails) {
-        AlertDialog(onDismissRequest = { showBalanceDetails = false }, title = { Text(t("total_balance")) },
-            text = { Column { cards.forEach { c -> val bal = cardBalancesInUzs[c.id] ?: 0L; Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Medium); Text("${bal.money()} UZS", fontWeight = FontWeight.Bold, color = if (bal >= 0) GREEN else RED) } } } },
-            confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("cancel")) } })
-    }
+        if (showBalanceDetails) {
+            AlertDialog(onDismissRequest = { showBalanceDetails = false }, title = { Text(t("total_balance")) },
+                text = { Column { cards.forEach { c -> val bal = cardBalancesInUzs[c.id] ?: 0L; Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Medium); Text("${bal.money()} UZS", fontWeight = FontWeight.Bold, color = if (bal >= 0) GREEN else RED) } } } },
+                confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("cancel")) } })
+        }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, "Prev") }
-                        
-                        // ПУНКТ 3: Кликабельный месяц с выпадающим списком
-                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Text(
-                                month.format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() },
-                                modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp),
-                                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium
-                            )
-                            DropdownMenu(expanded = showMonthPicker, onDismissRequest = { showMonthPicker = false }) {
-                                (1..12).forEach { m ->
-                                    DropdownMenuItem(
-                                        text = { Text(YearMonth.of(month.year, m).format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() }) },
-                                        onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false }
-                                    )
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, "Prev") }
+                            
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(
+                                    month.format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() },
+                                    modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp),
+                                    textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium
+                                )
+                                DropdownMenu(expanded = showMonthPicker, onDismissRequest = { showMonthPicker = false }) {
+                                    (1..12).forEach { m ->
+                                        DropdownMenuItem(
+                                            text = { Text(YearMonth.of(month.year, m).format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() }) },
+                                            onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false }
+                                        )
+                                    }
                                 }
                             }
+                            
+                            IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, "Next") }
                         }
-                        
-                        IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, "Next") }
-                    }
-                },
-                actions = {
-                    Box {
-                        IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
-                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
-                            DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
-                            DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
-                            HorizontalDivider()
-                            DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
-                            DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; jsonExportLauncher.launch("uchet_backup.json") })
-                            DropdownMenuItem(text = { Text(t("restore")) }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { showMenu = false; jsonImportLauncher.launch(arrayOf("application/json")) })
-                            HorizontalDivider()
-                            DropdownMenuItem(text = { Text(t("settings")) }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showMenu = false; showSettings = true })
-                        }
-                    }
-                }
-            )
-        },
-        floatingActionButton = { FloatingActionButton({ adding = true }) { Icon(Icons.Default.Add, t("add")) } }
-    ) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
-            item {
-                // ПУНКТ 2: Крестик для очистки поиска
-                OutlinedTextField(
-                    value = searchQuery, 
-                    onValueChange = { searchQuery = it }, 
-                    modifier = Modifier.fillMaxWidth(), 
-                    placeholder = { Text(t("search")) }, 
-                    leadingIcon = { Icon(Icons.Default.Search, null) }, 
-                    singleLine = true,
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Очистить")
+                    },
+                    actions = {
+                        Box {
+                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
+                                DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
+                                DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
+                                DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; jsonExportLauncher.launch("uchet_backup.json") })
+                                DropdownMenuItem(text = { Text(t("restore")) }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { showMenu = false; jsonImportLauncher.launch(arrayOf("application/json")) })
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text(t("settings")) }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showMenu = false; showSettings = true })
                             }
                         }
                     }
                 )
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text(t("all")) })
-                    FilterChip(selected = filterType == TxType.INCOME, onClick = { filterType = TxType.INCOME }, label = { Text(t("income")) })
-                    FilterChip(selected = filterType == TxType.EXPENSE, onClick = { filterType = TxType.EXPENSE }, label = { Text(t("expense")) })
+            },
+            floatingActionButton = { FloatingActionButton({ adding = true }) { Icon(Icons.Default.Add, t("add")) } }
+        ) { pad ->
+            LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
+                item {
+                    OutlinedTextField(
+                        value = searchQuery, 
+                        onValueChange = { searchQuery = it }, 
+                        modifier = Modifier.fillMaxWidth(), 
+                        placeholder = { Text(t("search")) }, 
+                        leadingIcon = { Icon(Icons.Default.Search, null) }, 
+                        singleLine = true,
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Очистить")
+                                }
+                            }
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text(t("all")) })
+                        FilterChip(selected = filterType == TxType.INCOME, onClick = { filterType = TxType.INCOME }, label = { Text(t("income")) })
+                        FilterChip(selected = filterType == TxType.EXPENSE, onClick = { filterType = TxType.EXPENSE }, label = { Text(t("expense")) })
+                    }
+                    
+                    Spacer(Modifier.height(12.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAnalytics = true }.padding(8.dp)) { Icon(Icons.Default.BarChart, contentDescription = t("analytics"), tint = MaterialTheme.colorScheme.primary); Text(t("analytics"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showGoalManager = true }.padding(8.dp)) { Icon(Icons.Default.Savings, contentDescription = t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showCategoryManager = true }.padding(8.dp)) { Icon(Icons.Default.Category, contentDescription = t("categories"), tint = MaterialTheme.colorScheme.primary); Text(t("categories"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showRecurringManager = true }.padding(8.dp)) { Icon(Icons.Default.Autorenew, contentDescription = t("recurring"), tint = MaterialTheme.colorScheme.primary); Text(t("recurring"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showBudgetManager = true }.padding(8.dp)) { Icon(Icons.Default.AccountBalanceWallet, contentDescription = t("budgets"), tint = MaterialTheme.colorScheme.primary); Text(t("budgets"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Card(modifier = Modifier.fillMaxWidth().clickable { showBalanceDetails = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                        Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(t("total_balance"), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Spacer(Modifier.height(4.dp))
+                            Text("${totalLiquidBalanceUzs.money()} UZS", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
-                
-                Spacer(Modifier.height(12.dp))
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAnalytics = true }.padding(8.dp)) { Icon(Icons.Default.BarChart, contentDescription = t("analytics"), tint = MaterialTheme.colorScheme.primary); Text(t("analytics"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showGoalManager = true }.padding(8.dp)) { Icon(Icons.Default.Savings, contentDescription = t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showCategoryManager = true }.padding(8.dp)) { Icon(Icons.Default.Category, contentDescription = t("categories"), tint = MaterialTheme.colorScheme.primary); Text(t("categories"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showRecurringManager = true }.padding(8.dp)) { Icon(Icons.Default.Autorenew, contentDescription = t("recurring"), tint = MaterialTheme.colorScheme.primary); Text(t("recurring"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showBudgetManager = true }.padding(8.dp)) { Icon(Icons.Default.AccountBalanceWallet, contentDescription = t("budgets"), tint = MaterialTheme.colorScheme.primary); Text(t("budgets"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Card(modifier = Modifier.fillMaxWidth().clickable { showBalanceDetails = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(t("total_balance"), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        Spacer(Modifier.height(4.dp))
-                        Text("${totalLiquidBalanceUzs.money()} UZS", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                if (goals.isNotEmpty()) {
+                    item {
+                        Card(Modifier.fillMaxWidth().clickable { showGoalManager = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Savings, null, tint = MaterialTheme.colorScheme.onSecondaryContainer); Spacer(Modifier.width(8.dp)); Text(t("goals"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                                Spacer(Modifier.height(12.dp))
+                                goals.forEach { goal ->
+                                    val progress = if (goal.targetAmountMinor > 0) goal.currentAmountMinor.toFloat() / goal.targetAmountMinor.toFloat() else 0f
+                                    val isDone = progress >= 1f
+                                    Column(Modifier.padding(vertical = 4.dp)) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(goal.name, fontWeight = FontWeight.Medium); Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = if (isDone) GREEN else Color.Unspecified) }
+                                        Spacer(Modifier.height(4.dp))
+                                        LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(10.dp), color = if (isDone) GREEN else BLUE, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-            }
 
-            if (goals.isNotEmpty()) {
-                item {
-                    // ПУНКТ 4: Кликабельная карточка Копилки
-                    Card(Modifier.fillMaxWidth().clickable { showGoalManager = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                if (budgets.isNotEmpty()) item {
+                    Card(Modifier.fillMaxWidth().clickable { showBudgetManager = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Column(Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Savings, null, tint = MaterialTheme.colorScheme.onSecondaryContainer); Spacer(Modifier.width(8.dp)); Text(t("goals"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                            Spacer(Modifier.height(12.dp))
-                            goals.forEach { goal ->
-                                val progress = if (goal.targetAmountMinor > 0) goal.currentAmountMinor.toFloat() / goal.targetAmountMinor.toFloat() else 0f
-                                val isDone = progress >= 1f
+                            Text(t("budgets_month"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(12.dp))
+                            budgets.forEach { budget ->
+                                val spent = txs.filter { it.type == TxType.EXPENSE && it.category == budget.category }.sumOf { it.amountMinor }
+                                val progress = if (budget.limitMinor > 0) spent.toFloat() / budget.limitMinor.toFloat() else 0f
+                                val progressColor = when { progress >= 1f -> RED; progress >= 0.8f -> YELLOW; else -> GREEN }
                                 Column(Modifier.padding(vertical = 4.dp)) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(goal.name, fontWeight = FontWeight.Medium); Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = if (isDone) GREEN else Color.Unspecified) }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(Translations.translateCategory(budget.category, currentLang.value), fontWeight = FontWeight.Medium); Text("${spent.money()} / ${budget.limitMinor.money()}", style = MaterialTheme.typography.bodySmall, color = if (progress >= 1f) RED else Color.Unspecified) }
                                     Spacer(Modifier.height(4.dp))
-                                    LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(10.dp), color = if (isDone) GREEN else BLUE, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                                    LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp), color = progressColor, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                                 }
                             }
                         }
                     }
                     Spacer(Modifier.height(16.dp))
                 }
-            }
-
-            if (budgets.isNotEmpty()) item {
-                // ПУНКТ 5: Кликабельная карточка Бюджетов
-                Card(Modifier.fillMaxWidth().clickable { showBudgetManager = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(t("budgets_month"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(12.dp))
-                        budgets.forEach { budget ->
-                            val spent = txs.filter { it.type == TxType.EXPENSE && it.category == budget.category }.sumOf { it.amountMinor }
-                            val progress = if (budget.limitMinor > 0) spent.toFloat() / budget.limitMinor.toFloat() else 0f
-                            val progressColor = when { progress >= 1f -> RED; progress >= 0.8f -> YELLOW; else -> GREEN }
-                            Column(Modifier.padding(vertical = 4.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(Translations.translateCategory(budget.category, currentLang.value), fontWeight = FontWeight.Medium); Text("${spent.money()} / ${budget.limitMinor.money()}", style = MaterialTheme.typography.bodySmall, color = if (progress >= 1f) RED else Color.Unspecified) }
-                                Spacer(Modifier.height(4.dp))
-                                LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp), color = progressColor, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                            }
+                
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp)) {
+                            SumRow(t("income"), income, GREEN); SumRow(t("expense"), expense, RED); HorizontalDivider(Modifier.padding(vertical = 8.dp)); SumRow(t("total"), income - expense, MaterialTheme.colorScheme.onSurface, bold = true)
                         }
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-            }
-            
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        SumRow(t("income"), income, GREEN); SumRow(t("expense"), expense, RED); HorizontalDivider(Modifier.padding(vertical = 8.dp)); SumRow(t("total"), income - expense, MaterialTheme.colorScheme.onSurface, bold = true)
-                    }
+                if (filteredTxs.isEmpty()) item { Text(t("no_found"), Modifier.padding(top = 32.dp), color = Color.Gray) }
+                byDay.forEach { (day, list) ->
+                    item { Text(day.format(DATE_FMT), Modifier.padding(top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = Color.Gray) }
+                    items(list, key = { it.id }) { tx -> TxRow(tx, currentLang.value) { editing = tx } }
                 }
             }
-            if (filteredTxs.isEmpty()) item { Text(t("no_found"), Modifier.padding(top = 32.dp), color = Color.Gray) }
-            byDay.forEach { (day, list) ->
-                item { Text(day.format(DATE_FMT), Modifier.padding(top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = Color.Gray) }
-                items(list, key = { it.id }) { tx -> TxRow(tx, currentLang.value) { editing = tx } }
-            }
         }
-    }
 
-    if (adding || editing != null) {
-        // ПУНКТ 8: Передаем vm в TxDialog, чтобы создавать категории
-        TxDialog(initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories, currentLang = currentLang.value, isPendingSms = isPendingSms, rates = rates, vm = vm,
-            onDismiss = { if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
-            onSave = { vm.save(it); if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
-            onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = "Удалено", actionLabel = "Отменить", duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
-        )
-    }
+        if (adding || editing != null) {
+            TxDialog(initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories, currentLang = currentLang.value, isPendingSms = isPendingSms, rates = rates, vm = vm,
+                onDismiss = { if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
+                onSave = { vm.save(it); if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
+                onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = "Удалено", actionLabel = "Отменить", duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
+            )
+        }
 
-    if (showCardManager) CardManagerDialog(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, currentLang.value, rates, { showCardManager = false })
-    if (showBudgetManager) BudgetManagerDialog(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
-    if (showRecurringManager) RecurringManagerDialog(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
+        if (showCardManager) CardManagerDialog(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, currentLang.value, rates, { showCardManager = false })
+        if (showBudgetManager) BudgetManagerDialog(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
+        if (showRecurringManager) RecurringManagerDialog(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AnalyticsDialog(txs: List<Tx>, allTxs: List<Tx>, currentLang: AppLanguage, onDismiss: () -> Unit) {
+fun AnalyticsScreen(txs: List<Tx>, allTxs: List<Tx>, currentLang: AppLanguage, onBack: () -> Unit) {
     val t = { key: String -> Translations.t(key, currentLang) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(t("analytics")) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                if (txs.any { it.type == TxType.EXPENSE }) {
-                    Text(t("daily_chart"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    DailyExpenseChart(txs = txs, yearMonth = YearMonth.now())
-                    Spacer(Modifier.height(24.dp))
-                }
-                if (allTxs.any { it.type == TxType.EXPENSE }) {
-                    Text(t("monthly_chart"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    MonthlyExpenseChart(allTxs = allTxs)
-                    Spacer(Modifier.height(24.dp))
-                }
-                val expensesByCategory = txs.filter { it.type == TxType.EXPENSE }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
-                if (expensesByCategory.isNotEmpty()) {
-                    Text(t("exp_by_cat"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    CategoryPieChart(expensesByCategory, currentLang)
-                }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(t("analytics")) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад") } }
+            )
+        }
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            if (txs.any { it.type == TxType.EXPENSE }) {
+                Text(t("daily_chart"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(16.dp))
+                DailyExpenseChart(txs = txs, yearMonth = YearMonth.now())
+                Spacer(Modifier.height(32.dp))
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } }
-    )
+            if (allTxs.any { it.type == TxType.EXPENSE }) {
+                Text(t("monthly_chart"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(16.dp))
+                MonthlyExpenseChart(allTxs = allTxs)
+                Spacer(Modifier.height(32.dp))
+            }
+            val expensesByCategory = txs.filter { it.type == TxType.EXPENSE }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
+            if (expensesByCategory.isNotEmpty()) {
+                Text(t("exp_by_cat"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(16.dp))
+                CategoryPieChart(expensesByCategory, currentLang)
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -749,7 +750,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var isLoading by remember { mutableStateOf(false) }
     val t = { key: String -> Translations.t(key, currentLang) }
 
-    // Состояния для выпадающих списков (ПУНКТЫ 6, 7, 8)
     var showTypeMenu by remember { mutableStateOf(false) }
     var showCategoryMenu by remember { mutableStateOf(false) }
     var showAddCategoryDialog by remember { mutableStateOf(false) }
@@ -825,7 +825,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         if (!currentList.contains(category) && !showAddCategoryDialog) category = currentList.lastOrNull() ?: "📦 Другое"
     }
 
-    // ПУНКТ 8: Мини-диалог для создания новой категории
     if (showAddCategoryDialog) {
         AlertDialog(
             onDismissRequest = { showAddCategoryDialog = false },
@@ -853,7 +852,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (isPendingSms) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(12.dp)) { Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold); Text(t("sms_title"), style = MaterialTheme.typography.bodySmall) } } }
                 
-                // ПУНКТ 6: Выпадающий список типов операций
                 Box(Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(type.label)
@@ -867,7 +865,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     }
                 }
 
-                // ПУНКТ 1: Горизонтальные кнопки
                 if (!isPendingSms) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
@@ -907,7 +904,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     }
                 }
 
-                // ПУНКТ 7 и 8: Выпадающий список категорий + кнопка создания новой
                 Box(Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(category)
@@ -1106,8 +1102,34 @@ fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
     val daysInMonth = yearMonth.lengthOfMonth(); val zone = ZoneId.systemDefault()
     val dailyExpenses = (1..daysInMonth).associateWith { day -> txs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.dayOfMonth == day && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
     val maxExpense = (dailyExpenses.values.maxOrNull() ?: 1L).toFloat(); val barColor = MaterialTheme.colorScheme.primary
-    Column { Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) { val width = size.width; val height = size.height; val barWidth = (width / daysInMonth) * 0.6f; val step = width / daysInMonth; dailyExpenses.forEach { (day, amount) -> if (amount > 0) { val barHeight = (amount / maxExpense) * height; val x = (day - 1) * step + (step - barWidth) / 2; drawRoundRect(color = barColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())) } } }
-        Spacer(Modifier.height(4.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("15", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("$daysInMonth", style = MaterialTheme.typography.labelSmall, color = Color.Gray) } }
+    var selectedDay by remember { mutableStateOf<Int?>(null) }
+
+    Column {
+        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp).pointerInput(Unit) {
+            detectTapGestures { offset ->
+                val step = size.width / daysInMonth
+                val clickedDay = (offset.x / step).toInt() + 1
+                selectedDay = if (selectedDay == clickedDay) null else clickedDay
+            }
+        }) { 
+            val width = size.width; val height = size.height; val barWidth = (width / daysInMonth) * 0.6f; val step = width / daysInMonth
+            dailyExpenses.forEach { (day, amount) ->
+                if (amount > 0) {
+                    val isSelected = selectedDay == day
+                    val currentBarColor = if (isSelected) MaterialTheme.colorScheme.secondary else barColor
+                    val barHeight = (amount / maxExpense) * height
+                    val x = (day - 1) * step + (step - barWidth) / 2
+                    drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
+                }
+            } 
+        }
+        Spacer(Modifier.height(8.dp))
+        if (selectedDay != null) {
+            Text("День: $selectedDay. Сумма: ${dailyExpenses[selectedDay]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("15", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("$daysInMonth", style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
+        }
+    }
 }
 
 @Composable
@@ -1115,8 +1137,34 @@ fun MonthlyExpenseChart(allTxs: List<Tx>) {
     val currentYear = Year.now(); val zone = ZoneId.systemDefault()
     val monthlyExpenses = (1..12).associateWith { m -> allTxs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.year == currentYear.value && date.monthValue == m && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
     val maxExpense = (monthlyExpenses.values.maxOrNull() ?: 1L).toFloat(); val barColor = MaterialTheme.colorScheme.secondary
-    Column { Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) { val width = size.width; val height = size.height; val step = width / 12; val barWidth = step * 0.6f; monthlyExpenses.forEach { (month, amount) -> if (amount > 0) { val barHeight = (amount / maxExpense) * height; val x = (month - 1) * step + (step - barWidth) / 2; drawRoundRect(color = barColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())) } } }
-        Spacer(Modifier.height(4.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("4", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("7", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("10", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("12", style = MaterialTheme.typography.labelSmall, color = Color.Gray) } }
+    var selectedMonth by remember { mutableStateOf<Int?>(null) }
+
+    Column {
+        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp).pointerInput(Unit) {
+            detectTapGestures { offset ->
+                val step = size.width / 12
+                val clickedMonth = (offset.x / step).toInt() + 1
+                selectedMonth = if (selectedMonth == clickedMonth) null else clickedMonth
+            }
+        }) { 
+            val width = size.width; val height = size.height; val step = width / 12; val barWidth = step * 0.6f
+            monthlyExpenses.forEach { (month, amount) ->
+                if (amount > 0) {
+                    val isSelected = selectedMonth == month
+                    val currentBarColor = if (isSelected) MaterialTheme.colorScheme.primary else barColor
+                    val barHeight = (amount / maxExpense) * height
+                    val x = (month - 1) * step + (step - barWidth) / 2
+                    drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
+                }
+            } 
+        }
+        Spacer(Modifier.height(8.dp))
+        if (selectedMonth != null) {
+            Text("Месяц: $selectedMonth. Сумма: ${monthlyExpenses[selectedMonth]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("4", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("7", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("10", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("12", style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
