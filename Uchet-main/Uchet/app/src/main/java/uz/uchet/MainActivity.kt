@@ -194,15 +194,9 @@ fun Long.money(): String {
     return "$sign$whole.%02d".format(frac)
 }
 
-// ============================================================
-// ОБЁРТКИ НАД SmsParser (реализация — в SmsParser.kt)
-// ============================================================
-
 fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) -> Unit) {
     onFound(SmsParser.scanInbox(context, existingTxs))
 }
-
-// ============================================================
 
 class VM(app: Application) : AndroidViewModel(app) {
     private val dao = AppDb.get(app).dao()
@@ -379,7 +373,7 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> Unit) {
     var pin by remember { mutableStateOf("") }; var error by remember { mutableStateOf(false) }
-    val prefs = activity.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
+    val prefs = activity.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val useBiometric = prefs.getBoolean("use_biometric", true)
     val biometricManager = BiometricManager.from(activity)
     val canUseBiometric = useBiometric && biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
@@ -445,21 +439,11 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
     fun checkPendingSms() {
         if (editing != null || adding) return
-        val prefs = context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("pending_sms", Context.MODE_PRIVATE)
         val pendingJson = prefs.getString("pending", null) ?: return
         try {
             val obj = JSONObject(pendingJson)
-            val pendingTx = Tx(
-                id = 0,
-                amountMinor = obj.getLong("amountMinor"),
-                type = TxType.valueOf(obj.getString("type")),
-                cardId = if (obj.isNull("card")) null else obj.getString("card"),
-                description = obj.optString("description"),
-                category = obj.optString("category"),
-                timestamp = obj.optLong("timestamp"),
-                source = "SMS",
-                currency = obj.optString("currency", "UZS")
-            )
+            val pendingTx = Tx(id = 0, amountMinor = obj.getLong("amountMinor"), type = TxType.valueOf(obj.getString("type")), cardId = if (obj.isNull("card")) null else obj.getString("card"), description = obj.optString("description"), category = obj.optString("category"), timestamp = obj.optLong("timestamp"), source = "SMS")
             editing = pendingTx; isPendingSms = true
         } catch (e: Exception) { prefs.edit().remove("pending").apply() }
     }
@@ -483,7 +467,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
                 val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
-                val parsedTxs = parseImportedFile(text)
+                val parsedTxs = SmsParser.parseImportedFile(text)
                 if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true }
                 else { snackbarHostState.showSnackbar("Не найдено транзакций") }
             } catch (e: Exception) { snackbarHostState.showSnackbar("Ошибка чтения файла") }
@@ -529,7 +513,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
     LaunchedEffect(cardBalancesInUzs, goals) {
         val total = totalLiquidBalanceUzs + goals.sumOf { it.currentAmountMinor }
-        val prefs = context.getSharedPreferences("widget_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
         prefs.edit().putLong("total_balance", total).apply()
         val appWidgetManager = android.appwidget.AppWidgetManager.getInstance(context)
         val componentName = android.content.ComponentName(context, BalanceWidget::class.java)
@@ -546,26 +530,34 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
         }
 
+        // ИСПРАВЛЕННЫЙ БЛОК ИМПОРТА
         if (showImportConfirm && importedTxs != null) {
-                        confirmButton = { TextButton(onClick = { 
-                // АВТОСОЗДАНИЕ КАРТ: если в импортированных транзакциях есть новые карты, создаем их
-                val existingCardIds = cards.map { it.id }.toSet()
-                txsToImport.mapNotNull { it.cardId }.distinct().forEach { cardId ->
-                    if (!existingCardIds.contains(cardId)) {
-                        val last4 = cardId.split("_").firstOrNull() ?: "0000"
-                        val currency = cardId.split("_").getOrNull(1) ?: "UZS"
-                        vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "Импорт *$last4", currency = currency, initialBalanceMinor = 0))
-                    }
-                }
-                
-                vm.bulkSave(txsToImport)
-                scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }
-                showImportConfirm = false; importedTxs = null 
-            }) { Text(t("confirm"), color = GREEN) } },val txsToImport = importedTxs!!
-            AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text("Импорт данных") },
+            val txsToImport = importedTxs!!
+            AlertDialog(
+                onDismissRequest = { showImportConfirm = false; importedTxs = null },
+                title = { Text("Импорт данных") },
                 text = { Text("${t("import_confirm")} ${txsToImport.size}") },
-                confirmButton = { TextButton(onClick = { vm.bulkSave(txsToImport); scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }; showImportConfirm = false; importedTxs = null }) { Text(t("confirm"), color = GREEN) } },
-                dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } })
+                confirmButton = {
+                    TextButton(onClick = {
+                        // АВТОСОЗДАНИЕ КАРТ
+                        val existingCardIds = cards.map { it.id }.toSet()
+                        txsToImport.mapNotNull { it.cardId }.distinct().forEach { cardId ->
+                            if (!existingCardIds.contains(cardId)) {
+                                val last4 = cardId.split("_").firstOrNull() ?: "0000"
+                                val currency = cardId.split("_").getOrNull(1) ?: "UZS"
+                                vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "Импорт *$last4", currency = currency, initialBalanceMinor = 0))
+                            }
+                        }
+                        vm.bulkSave(txsToImport)
+                        scope.launch { snackbarHostState.showSnackbar("Импортировано: ${txsToImport.size}") }
+                        showImportConfirm = false
+                        importedTxs = null
+                    }) { Text(t("confirm"), color = GREEN) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) }
+                }
+            )
         }
 
         if (showCardImportConfirm && importedCards != null) {
@@ -747,8 +739,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
         if (adding || editing != null) {
             TxDialog(initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories, currentLang = currentLang.value, isPendingSms = isPendingSms, rates = rates, vm = vm,
-                onDismiss = { if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
-                onSave = { vm.save(it); if (isPendingSms) { context.getSharedPreferences("pending_sms", android.content.Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
+                onDismiss = { if (isPendingSms) { context.getSharedPreferences("pending_sms", Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
+                onSave = { vm.save(it); if (isPendingSms) { context.getSharedPreferences("pending_sms", Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
                 onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = "Удалено", actionLabel = "Отменить", duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
             )
         }
@@ -839,7 +831,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     val image = InputImage.fromBitmap(bmp, 0)
                     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                     recognizer.process(image).addOnSuccessListener { visionText ->
-                        val parsed = parseSmsText(visionText.text)
+                        val parsed = SmsParser.parseForOcr(visionText.text)
                         if (parsed != null) { amount = parsed.amountStr; desc = parsed.description }
                         val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
                         file.parentFile?.mkdirs()
@@ -880,7 +872,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                 val image = InputImage.fromBitmap(bmp, 0)
                 val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                 recognizer.process(image).addOnSuccessListener { visionText ->
-                    val parsed = parseSmsText(visionText.text)
+                    val parsed = SmsParser.parseForOcr(visionText.text)
                     if (parsed != null) { amount = parsed.amountStr; desc = parsed.description }
                     val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
                     file.parentFile?.mkdirs()
@@ -1140,8 +1132,6 @@ fun uriToBitmap(context: Context, uri: Uri): Bitmap? = try {
 fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
-
-fun parseImportedFile(text: String): List<Tx> = SmsParser.parseImportedFile(text)
 
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
@@ -1457,58 +1447,33 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
             }) { Text(t("save")) } },
             dismissButton = { TextButton(onClick = { editingCard = null }) { Text(t("cancel")) } })
     } else {
-                  AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Управление картами") }, // Можно добавить t("manage_cards") в Translations
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Добавить карту:", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Название карты") }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = last4, onValueChange = { last4 = it.filter(Char::isDigit).take(4) }, label = { Text("Последние 4 цифры") }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text("Начальный баланс") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
-                    
-                    Box {
+        AlertDialog(onDismissRequest = onDismiss, title = { Text(t("my_accounts")) },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(t("add") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = last4, onValueChange = { last4 = it.uppercase() }, label = { Text(t("account")) }, modifier = Modifier.weight(1f), singleLine = true)
+                    Box(Modifier.weight(0.5f)) {
                         var expanded by remember { mutableStateOf(false) }
-                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("Валюта: $currency") }
+                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currency) }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy ->
-                                DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false })
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Button(onClick = {
-                        val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L
-                        if (name.isNotBlank() && last4.length == 4) {
-                            onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor))
-                            name = ""; last4 = ""; initialBalance = ""
-                        }
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Добавить") }
-                    
-                    Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                    
-                    Text("Мои карты:", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-                    if (cards.isEmpty()) Text("Нет карт", color = Color.Gray)
-                    
-                    cards.forEach { card ->
-                        val balance = cardBalances[card.id] ?: 0L
-                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("${card.name} (*${card.last4})", fontWeight = FontWeight.Bold)
-                                Text("${balance.money()} ${card.currency}", style = MaterialTheme.typography.bodySmall, color = if (balance >= 0) GREEN else RED)
-                            }
-                            IconButton(onClick = { editingCard = card }) { Icon(Icons.Default.Edit, "Edit") }
-                            if (card.id != "CASH") {
-                                IconButton(onClick = { onDelete(card.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) }
-                            }
+                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy -> DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false }) }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } }
-        )
+                Spacer(Modifier.height(8.dp)); OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
+                Button(onClick = { val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L; if (name.isNotBlank() && last4.isNotBlank()) { onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor)); name = ""; last4 = ""; initialBalance = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
+                Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+                Text(t("my_accounts") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
+                if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
+                cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) };
+                        IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.primary) };
+                        if (c.id != "CASH") {
+                            IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) }
+                        }
+                    }
+                }
+            } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
     }
-} // Закрывает fun CardManagerDialog
-// Если после этого у вас в файле есть еще код (например, другие функции), он должен идти после этой скобки.
-       
+}
