@@ -1443,4 +1443,58 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
             }) { Text(t("save")) } },
             dismissButton = { TextButton(onClick = { editingCard = null }) { Text(t("cancel")) } })
     } else {
+                  AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Управление картами") }, // Можно добавить t("manage_cards") в Translations
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Добавить карту:", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Название карты") }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = last4, onValueChange = { last4 = it.filter(Char::isDigit).take(4) }, label = { Text("Последние 4 цифры") }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text("Начальный баланс") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
+                    
+                    Box {
+                        var expanded by remember { mutableStateOf(false) }
+                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("Валюта: $currency") }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy ->
+                                DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false })
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Button(onClick = {
+                        val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L
+                        if (name.isNotBlank() && last4.length == 4) {
+                            onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor))
+                            name = ""; last4 = ""; initialBalance = ""
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Добавить") }
+                    
+                    Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+                    
+                    Text("Мои карты:", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
+                    if (cards.isEmpty()) Text("Нет карт", color = Color.Gray)
+                    
+                    cards.forEach { card ->
+                        val balance = cardBalances[card.id] ?: 0L
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("${card.name} (*${card.last4})", fontWeight = FontWeight.Bold)
+                                Text("${balance.money()} ${card.currency}", style = MaterialTheme.typography.bodySmall, color = if (balance >= 0) GREEN else RED)
+                            }
+                            IconButton(onClick = { editingCard = card }) { Icon(Icons.Default.Edit, "Edit") }
+                            if (card.id != "CASH") {
+                                IconButton(onClick = { onDelete(card.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } }
+        )
+    }
+} // Закрывает fun CardManagerDialog
+// Если после этого у вас в файле есть еще код (например, другие функции), он должен идти после этой скобки.
        
