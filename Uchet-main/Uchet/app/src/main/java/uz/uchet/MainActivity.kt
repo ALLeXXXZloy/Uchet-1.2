@@ -497,7 +497,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         appWidgetManager.getAppWidgetIds(componentName).forEach { id -> BalanceWidget.updateWidget(context, appWidgetManager, id) }
     }
 
-    // ПУНКТ 12: Навигация на отдельный экран аналитики
     if (showAnalytics) {
         AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { showAnalytics = false })
     } else {
@@ -1101,7 +1100,12 @@ fun parseSmsText(text: String): ParsedSms? {
 fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
     val daysInMonth = yearMonth.lengthOfMonth(); val zone = ZoneId.systemDefault()
     val dailyExpenses = (1..daysInMonth).associateWith { day -> txs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.dayOfMonth == day && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
-    val maxExpense = (dailyExpenses.values.maxOrNull() ?: 1L).toFloat(); val barColor = MaterialTheme.colorScheme.primary
+    val maxExpense = (dailyExpenses.values.maxOrNull() ?: 1L).toFloat()
+    
+    // FIX: Получаем цвета Compose ДО вызова Canvas
+    val barColor = MaterialTheme.colorScheme.primary
+    val selectedBarColor = MaterialTheme.colorScheme.secondary 
+    
     var selectedDay by remember { mutableStateOf<Int?>(null) }
 
     Column {
@@ -1116,7 +1120,7 @@ fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
             dailyExpenses.forEach { (day, amount) ->
                 if (amount > 0) {
                     val isSelected = selectedDay == day
-                    val currentBarColor = if (isSelected) MaterialTheme.colorScheme.secondary else barColor
+                    val currentBarColor = if (isSelected) selectedBarColor else barColor
                     val barHeight = (amount / maxExpense) * height
                     val x = (day - 1) * step + (step - barWidth) / 2
                     drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
@@ -1125,7 +1129,7 @@ fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
         }
         Spacer(Modifier.height(8.dp))
         if (selectedDay != null) {
-            Text("День: $selectedDay. Сумма: ${dailyExpenses[selectedDay]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+            Text("День: $selectedDay. Сумма: ${dailyExpenses[selectedDay]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = selectedBarColor)
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("15", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("$daysInMonth", style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
         }
@@ -1136,7 +1140,12 @@ fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
 fun MonthlyExpenseChart(allTxs: List<Tx>) {
     val currentYear = Year.now(); val zone = ZoneId.systemDefault()
     val monthlyExpenses = (1..12).associateWith { m -> allTxs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.year == currentYear.value && date.monthValue == m && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
-    val maxExpense = (monthlyExpenses.values.maxOrNull() ?: 1L).toFloat(); val barColor = MaterialTheme.colorScheme.secondary
+    val maxExpense = (monthlyExpenses.values.maxOrNull() ?: 1L).toFloat()
+    
+    // FIX: Получаем цвета Compose ДО вызова Canvas
+    val barColor = MaterialTheme.colorScheme.secondary
+    val selectedBarColor = MaterialTheme.colorScheme.primary
+    
     var selectedMonth by remember { mutableStateOf<Int?>(null) }
 
     Column {
@@ -1151,7 +1160,7 @@ fun MonthlyExpenseChart(allTxs: List<Tx>) {
             monthlyExpenses.forEach { (month, amount) ->
                 if (amount > 0) {
                     val isSelected = selectedMonth == month
-                    val currentBarColor = if (isSelected) MaterialTheme.colorScheme.primary else barColor
+                    val currentBarColor = if (isSelected) selectedBarColor else barColor
                     val barHeight = (amount / maxExpense) * height
                     val x = (month - 1) * step + (step - barWidth) / 2
                     drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
@@ -1160,7 +1169,7 @@ fun MonthlyExpenseChart(allTxs: List<Tx>) {
         }
         Spacer(Modifier.height(8.dp))
         if (selectedMonth != null) {
-            Text("Месяц: $selectedMonth. Сумма: ${monthlyExpenses[selectedMonth]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Месяц: $selectedMonth. Сумма: ${monthlyExpenses[selectedMonth]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = selectedBarColor)
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("4", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("7", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("10", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("12", style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
         }
