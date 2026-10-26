@@ -1184,25 +1184,35 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+
+    // Ищем сумму, за которой следует "сум", "cyM", "UZS" и т.д. (включая буквы O/o вместо нуля)
+    val amountRegex = Regex("""([0-9Oo\s\u00A0]+[.,]\d{2})\s*(?:cyM|сум|UZS|so['`]?m)""", RegexOption.IGNORE_CASE)
     
-    val amountRegex = Regex("""([\d\s\u00A0]+[.,]\d{2})\s*(?:сум|UZS|so['`]?m)""", RegexOption.IGNORE_CASE)
-    val cardRegex = Regex("""(\d{4})\s*[•\.\-\*]?\s*(.+)""")
+    // Ищем 4 цифры в начале строки, за которыми идет название банка (учитываем разные разделители)
+    val cardRegex = Regex("""^(\d{4})\s*[\-\.\·•]?\s*(.*)""")
 
     var pendingAmount: Long? = null
 
     for (line in lines) {
+        // 1. Если нашли сумму
         val amtMatch = amountRegex.find(line)
         if (amtMatch != null) {
-            val amtStr = amtMatch.groupValues[1].replace(" ", "").replace("\u00A0", "").replace(",", ".")
+            val amtStr = amtMatch.groupValues[1]
+                .replace(" ", "").replace("\u00A0", "")
+                .replace(",", ".")
+                .replace('O', '0').replace('o', '0') // Заменяем буквы O на ноль
+            
             pendingAmount = amtStr.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
-            continue 
+            continue // Переходим к следующей строке, где должна быть карта
         }
 
+        // 2. Если нашли карту и у нас уже есть сумма
         val cardMatch = cardRegex.find(line)
         if (cardMatch != null && pendingAmount != null) {
             val last4 = cardMatch.groupValues[1]
-            val bankName = cardMatch.groupValues[2].replace("•", "").trim()
-            
+            var bankName = cardMatch.groupValues[2].replace("•", "").replace("-", "").trim()
+            if (bankName.isBlank()) bankName = "Банк"
+
             if (result.none { it.last4 == last4 }) {
                 result.add(CardEntity(
                     id = "${last4}_UZS", 
@@ -1212,7 +1222,7 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
                     initialBalanceMinor = pendingAmount!!
                 ))
             }
-            pendingAmount = null 
+            pendingAmount = null // Сбрасываем сумму для следующей карты
         }
     }
     return result
