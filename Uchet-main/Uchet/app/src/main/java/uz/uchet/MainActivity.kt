@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import androidx.activity.compose.BackHandler // ДОБАВЛЕНО для кнопки Назад
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -515,6 +516,10 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     }
 
     if (showAnalytics) {
+        // ПУНКТ 3: Перехват системной кнопки "Назад" на экране Аналитики
+        BackHandler {
+            showAnalytics = false
+        }
         AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { showAnalytics = false })
     } else {
         if (showRestoreConfirm) {
@@ -583,7 +588,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
-                                // ВОЗВРАЩЕН ПУНКТ УПРАВЛЕНИЯ КАРТАМИ
                                 DropdownMenuItem(text = { Text("Управление картами") }, leadingIcon = { Icon(Icons.Default.CreditCard, null) }, onClick = { showMenu = false; showCardManager = true })
                                 HorizontalDivider()
                                 DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
@@ -774,10 +778,9 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var showCardMenu by remember { mutableStateOf(false) }
     var showToCardMenu by remember { mutableStateOf(false) }
     var showAddCategoryDialog by remember { mutableStateOf(false) }
-    var showAddCardDialog by remember { mutableStateOf(false) } // Для добавления карты
+    var showAddCardDialog by remember { mutableStateOf(false) }
     var newCategoryName by remember { mutableStateOf("") }
     
-    // Состояния для новой карты
     var newCardName by remember { mutableStateOf("") }
     var newCardLast4 by remember { mutableStateOf("") }
     var newCardCurrency by remember { mutableStateOf("UZS") }
@@ -872,7 +875,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         )
     }
 
-    // Мини-диалог для быстрого добавления карты
     if (showAddCardDialog) {
         AlertDialog(
             onDismissRequest = { showAddCardDialog = false },
@@ -1354,16 +1356,50 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
     var type by remember { mutableStateOf(TxType.EXPENSE) }; var category by remember { mutableStateOf(expenseCategories.lastOrNull() ?: "📦 Другое") }
     var amount by remember { mutableStateOf("") }; var selectedCardId by remember { mutableStateOf("CASH") }; var desc by remember { mutableStateOf("") }; var dayOfMonth by remember { mutableStateOf("1") }
     val t = { key: String -> Translations.t(key, currentLang) }
+    
+    var showTypeMenu by remember { mutableStateOf(false) }
+    var showCategoryMenu by remember { mutableStateOf(false) }
+
     LaunchedEffect(type) { val currentList = if (type == TxType.INCOME) incomeCategories else expenseCategories; if (!currentList.contains(category)) category = currentList.lastOrNull() ?: "📦 Другое" }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("recurring")) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("add_temp") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { TxType.values().forEachIndexed { i, tt -> SegmentedButton(type == tt, { type = tt }, SegmentedButtonDefaults.itemShape(i, TxType.values().size)) { Text(if(tt == TxType.INCOME) t("income") else if(tt == TxType.EXPENSE) t("expense") else "→") } } }
+            
+            // ПУНКТ 2: Выпадающий список типов (Доход/Расход) вместо кнопок со стрелками
+            Box(Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(type.label)
+                    Spacer(Modifier.weight(1f))
+                    Icon(Icons.Default.ArrowDropDown, null)
+                }
+                DropdownMenu(expanded = showTypeMenu, onDismissRequest = { showTypeMenu = false }) {
+                    listOf(TxType.INCOME, TxType.EXPENSE).forEach { tt ->
+                        DropdownMenuItem(text = { Text(tt.label) }, onClick = { type = tt; showTypeMenu = false })
+                    }
+                }
+            }
+            
             Spacer(Modifier.height(8.dp)); OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = dayOfMonth, onValueChange = { dayOfMonth = it.filter(Char::isDigit).take(2) }, label = { Text(t("day")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)); Spacer(Modifier.height(8.dp))
+            
             Text(t("category") + ":", style = MaterialTheme.typography.labelMedium)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { val currentCategories = if (type == TxType.INCOME) incomeCategories else expenseCategories; currentCategories.forEach { c -> FilterChip(selected = category == c, onClick = { category = c }, label = { Text(Translations.translateCategory(c, currentLang)) }) } }
+            
+            // ПУНКТ 2: Выпадающий список категорий вместо горизонтальных кнопок
+            Box(Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(Translations.translateCategory(category, currentLang))
+                    Spacer(Modifier.weight(1f))
+                    Icon(Icons.Default.ArrowDropDown, null)
+                }
+                DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
+                    val currentCategories = if (type == TxType.INCOME) incomeCategories else expenseCategories
+                    currentCategories.forEach { c ->
+                        DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; showCategoryMenu = false })
+                    }
+                }
+            }
+            
             Spacer(Modifier.height(8.dp)); Text(t("account") + ":", style = MaterialTheme.typography.labelMedium)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { cards.forEach { c -> FilterChip(selected = selectedCardId == c.id, onClick = { selectedCardId = c.id }, label = { Text("${c.name} (${c.currency})") }) } }
             Spacer(Modifier.height(8.dp)); Button(onClick = { val minor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); val day = dayOfMonth.toIntOrNull(); if (minor != null && minor > 0 && day != null && day in 1..31) { onSave(RecurringEntity(amountMinor = minor, type = type, cardId = if(selectedCardId == "CASH") null else selectedCardId, description = desc.trim(), category = category, dayOfMonth = day)); amount = ""; desc = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add_temp")) }
@@ -1377,11 +1413,27 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
 @Composable
 fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<String>, onSave: (BudgetEntity) -> Unit, onDelete: (String) -> Unit, currentLang: AppLanguage, onDismiss: () -> Unit) {
     var selectedCategory by remember { mutableStateOf(expenseCategories.firstOrNull() ?: "📦 Другое") }; var limitInput by remember { mutableStateOf("") }
+    var showCategoryMenu by remember { mutableStateOf(false) }
     val t = { key: String -> Translations.t(key, currentLang) }
+    
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("budgets")) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("set_limit") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { expenseCategories.forEach { c -> FilterChip(selected = selectedCategory == c, onClick = { selectedCategory = c }, label = { Text(Translations.translateCategory(c, currentLang)) }) } }
+            
+            // ПУНКТ 1: Выпадающий список категорий для бюджетов
+            Box(Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(Translations.translateCategory(selectedCategory, currentLang))
+                    Spacer(Modifier.weight(1f))
+                    Icon(Icons.Default.ArrowDropDown, null)
+                }
+                DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
+                    expenseCategories.forEach { c ->
+                        DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { selectedCategory = c; showCategoryMenu = false })
+                    }
+                }
+            }
+            
             Spacer(Modifier.height(8.dp)); OutlinedTextField(value = limitInput, onValueChange = { limitInput = it }, label = { Text(t("limit")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
             Button(onClick = { val limitMinor = runCatching { BigDecimal(limitInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); if (limitMinor != null && limitMinor > 0) { onSave(BudgetEntity(category = selectedCategory, limitMinor = limitMinor)); limitInput = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("set_limit")) }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
@@ -1423,4 +1475,25 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                     OutlinedTextField(value = last4, onValueChange = { last4 = it.uppercase() }, label = { Text(t("account")) }, modifier = Modifier.weight(1f), singleLine = true)
                     Box(Modifier.weight(0.5f)) {
                         var expanded by remember { mutableStateOf(false) }
-                        Outlined
+                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currency) }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy -> DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false }) }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp)); OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Spacer(Modifier.height(8.dp))
+                Button(onClick = { val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L; if (name.isNotBlank() && last4.isNotBlank()) { onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor)); name = ""; last4 = ""; initialBalance = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
+                Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+                Text(t("my_accounts") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
+                if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
+                cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; 
+                        IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.primary) }; 
+                        if (c.id != "CASH") {
+                            IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) } 
+                        }
+                    }
+                }
+            } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
+    }
+}
