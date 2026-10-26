@@ -276,9 +276,24 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun saveGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.upsertGoal(goal) } }
     fun deleteGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.deleteGoal(goal) } }
 
+    // ПУНКТ 10: Функция корректировки баланса
+    fun adjustBalance(cardId: String, diffMinor: Long) {
+        if (diffMinor == 0L) return
+        val tx = Tx(
+            amountMinor = kotlin.math.abs(diffMinor),
+            type = if (diffMinor > 0) TxType.INCOME else TxType.EXPENSE,
+            cardId = cardId,
+            description = "Корректировка баланса",
+            category = "⚙️ Система",
+            timestamp = System.currentTimeMillis(),
+            source = "ADJUSTMENT"
+        )
+        viewModelScope.launch { dao.upsert(tx) }
+    }
+
     fun depositToGoal(goal: SavingsGoalEntity, cardId: String, amountMinor: Long) {
         viewModelScope.launch {
-            val tx = Tx(amountMinor = amountMinor, type = TxType.TRANSFER, cardId = cardId, description = goal.name, category = "🏦 Копилка", timestamp = System.currentTimeMillis(), source = "SAVINGS")
+            val tx = Tx(amountMinor = amountMinor, type = TxType.TRANSFER, cardId = cardId, toCardId = "GOAL_${goal.id}", description = goal.name, category = "🏦 Копилка", timestamp = System.currentTimeMillis(), source = "SAVINGS")
             dao.upsert(tx); dao.upsertGoal(goal.copy(currentAmountMinor = goal.currentAmountMinor + amountMinor))
         }
     }
@@ -288,7 +303,7 @@ class VM(app: Application) : AndroidViewModel(app) {
             try {
                 val allTx = allTxs.first(); val allCards = cards.first(); val allBudgets = budgets.first(); val allRecurring = dao.getRecurringList(); val allCats = dao.getCategoriesList(); val allGoals = goals.first()
                 val root = JSONObject()
-                val txsArray = JSONArray(); allTx.forEach { t -> txsArray.put(JSONObject().apply { put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name); put("cardId", t.cardId ?: JSONObject.NULL); put("description", t.description); put("category", t.category); put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL) }) }; root.put("txs", txsArray)
+                val txsArray = JSONArray(); allTx.forEach { t -> txsArray.put(JSONObject().apply { put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name); put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL); put("description", t.description); put("category", t.category); put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL) }) }; root.put("txs", txsArray)
                 val cardsArray = JSONArray(); allCards.forEach { c -> cardsArray.put(JSONObject().apply { put("id", c.id); put("last4", c.last4); put("name", c.name); put("currency", c.currency); put("initialBalanceMinor", c.initialBalanceMinor) }) }; root.put("cards", cardsArray)
                 val budgetsArray = JSONArray(); allBudgets.forEach { b -> budgetsArray.put(JSONObject().apply { put("category", b.category); put("limitMinor", b.limitMinor) }) }; root.put("budgets", budgetsArray)
                 val recurringArray = JSONArray(); allRecurring.forEach { r -> recurringArray.put(JSONObject().apply { put("id", r.id); put("amountMinor", r.amountMinor); put("type", r.type.name); put("cardId", r.cardId ?: JSONObject.NULL); put("description", r.description); put("category", r.category); put("dayOfMonth", r.dayOfMonth); put("lastExecutedMonth", r.lastExecutedMonth) }) }; root.put("recurring", recurringArray)
@@ -304,7 +319,7 @@ class VM(app: Application) : AndroidViewModel(app) {
             try {
                 val root = JSONObject(jsonString)
                 dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
-                val txsArray = root.optJSONArray("txs"); if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); dao.upsert(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
+                val txsArray = root.optJSONArray("txs"); if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); dao.upsert(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
                 val cardsArray = root.optJSONArray("cards"); if (cardsArray != null) { for (i in 0 until cardsArray.length()) { val o = cardsArray.getJSONObject(i); dao.upsertCard(CardEntity(id = o.getString("id"), last4 = o.getString("last4"), name = o.getString("name"), currency = o.getString("currency"), initialBalanceMinor = o.getLong("initialBalanceMinor"))) } }
                 val budgetsArray = root.optJSONArray("budgets"); if (budgetsArray != null) { for (i in 0 until budgetsArray.length()) { val o = budgetsArray.getJSONObject(i); dao.upsertBudget(BudgetEntity(category = o.getString("category"), limitMinor = o.getLong("limitMinor"))) } }
                 val recurringArray = root.optJSONArray("recurring"); if (recurringArray != null) { for (i in 0 until recurringArray.length()) { val o = recurringArray.getJSONObject(i); dao.upsertRecurring(RecurringEntity(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), description = o.optString("description"), category = o.optString("category"), dayOfMonth = o.getInt("dayOfMonth"), lastExecutedMonth = o.optString("lastExecutedMonth"))) } }
@@ -474,12 +489,17 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val filteredTxs = txs.filter { tx -> (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) && (filterType == null || tx.type == filterType) }
     val byDay = filteredTxs.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
 
+    // ПУНКТ 9: Обновленный расчет баланса с учетом переводов
     val cardBalancesInUzs = cards.associate { card ->
         val cardTxs = allTxs.filter { it.cardId == card.id }
         val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
         val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-        val cardTransfer = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
-        val balanceInCardCurrency = card.initialBalanceMinor + cardIncome - cardExpense - cardTransfer
+        val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
+        
+        // Деньги, которые ПРИШЛИ на эту карту в результате переводов
+        val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
+
+        val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
         
         val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
         val balanceInUzs = (balanceInCardCurrency.toDouble() * rate).toLong()
@@ -688,7 +708,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             )
         }
 
-        if (showCardManager) CardManagerDialog(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, currentLang.value, rates, { showCardManager = false })
+        if (showCardManager) CardManagerDialog(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
         if (showBudgetManager) BudgetManagerDialog(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
         if (showRecurringManager) RecurringManagerDialog(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
     }
@@ -741,6 +761,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var amount by remember { mutableStateOf(initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
     var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
     var selectedCardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
+    var toCardId by remember { mutableStateOf(initial?.toCardId) } // ПУНКТ 9
     var isCustomCard by remember { mutableStateOf(initial?.cardId?.let { !cards.map { c -> c.id }.contains(it) } ?: false) }
     var desc by remember { mutableStateOf(initial?.description ?: "") }
     var date by remember { mutableStateOf(initDt.format(DATE_FMT)) }
@@ -751,6 +772,8 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
 
     var showTypeMenu by remember { mutableStateOf(false) }
     var showCategoryMenu by remember { mutableStateOf(false) }
+    var showCardMenu by remember { mutableStateOf(false) } // ПУНКТ 9
+    var showToCardMenu by remember { mutableStateOf(false) } // ПУНКТ 9
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     var newCategoryName by remember { mutableStateOf("") }
 
@@ -919,23 +942,33 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     }
                 }
 
-                Text(t("account") + ":", style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    cards.forEach { c -> FilterChip(selected = selectedCardId == c.id && !isCustomCard, onClick = { selectedCardId = c.id; isCustomCard = false }, label = { Text("${c.name} (${c.currency})") }) }
-                    FilterChip(selected = isCustomCard, onClick = { isCustomCard = true; selectedCardId = "" }, label = { Text(t("other")) })
+                // ПУНКТ 9: Выбор карты (Откуда)
+                Box(Modifier.fillMaxWidth()) {
+                    val cardName = cards.find { it.id == selectedCardId }?.let { "${it.name} (${it.currency})" } ?: t("cash")
+                    OutlinedButton(onClick = { showCardMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Счет: $cardName")
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(expanded = showCardMenu, onDismissRequest = { showCardMenu = false }) {
+                        cards.forEach { c ->
+                            DropdownMenuItem(text = { Text("${c.name} (${c.currency})") }, onClick = { selectedCardId = c.id; showCardMenu = false })
+                        }
+                    }
                 }
-                if (isCustomCard) {
-                    var customLast4 by remember { mutableStateOf("") }
-                    var customCurrency by remember { mutableStateOf("UZS") }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = customLast4, onValueChange = { customLast4 = it.filter(Char::isDigit).take(4); selectedCardId = "${customLast4}_${customCurrency}" }, label = { Text("4 цифры") }, singleLine = true, modifier = Modifier.weight(1f))
-                        Box(Modifier.weight(0.5f)) {
-                            var expanded by remember { mutableStateOf(false) }
-                            OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(customCurrency) }
-                            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                listOf("UZS", "USD", "EUR", "RUB").forEach { ccy ->
-                                    DropdownMenuItem(text = { Text(ccy) }, onClick = { customCurrency = ccy; selectedCardId = "${customLast4}_${ccy}"; expanded = false })
-                                }
+
+                // ПУНКТ 9: Выбор карты (Куда) для перевода
+                if (type == TxType.TRANSFER) {
+                    Box(Modifier.fillMaxWidth()) {
+                        val toCardName = cards.find { it.id == toCardId }?.let { "${it.name} (${it.currency})" } ?: "Выберите карту"
+                        OutlinedButton(onClick = { showToCardMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Куда: $toCardName")
+                            Spacer(Modifier.weight(1f))
+                            Icon(Icons.Default.ArrowDropDown, null)
+                        }
+                        DropdownMenu(expanded = showToCardMenu, onDismissRequest = { showToCardMenu = false }) {
+                            cards.forEach { c ->
+                                DropdownMenuItem(text = { Text("${c.name} (${c.currency})") }, onClick = { toCardId = c.id; showToCardMenu = false })
                             }
                         }
                     }
@@ -961,10 +994,10 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                 when {
                     amountMinor == null || amountMinor <= 0 -> error = "Error"
                     d == null -> error = "Error"
-                    isCustomCard && !selectedCardId.contains("_") -> error = "Error"
+                    type == TxType.TRANSFER && toCardId == null -> error = "Выберите куда перевести" // Валидация для перевода
                     else -> {
                         val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
-                        onSave(Tx(id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, description = desc.trim(), category = category, timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath))
+                        onSave(Tx(id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, toCardId = toCardId, description = desc.trim(), category = category, timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath))
                     }
                 }
             }) { Text(if (isPendingSms) t("confirm") else t("save")) }
@@ -1102,7 +1135,6 @@ fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
     val dailyExpenses = (1..daysInMonth).associateWith { day -> txs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.dayOfMonth == day && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
     val maxExpense = (dailyExpenses.values.maxOrNull() ?: 1L).toFloat()
     
-    // FIX: Получаем цвета Compose ДО вызова Canvas
     val barColor = MaterialTheme.colorScheme.primary
     val selectedBarColor = MaterialTheme.colorScheme.secondary 
     
@@ -1142,7 +1174,6 @@ fun MonthlyExpenseChart(allTxs: List<Tx>) {
     val monthlyExpenses = (1..12).associateWith { m -> allTxs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.year == currentYear.value && date.monthValue == m && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
     val maxExpense = (monthlyExpenses.values.maxOrNull() ?: 1L).toFloat()
     
-    // FIX: Получаем цвета Compose ДО вызова Canvas
     val barColor = MaterialTheme.colorScheme.secondary
     val selectedBarColor = MaterialTheme.colorScheme.primary
     
@@ -1257,9 +1288,18 @@ fun SumRow(label: String, v: Long, color: Color, bold: Boolean = false) {
 
 @Composable
 fun TxRow(t: Tx, lang: AppLanguage, onClick: () -> Unit) {
-    val (sign, color) = when (t.type) { TxType.INCOME -> "+" to GREEN; TxType.EXPENSE -> "−" to RED; TxType.TRANSFER -> "→" to BLUE }
+    val (sign, color) = when (t.type) { TxType.INCOME -> "+" to GREEN; TxType.EXPENSE -> "−" to RED; TxType.TRANSFER -> "→" to BLUE; TxType.ADJUSTMENT -> "⚙️" to Color.Gray }
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { val icon = when (t.source) { "AUTO" -> "🔄 "; "SMS" -> "✉️ "; "SAVINGS" -> "🏦 "; "IMPORT" -> "📥 "; else -> "" }; Text("$icon${Translations.translateCategory(t.category, lang)}  ${t.description}".trim(), maxLines = 2); val time = Instant.ofEpochMilli(t.timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm")); val cardText = if (t.cardId.isNullOrEmpty()) Translations.t("cash", lang) else "*${t.cardId.split("_")[0]} (${t.cardId.split("_").getOrElse(1) { "" }})"; Text(listOfNotNull(time, cardText).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Color.Gray) }
+        Column(Modifier.weight(1f)) { 
+            val icon = when (t.source) { "AUTO" -> "🔄 "; "SMS" -> "✉️ "; "SAVINGS" -> "🏦 "; "IMPORT" -> "📥 "; "ADJUSTMENT" -> "⚙️ "; else -> "" }
+            Text("$icon${Translations.translateCategory(t.category, lang)}  ${t.description}".trim(), maxLines = 2)
+            
+            val time = Instant.ofEpochMilli(t.timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))
+            val cardText = if (t.cardId.isNullOrEmpty()) Translations.t("cash", lang) else "*${t.cardId.split("_")[0]}"
+            val toCardText = if (t.toCardId != null) " -> *${t.toCardId.split("_")[0]}" else ""
+            
+            Text(listOfNotNull(time, cardText + toCardText).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Color.Gray) 
+        }
         Text("$sign${t.amountMinor.money()}", color = color, fontWeight = FontWeight.Medium)
     }
 }
@@ -1308,7 +1348,7 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
 }
 
 @Composable
-fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, allTxs: List<Tx>, onSave: (CardEntity) -> Unit, onDelete: (String) -> Unit, currentLang: AppLanguage, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit) {
+fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, allTxs: List<Tx>, onSave: (CardEntity) -> Unit, onDelete: (String) -> Unit, onAdjustBalance: (String, Long) -> Unit, currentLang: AppLanguage, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit) {
     var last4 by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var initialBalance by remember { mutableStateOf("") }; var currency by remember { mutableStateOf("UZS") }
     var editingCard by remember { mutableStateOf<CardEntity?>(null) }; var actualBalanceInput by remember { mutableStateOf("") }
     val t = { key: String -> Translations.t(key, currentLang) }
@@ -1316,8 +1356,19 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
     if (editingCard != null) {
         val card = editingCard!!; val currentMathBalance = cardBalances[card.id] ?: card.initialBalanceMinor
         AlertDialog(onDismissRequest = { editingCard = null }, title = { Text("${card.name} (${card.currency})") },
-            text = { Column { Text("${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp)); Text(t("amount") + ":", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp)); OutlinedTextField(value = actualBalanceInput, onValueChange = { actualBalanceInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth()) } },
-            confirmButton = { TextButton(onClick = { val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); if (actualMinor != null) { onSave(card.copy(initialBalanceMinor = card.initialBalanceMinor + (actualMinor - currentMathBalance))); editingCard = null; actualBalanceInput = "" } }) { Text(t("save")) } },
+            text = { Column { 
+                Text("Текущий расчетный баланс: ${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp)); 
+                Text("Введите фактический баланс для корректировки:", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp)); 
+                OutlinedTextField(value = actualBalanceInput, onValueChange = { actualBalanceInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth()) 
+            } },
+            confirmButton = { TextButton(onClick = { 
+                val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); 
+                if (actualMinor != null) { 
+                    val diff = actualMinor - currentMathBalance
+                    onAdjustBalance(card.id, diff) // ПУНКТ 10: Создаем транзакцию
+                    editingCard = null; actualBalanceInput = "" 
+                } 
+            }) { Text(t("save")) } },
             dismissButton = { TextButton(onClick = { editingCard = null }) { Text(t("cancel")) } })
     } else {
         AlertDialog(onDismissRequest = onDismiss, title = { Text(t("my_accounts")) },
@@ -1340,7 +1391,13 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                 Text(t("my_accounts") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
                 if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
                 cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; if (c.id != "CASH") { IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.primary) }; IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) } } }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; 
+                        // ПУНКТ 10: Разрешаем корректировку для всех карт
+                        IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.primary) }; 
+                        if (c.id != "CASH") {
+                            IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, "Delete", tint = RED) } 
+                        }
+                    }
                 }
             } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
     }
