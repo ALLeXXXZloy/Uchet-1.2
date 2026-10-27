@@ -26,7 +26,6 @@ data class BankTx(
 
 object SmsParser {
 
-    // [±]123[ 456][.,78]( )?UZS|so'm|сум|sum
     private val AMOUNT_RE = Regex(
         """([+-]?)(\d{1,3}(?:[ \u00A0]\d{3})*|\d+)(?:[.,](\d{1,2}))?(?:\s*,\s*|\s+)(?:UZS\b|so[''`]?m\b|сум\b|sum\b)""",
         RegexOption.IGNORE_CASE
@@ -44,7 +43,6 @@ object SmsParser {
         "balance", "баланс", "остаток", "доступно"
     )
 
-    // --- доход ---
     private val INCOME_VERBS = listOf(
         "popolnenie", "пополнение", "postuplenie", "поступление",
         "zachislenie", "зачисление", "kirim", "credit account",
@@ -54,7 +52,6 @@ object SmsParser {
         "tushdi", "kelib tushdi", "keldi", "kirib keldi", "yetib keldi"
     )
 
-    // --- расход ---
     private val EXPENSE_VERBS = listOf(
         "oplata", "оплата", "spisanie", "списание", "pokupka", "покупка",
         "xarid", "snjatie nalichnih", "snyatiye", "снятие",
@@ -65,24 +62,19 @@ object SmsParser {
         "yechildi", "yechib olindi", "списаны", "spisany"
     )
 
-    // --- сильные признаки долга/напоминания (если нет глагола завершения) ---
     private val STRONG_DEBT = listOf(
         "задолженность", "задолженност", "qarzdorlik", "qarzdor",
         "qarzingiz", "qarz mavjud",
         "просим оплатить", "оплатите", "to'lang", "to’lang", "тўланг",
-        "погасите",
-        "недостаточно средств", "не хватает средств",
+        "погасите", "недостаточно средств", "не хватает средств",
         "номер заблокирован", "vaш номер заблокирован", "bloklandi",
         "расторжение договора", "shartnoma bekor",
         "kechik", "muddatli to'lov kuni", "muddatli to'lovni amalga oshiring",
-        "eslatamiz",
-        "просрочен", "просрочк",
-        "мвд", "mib", "исполнительный", "ijro ishi",
-        "prokuratura", "прокуратура",
+        "eslatamiz", "просрочен", "просрочк", "мвд", "mib",
+        "исполнительный", "ijro ishi", "prokuratura", "прокуратура",
         "sudga", "суд", "принудительн", "ispolnitelniy"
     )
 
-    // --- признаки завершённой транзакции (перебивают STRONG_DEBT) ---
     private val COMPLETION_VERBS = listOf(
         "spisano", "списано", "spisany", "списаны", "spisana", "списана",
         "yechildi", "yechib olindi", "вычтено", "снято",
@@ -90,7 +82,6 @@ object SmsParser {
         "qabul qilindi", "amalga oshirildi", "выполнено"
     )
 
-    // --- OTP-предупреждения (никогда не бывают в завершённых транзакциях) ---
     private val OTP_WARNINGS = listOf(
         "никому не передавайте", "никому не сообщайте", "никому не говорите",
         "nikomu ne peredavayte", "nikomu ne soobshchayte", "nikomu ne govorite",
@@ -139,32 +130,20 @@ object SmsParser {
         "sms o’chirildi", "sms-info"
     )
 
-    // ====================================================================
-    // Public API
-    // ====================================================================
-
     fun classify(sender: String, body: String, timestamp: Long): Pair<SmsCategory, BankTx?> {
         val lower = body.lowercase()
 
-        // 1. OTP-предупреждения — первыми (в завершённых банковских SMS их не бывает)
         if (OTP_WARNINGS.any { lower.contains(it) }) return SmsCategory.OTP to null
 
-        // 2. Сильный долг БЕЗ глагола завершения
         val hasCompletion = COMPLETION_VERBS.any { lower.contains(it) }
         if (!hasCompletion && STRONG_DEBT.any { lower.contains(it) })
             return SmsCategory.DEBT_REMINDER to null
 
-        // 3. Транзакция
         val tx = tryParseTransaction(sender, body, timestamp, lower)
         if (tx != null) return SmsCategory.TRANSACTION to tx
 
-        // 4. Слабая OTP (маркер + короткий код, без признаков транзакции)
         if (isWeakOtp(lower)) return SmsCategory.OTP to null
-
-        // 5. Долг (широкий набор)
         if (DEBT_MARKERS.any { lower.contains(it) }) return SmsCategory.DEBT_REMINDER to null
-
-        // 6. Реклама (>=2 маркера)
         if (AD_MARKERS.count { lower.contains(it) } >= 2) return SmsCategory.ADVERTISING to null
 
         return SmsCategory.PERSONAL to null
@@ -199,7 +178,6 @@ object SmsParser {
         return result
     }
 
-    /** Роутер: CSV (экспорт SMS) vs PDF (выписка банка). */
     fun parseImportedFile(text: String): List<Tx> {
         val clean = text.removePrefix("\uFEFF")
         val lines = clean.lines()
@@ -225,7 +203,6 @@ object SmsParser {
                 category = tx.category
             )
         }
-        // чек: итого / jami / total
         val totalRegex = Regex(
             """(?:jami|итого|total|к оплате|сумма)[:\s=]*([\d \u00A0.,]+)""",
             RegexOption.IGNORE_CASE
@@ -244,10 +221,6 @@ object SmsParser {
             null, text.take(60).replace("\n", " ").trim(), "📦 Другое"
         )
     }
-
-    // ====================================================================
-    // CSV
-    // ====================================================================
 
     private fun parseCsvExport(csv: String): List<Tx> {
         val rows = parseCsvRecords(csv)
@@ -315,18 +288,16 @@ object SmsParser {
     }
 
     // ====================================================================
-    // PDF (Kapitalbank / Uzum Bank)
+    // PDF (Kapitalbank / Uzum Bank) - ИСПРАВЛЕНО
     // ====================================================================
-
     private fun parsePdfText(text: String): List<Tx> {
         val result = mutableListOf<Tx>()
-        // Убираем лишние пробелы и переносы строк, чтобы склеить разорванный текст Uzum и Kapitalbank
+        // Склеиваем все переносы строк в один сплошной текст
         val normText = text.replace(Regex("\\s+"), " ")
 
-        // Универсальная регулярка: ищет дату, время (опционально), номер документа (опционально), 
-        // минус (опционально), сумму и описание до следующей даты.
+        // Ищем дату, опциональный знак, сумму и описание до следующей даты
         val txRegex = Regex(
-            """(?<date>\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})(?:\s+\d{2}:\d{2}:\d{2})?(?:\s+\d{2}\.\d{2}\.\d{4})?(?:\s+\d+)?\s*(?<sign>[+-]?)\s*(?<amount>[\d\s\u00A0]+[.,]\d{2})\s*(?<desc>.+?)(?=(?:\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2}))|(?:\d{2}\.\d{2}\.\d{4})|$)""",
+            """(?<date>\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})(?:\s+\d{2}:\d{2}:\d{2})?(?:\s+\d{2}\.\d{2}\.\d{4})?(?:\s+\d+)?\s*(?<sign>[+-])?\s*(?<amount>[\d\s\u00A0]+[.,]\d{2})\s*(?<desc>.+?)(?=(?:\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2}))|(?:\d{2}\.\d{2}\.\d{4})|$)""",
             RegexOption.DOT_MATCHES_ALL
         )
 
@@ -336,49 +307,71 @@ object SmsParser {
             val desc = match.groups["desc"]?.value?.trim() ?: ""
             val sign = match.groups["sign"]?.value ?: ""
 
-            // 1. Парсим дату
+            // 1. Дата
             val formatter = if (dateStr.contains("-")) DateTimeFormatter.ofPattern("yyyy-MM-dd") else DateTimeFormatter.ofPattern("dd.MM.yyyy")
             val ts = try {
                 LocalDate.parse(dateStr, formatter).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
             } catch (e: Exception) { System.currentTimeMillis() }
 
-            // 2. Парсим сумму (убираем пробелы, меняем запятую на точку)
+            // 2. Сумма
             val cleanAmount = amountStr.replace(" ", "").replace("\u00A0", "").replace(",", ".")
             val amountMinor = cleanAmount.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
             if (amountMinor == 0L) continue
 
-            // 3. Определяем тип транзакции по ключевым словам
-            val isExpense = sign == "-" || desc.contains("Списание", true) || desc.contains("Оплата", true) || 
-                            desc.contains("Снятие", true) || desc.contains("Перевод с", true) || desc.contains("Покупка", true)
-            val isIncome = sign == "+" || desc.contains("Зачисление", true) || desc.contains("Поступление", true) || 
-                           desc.contains("Пополнение", true) || desc.contains("Перевод на", true) || desc.contains("Возврат", true)
+            // 3. Карта (извлекаем ДО обрезки текста)
+            val cardPatterns = listOf(
+                Regex("""(?:карты|карта|card):?\s*\d+\*+(\d{4})""", RegexOption.IGNORE_CASE),
+                Regex("""\*+(\d{4})"""),
+                Regex("""\d{4}\s?\d{4}\s?\d{4}\s?(\d{4})"""),
+                Regex("""(\d{4})\s*}""")
+            )
+            val cardLast4 = cardPatterns.firstNotNullOfOrNull { it.find(desc)?.groupValues?.get(1) }
+            val cardId = cardLast4?.let { "${it}_UZS" }
+
+            // 4. Тип операции (доход/расход)
+            val lowerDesc = desc.lowercase()
+            val isExpense = sign == "-" ||
+                            lowerDesc.contains("списание") ||
+                            lowerDesc.contains("оплата") ||
+                            lowerDesc.contains("покупка") ||
+                            lowerDesc.contains("снятие") ||
+                            lowerDesc.contains("atm") ||
+                            lowerDesc.contains("выд нал") ||
+                            lowerDesc.contains("перевод с visa")
+                            
+            val isIncome = sign == "+" ||
+                           lowerDesc.contains("зачисление") ||
+                           lowerDesc.contains("поступление") ||
+                           lowerDesc.contains("пополнение") ||
+                           lowerDesc.contains("возврат") ||
+                           lowerDesc.contains("перевод с uzcard") ||
+                           lowerDesc.contains("перевод на visa")
 
             val type = when {
                 isExpense -> TxType.EXPENSE
                 isIncome -> TxType.INCOME
-                desc.contains("Перевод", true) -> TxType.TRANSFER
+                lowerDesc.contains("перевод") -> TxType.TRANSFER
                 else -> TxType.EXPENSE
             }
 
-            // 4. Вытаскиваем номер карты (последние 4 цифры) из текста описания
-            val cardRegex = Regex("""(?:\*\*|\.\.)(\d{4})""")
-            val cardLast4 = cardRegex.find(desc)?.groupValues?.get(1)
-            val cardId = cardLast4?.let { "${it}_UZS" }
-
-            // 5. Определяем категорию (более точная для банковских выписок)
+            // 5. Категория
             val category = when {
-                desc.contains("Кешбек", true) || desc.contains("Cashback", true) -> "🎁 Подарок"
-                desc.contains("Перевод", true) || desc.contains("P2P", true) -> "💸 Перевод"
-                desc.contains("Снятие", true) || desc.contains("ATM", true) || desc.contains("наличных", true) -> "💸 Перевод"
-                desc.contains("Оплата", true) || desc.contains("Покупка", true) -> "🛒 Покупки"
+                lowerDesc.contains("кешбек") || lowerDesc.contains("cashback") -> "🎁 Подарок"
+                lowerDesc.contains("перевод") || lowerDesc.contains("p2p") -> "💸 Перевод"
+                lowerDesc.contains("снятие") || lowerDesc.contains("atm") || lowerDesc.contains("наличных") -> "💸 Перевод"
+                lowerDesc.contains("оплата") || lowerDesc.contains("покупка") -> "🛒 Покупки"
+                lowerDesc.contains("зарплата") || lowerDesc.contains("самозанятому") -> "💵 Зарплата"
                 else -> "📦 Другое"
             }
+
+            // 6. Очищаем описание для отображения
+            val displayDesc = desc.replace(Regex("""[;:]"""), "").take(80).trim()
 
             result.add(Tx(
                 amountMinor = amountMinor,
                 type = type,
                 cardId = cardId,
-                description = desc.take(80), // Обрезаем слишком длинные описания
+                description = displayDesc,
                 category = category,
                 timestamp = ts,
                 source = "IMPORT"
@@ -386,10 +379,6 @@ object SmsParser {
         }
         return result
     }
-
-    // ====================================================================
-    // Ядро (для СМС)
-    // ====================================================================
 
     private fun tryParseTransaction(
         sender: String, body: String, timestamp: Long, lower: String
@@ -459,8 +448,8 @@ object SmsParser {
 
     private fun extractCardLast4(body: String): String? {
         val patterns = listOf(
-            Regex("""\(\*(\d{4})\)"""),                 // (*1226)
-            Regex("""\d*\*+\s*(\d{4})\b""")             // ****8126, *9321, 5477***0855
+            Regex("""\(\*(\d{4})\)"""),
+            Regex("""\d*\*+\s*(\d{4})\b""")
         )
         for (p in patterns) p.find(body)?.let { return it.groupValues[1] }
         return null
