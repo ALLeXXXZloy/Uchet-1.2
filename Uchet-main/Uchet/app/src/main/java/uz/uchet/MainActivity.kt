@@ -1300,7 +1300,7 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
-// ИСПРАВЛЕНО: Парсер карт теперь корректно обрабатывает перемешанный текст Kapitalbank
+// ИСПРАВЛЕНО: Убран look-behind, который вызывал ошибку на Android
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
@@ -1308,8 +1308,8 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     // Ищем суммы (например: 65 432 UZS, 0 UZS, 39.2 UZS)
     val amountRegex = Regex("""([0-9Oo\s\u00A0]+(?:[.,]\d{1,2})?)\s*(?:cyM|сум|UZS|USD|EUR|RUB|so['`]?m)""", RegexOption.IGNORE_CASE)
     
-    // Ищем 4 цифры, отсекая номера переводов (**** 7973)
-    val cardRegex = Regex("""(?<!\*{2,}\s*)(?<![0-9])([0-9Oo]{4})(?![0-9])""")
+    // Ищем просто 4 цифры/буквы O. Никаких look-behind!
+    val cardRegex = Regex("""\b([0-9Oo]{4})\b""")
 
     val pendingAmounts = mutableListOf<Long>()
     var currentBank = "Bank"
@@ -1352,6 +1352,12 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
         // 2. Затем ищем карты
         val cardMatch = cardRegex.find(line)
         if (cardMatch != null) {
+            val startIndex = cardMatch.range.first
+            val prefix = line.substring(0, startIndex)
+            
+            // Отсеиваем номера переводов, которые начинаются с ****
+            if (prefix.contains("****")) continue
+
             val rawLast4 = cardMatch.groupValues[1]
             val last4 = rawLast4.replace('O', '0').replace('o', '0')
             
