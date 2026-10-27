@@ -1300,18 +1300,18 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
-// Поиск карты по 16 цифрам или 4 цифрам после *
+// ИСПРАВЛЕНО: Парсер карт теперь корректно обрабатывает перемешанный текст Kapitalbank
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
 
-    val amountRegex = Regex("""([0-9Oo\s\u00A0]+[.,]\d{2})\s*(?:cyM|сум|UZS|USD|EUR|RUB|so['`]?m)""", RegexOption.IGNORE_CASE)
+    // Ищем суммы (например: 65 432 UZS, 0 UZS, 39.2 UZS)
+    val amountRegex = Regex("""([0-9Oo\s\u00A0]+(?:[.,]\d{1,2})?)\s*(?:cyM|сум|UZS|USD|EUR|RUB|so['`]?m)""", RegexOption.IGNORE_CASE)
     
-    // Ищем 4 цифры после звездочек или 16 цифр подряд
-    val maskedCardRegex = Regex("""(?:[*\s]+|^)([0-9Oo]{4})(?:\s|$)""")
-    val fullCardRegex = Regex("""\b(?:\d[ -]*?){15}\d\b""")
+    // Ищем 4 цифры, отсекая номера переводов (**** 7973)
+    val cardRegex = Regex("""(?<!\*{2,}\s*)(?<![0-9])([0-9Oo]{4})(?![0-9])""")
 
-    var pendingAmount: Long? = null
+    val pendingAmounts = mutableListOf<Long>()
     var currentBank = "Bank"
     var currentCurrency = "UZS"
 
@@ -1320,9 +1320,13 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
         else if (line.contains("UZUM", ignoreCase = true)) currentBank = "Uzum"
         else if (line.contains("KAPITAL", ignoreCase = true)) currentBank = "Kapitalbank"
         else if (line.contains("TBC", ignoreCase = true)) currentBank = "TBC"
+        else if (line.contains("HUMO", ignoreCase = true)) currentBank = "Humo"
+        else if (line.contains("VISA", ignoreCase = true)) currentBank = "Visa"
+        else if (line.contains("MULTI", ignoreCase = true)) currentBank = "Multi"
 
         if (line.contains("/")) continue // Пропускаем даты (12/30)
 
+        // 1. Сначала ищем суммы
         val amtMatch = amountRegex.find(line)
         if (amtMatch != null) {
             if (line.contains("USD", true)) currentCurrency = "USD"
@@ -1335,39 +1339,39 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
                 .replace(",", ".")
                 .replace('O', '0').replace('o', '0')
             
-            pendingAmount = amtStr.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
-            continue 
-        }
-
-        // Ищем 16 цифр подряд (в OCR они могут быть с пробелами)
-        var last4: String? = null
-        val fullMatch = fullCardRegex.find(line)?.value?.replace(Regex("[^0-9]"), "")
-        if (fullMatch != null && fullMatch.length >= 16) {
-            last4 = fullMatch.takeLast(4)
-        } else {
-            // Ищем 4 цифры после звездочек
-            val cardMatch = maskedCardRegex.find(line)
-            if (cardMatch != null) {
-                last4 = cardMatch.groupValues[1].replace('O', '0').replace('o', '0')
+            // Нормализуем 39.2 -> 39.20
+            val normalizedAmt = if (amtStr.contains(".") && amtStr.substringAfter(".").length == 1) "${amtStr}0" else amtStr
+            
+            val parsedAmount = normalizedAmt.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong()
+            if (parsedAmount != null) {
+                pendingAmounts.add(parsedAmount)
             }
+            continue // Переходим к следующей строке
         }
 
-        if (last4 != null && pendingAmount != null) {
-            if (last4.startsWith("20")) continue // Защита от годов
+        // 2. Затем ищем карты
+        val cardMatch = cardRegex.find(line)
+        if (cardMatch != null) {
+            val rawLast4 = cardMatch.groupValues[1]
+            val last4 = rawLast4.replace('O', '0').replace('o', '0')
+            
+            // Защита от годов (например, 2024)
+            if (last4.startsWith("20")) continue
 
             val shortName = getShortBankName(currentBank)
             val finalName = "$shortName $last4"
 
             if (result.none { it.last4 == last4 }) {
+                // Берем первую сумму из очереди. Если очередь пуста, ставим 0.
+                val amountToAssign = if (pendingAmounts.isNotEmpty()) pendingAmounts.removeAt(0) else 0L
                 result.add(CardEntity(
                     id = "${last4}_$currentCurrency", 
                     last4 = last4, 
                     name = finalName, 
                     currency = currentCurrency, 
-                    initialBalanceMinor = pendingAmount!!
+                    initialBalanceMinor = amountToAssign
                 ))
             }
-            pendingAmount = null 
         }
     }
     return result
