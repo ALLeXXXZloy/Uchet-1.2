@@ -318,14 +318,8 @@ object SmsParser {
             val amountMinor = cleanAmount.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
             if (amountMinor == 0L) continue
 
-            // 3. Карта (извлекаем ДО обрезки текста)
-            val cardPatterns = listOf(
-                Regex("""(?:карты|карта|card):?\s*\d+\*+(\d{4})""", RegexOption.IGNORE_CASE),
-                Regex("""\*+(\d{4})"""),
-                Regex("""\d{4}\s?\d{4}\s?\d{4}\s?(\d{4})"""),
-                Regex("""(\d{4})\s*}""")
-            )
-            val cardLast4 = cardPatterns.firstNotNullOfOrNull { it.find(desc)?.groupValues?.get(1) }
+            // 3. Карта (используем нашу новую универсальную функцию)
+            val cardLast4 = extractCardLast4(desc)
             val cardId = cardLast4?.let { "${it}_UZS" }
 
             // 4. Тип операции (доход/расход)
@@ -446,12 +440,23 @@ object SmsParser {
         return out
     }
 
+    // ИСПРАВЛЕНО: Универсальный поиск карты (4 цифры после * или 16 цифр подряд)
     private fun extractCardLast4(body: String): String? {
-        val patterns = listOf(
-            Regex("""\(\*(\d{4})\)"""),
-            Regex("""\d*\*+\s*(\d{4})\b""")
-        )
-        for (p in patterns) p.find(body)?.let { return it.groupValues[1] }
+        // 1. Ищем 16 цифр подряд (возможно с пробелами) - стандарт номера карты
+        val fullCardRegex = Regex("""\b(?:\d[ -]*?){13,16}\b""")
+        val fullMatch = fullCardRegex.find(body)?.value?.replace(Regex("[^0-9]"), "")
+        if (fullMatch != null && fullMatch.length >= 16) {
+            return fullMatch.takeLast(4)
+        }
+
+        // 2. Ищем 4 цифры после звездочек (например, **** 1226)
+        val maskedCardRegex = Regex("""\*+\s*(\d{4})\b""")
+        maskedCardRegex.find(body)?.let { return it.groupValues[1] }
+
+        // 3. Старый формат со скобками на всякий случай (*1226)
+        val parenRegex = Regex("""\(\*(\d{4})\)""")
+        parenRegex.find(body)?.let { return it.groupValues[1] }
+
         return null
     }
 
