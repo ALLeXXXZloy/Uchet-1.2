@@ -88,12 +88,30 @@ private val RED = Color(0xFFC62828)
 private val YELLOW = Color(0xFFF9A825)
 private val BLUE = Color(0xFF1976D2)
 
-fun getMonthFormatter(lang: AppLanguage): DateTimeFormatter {
-    val locale = when(lang) {
-        AppLanguage.RU -> Locale("ru"); AppLanguage.UZ -> Locale("uz"); AppLanguage.EN -> Locale("en")
-        AppLanguage.TG -> Locale("tg"); AppLanguage.KAA -> Locale("kaa"); AppLanguage.KK -> Locale("kk")
+// ИСПРАВЛЕНО: Надежное получение имени месяца (вместо DateTimeFormatter)
+fun getMonthName(month: Int, lang: AppLanguage): String {
+    val ru = listOf("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+    val uz = listOf("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr")
+    val en = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+    
+    return when (lang) {
+        AppLanguage.RU, AppLanguage.TG, AppLanguage.KAA, AppLanguage.KK -> ru[month - 1]
+        AppLanguage.UZ -> uz[month - 1]
+        AppLanguage.EN -> en[month - 1]
     }
-    return DateTimeFormatter.ofPattern("LLLL yyyy", locale)
+}
+
+// ИСПРАВЛЕНО: Функция для генерации короткого названия банка (4 согласные)
+fun getShortBankName(name: String): String {
+    val vowels = "aeiouyаеёиоуыэюяAEIOUYАЕЁИОУЫЭЮЯ"
+    val consonants = name.filter { it.isLetter() && it !in vowels }
+    return if (consonants.length >= 4) {
+        consonants.take(4).lowercase().replaceFirstChar { it.uppercase() }
+    } else if (consonants.isNotEmpty()) {
+        consonants.lowercase().replaceFirstChar { it.uppercase() }
+    } else {
+        "Bank"
+    }
 }
 
 val DEFAULT_EXPENSE_CATEGORIES = listOf("🍔 Еда", "🚕 Транспорт", "🏠 Жилье", "🛒 Покупки", "💊 Здоровье", "🎉 Развлечения", "📦 Другое")
@@ -635,15 +653,18 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                             IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, "Prev") }
 
                             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                // ИСПРАВЛЕНО: Используем надежное получение имени месяца
+                                val monthTitle = "${getMonthName(month.monthValue, currentLang.value)} ${month.year}"
+                                
                                 Text(
-                                    month.format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() },
+                                    monthTitle,
                                     modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp),
                                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium
                                 )
                                 DropdownMenu(expanded = showMonthPicker, onDismissRequest = { showMonthPicker = false }) {
                                     (1..12).forEach { m ->
                                         DropdownMenuItem(
-                                            text = { Text(YearMonth.of(month.year, m).format(getMonthFormatter(currentLang.value)).replaceFirstChar { it.uppercase() }) },
+                                            text = { Text("${getMonthName(m, currentLang.value)} ${month.year}") },
                                             onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false }
                                         )
                                     }
@@ -1181,48 +1202,47 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
+// ИСПРАВЛЕНО: Парсер карт теперь генерирует короткие имена (Kptl 8126)
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
 
-    // Ищем сумму, за которой следует "сум", "cyM", "UZS" и т.д. (включая буквы O/o вместо нуля)
     val amountRegex = Regex("""([0-9Oo\s\u00A0]+[.,]\d{2})\s*(?:cyM|сум|UZS|so['`]?m)""", RegexOption.IGNORE_CASE)
-    
-    // Ищем 4 цифры в начале строки, за которыми идет название банка (учитываем разные разделители)
     val cardRegex = Regex("""^(\d{4})\s*[\-\.\·•]?\s*(.*)""")
 
     var pendingAmount: Long? = null
 
     for (line in lines) {
-        // 1. Если нашли сумму
         val amtMatch = amountRegex.find(line)
         if (amtMatch != null) {
             val amtStr = amtMatch.groupValues[1]
                 .replace(" ", "").replace("\u00A0", "")
                 .replace(",", ".")
-                .replace('O', '0').replace('o', '0') // Заменяем буквы O на ноль
+                .replace('O', '0').replace('o', '0')
             
             pendingAmount = amtStr.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
-            continue // Переходим к следующей строке, где должна быть карта
+            continue 
         }
 
-        // 2. Если нашли карту и у нас уже есть сумма
         val cardMatch = cardRegex.find(line)
         if (cardMatch != null && pendingAmount != null) {
             val last4 = cardMatch.groupValues[1]
             var bankName = cardMatch.groupValues[2].replace("•", "").replace("-", "").trim()
-            if (bankName.isBlank()) bankName = "Банк"
+            if (bankName.isBlank()) bankName = "Bank"
+            
+            val shortName = getShortBankName(bankName)
+            val finalName = "$shortName $last4"
 
             if (result.none { it.last4 == last4 }) {
                 result.add(CardEntity(
                     id = "${last4}_UZS", 
                     last4 = last4, 
-                    name = "Импорт: $bankName", 
+                    name = finalName, 
                     currency = "UZS", 
                     initialBalanceMinor = pendingAmount!!
                 ))
             }
-            pendingAmount = null // Сбрасываем сумму для следующей карты
+            pendingAmount = null 
         }
     }
     return result
