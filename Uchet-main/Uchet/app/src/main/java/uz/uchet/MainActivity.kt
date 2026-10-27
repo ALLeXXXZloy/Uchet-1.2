@@ -1202,19 +1202,37 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
-// ИСПРАВЛЕНО: Парсер карт теперь генерирует короткие имена (Kptl 8126)
+// ИСПРАВЛЕНО: Парсер карт теперь понимает USD/EUR, обрабатывает 'O' вместо '0' и игнорирует даты
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
 
-    val amountRegex = Regex("""([0-9Oo\s\u00A0]+[.,]\d{2})\s*(?:cyM|сум|UZS|so['`]?m)""", RegexOption.IGNORE_CASE)
-    val cardRegex = Regex("""^(\d{4})\s*[\-\.\·•]?\s*(.*)""")
+    // Добавлены USD, EUR, RUB и обработка буквы O вместо нуля
+    val amountRegex = Regex("""([0-9Oo\s\u00A0]+[.,]\d{2})\s*(?:cyM|сум|UZS|USD|EUR|RUB|so['`]?m)""", RegexOption.IGNORE_CASE)
+    
+    // Ищем 4 цифры (или буквы O) в начале строки или после звездочек
+    val cardRegex = Regex("""(?:[*\s]+|^)([0-9Oo]{4})(?:\s|$)""")
 
     var pendingAmount: Long? = null
+    var currentBank = "Bank"
+    var currentCurrency = "UZS"
 
     for (line in lines) {
+        if (line.contains("ANORBANK", ignoreCase = true)) currentBank = "Anorbank"
+        else if (line.contains("UZUM", ignoreCase = true)) currentBank = "Uzum"
+        else if (line.contains("KAPITAL", ignoreCase = true)) currentBank = "Kapitalbank"
+        else if (line.contains("TBC", ignoreCase = true)) currentBank = "TBC"
+
+        // Пропускаем строки с датами (например, 12/30), чтобы не спутать с картой
+        if (line.contains("/")) continue
+
         val amtMatch = amountRegex.find(line)
         if (amtMatch != null) {
+            if (line.contains("USD", true)) currentCurrency = "USD"
+            else if (line.contains("EUR", true)) currentCurrency = "EUR"
+            else if (line.contains("RUB", true)) currentCurrency = "RUB"
+            else currentCurrency = "UZS"
+
             val amtStr = amtMatch.groupValues[1]
                 .replace(" ", "").replace("\u00A0", "")
                 .replace(",", ".")
@@ -1226,19 +1244,21 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
 
         val cardMatch = cardRegex.find(line)
         if (cardMatch != null && pendingAmount != null) {
-            val last4 = cardMatch.groupValues[1]
-            var bankName = cardMatch.groupValues[2].replace("•", "").replace("-", "").trim()
-            if (bankName.isBlank()) bankName = "Bank"
+            val rawLast4 = cardMatch.groupValues[1]
+            val last4 = rawLast4.replace('O', '0').replace('o', '0')
             
-            val shortName = getShortBankName(bankName)
+            // Дополнительная проверка: номер карты не должен быть годом (например, 2024)
+            if (last4.startsWith("20")) continue
+
+            val shortName = getShortBankName(currentBank)
             val finalName = "$shortName $last4"
 
             if (result.none { it.last4 == last4 }) {
                 result.add(CardEntity(
-                    id = "${last4}_UZS", 
+                    id = "${last4}_$currentCurrency", 
                     last4 = last4, 
                     name = finalName, 
-                    currency = "UZS", 
+                    currency = currentCurrency, 
                     initialBalanceMinor = pendingAmount!!
                 ))
             }
