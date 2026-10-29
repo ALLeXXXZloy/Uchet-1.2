@@ -33,7 +33,13 @@ object Translations {
             "export_ok" to "Файл успешно экспортирован", "clear" to "Очистить",
             "prev" to "Предыдущий", "next" to "Следующий", "receipt" to "Чек",
             "voice_error" to "Ошибка голосового ввода", "import_prefix" to "Импорт",
-            "pin_new" to "Новый PIN", "pin_repeat" to "Повторите PIN"
+            "pin_new" to "Новый PIN", "pin_repeat" to "Повторите PIN",
+            "delete_confirm_title" to "Удалить?",
+            "delete_confirm_text" to "Вы уверены? Это действие нельзя отменить.",
+            "category_in_use" to "В этой категории есть операции. Они будут перенесены в 'Другое'.",
+            "empty_tx" to "Здесь пока нет операций.\nНажмите +, чтобы добавить.",
+            "hold_to_voice" to "Удерживайте для голосового ввода",
+            "yes" to "Да", "no" to "Нет"
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -66,7 +72,13 @@ object Translations {
             "export_ok" to "Fayl muvaffaqiyatli eksport qilindi", "clear" to "Tozalash",
             "prev" to "Oldingi", "next" to "Keyingi", "receipt" to "Chek",
             "voice_error" to "Ovozli kiritish xatosi", "import_prefix" to "Import",
-            "pin_new" to "Yangi PIN", "pin_repeat" to "PINni takrorlang"
+            "pin_new" to "Yangi PIN", "pin_repeat" to "PINni takrorlang",
+            "delete_confirm_title" to "O'chirilsinmi?",
+            "delete_confirm_text" to "Ishonchingiz komilmi? Bu amalni bekor qilib bo'lmaydi.",
+            "category_in_use" to "Bu kategoriyada operatsiyalar mavjud. Ular 'Boshqa'ga o'tkaziladi.",
+            "empty_tx" to "Hozircha operatsiyalar yo'q.\nQo'shish uchun + tugmasini bosing.",
+            "hold_to_voice" to "Ovozli kiritish uchun ushlab turing",
+            "yes" to "Ha", "no" to "Yo'q"
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -99,7 +111,13 @@ object Translations {
             "export_ok" to "File exported successfully", "clear" to "Clear",
             "prev" to "Previous", "next" to "Next", "receipt" to "Receipt",
             "voice_error" to "Voice input error", "import_prefix" to "Import",
-            "pin_new" to "New PIN", "pin_repeat" to "Repeat PIN"
+            "pin_new" to "New PIN", "pin_repeat" to "Repeat PIN",
+            "delete_confirm_title" to "Delete?",
+            "delete_confirm_text" to "Are you sure? This action cannot be undone.",
+            "category_in_use" to "There are transactions in this category. They will be moved to 'Other'.",
+            "empty_tx" to "No transactions yet.\nTap + to add one.",
+            "hold_to_voice" to "Hold for voice input",
+            "yes" to "Yes", "no" to "No"
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -132,7 +150,13 @@ object Translations {
             "export_ok" to "Файл бомуваффақият содир шуд", "clear" to "Тоза кардан",
             "prev" to "Пешина", "next" to "Баъдӣ", "receipt" to "Чек",
             "voice_error" to "Хатои воридоти овозӣ", "import_prefix" to "Воридот",
-            "pin_new" to "PIN-и нав", "pin_repeat" to "PIN-ро такрор кунед"
+            "pin_new" to "PIN-и нав", "pin_repeat" to "PIN-ро такрор кунед",
+            "delete_confirm_title" to "Нест кардан?",
+            "delete_confirm_text" to "Шумо мутмаин ҳастед? Ин амалро бекор кардан мумкин нест.",
+            "category_in_use" to "Дар ин категория амалиётҳо мавҷуданд. Онҳо ба 'Дигар' гузаронида мешаванд.",
+            "empty_tx" to "Ҳанӯз амалиётҳо нест.\nБарои илова кардан +-ро пахш кунед.",
+            "hold_to_voice" to "Барои воридоти овозӣ нигоҳ доред",
+            "yes" to "Ҳа", "no" to "Не"
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -165,7 +189,13 @@ object Translations {
             "export_ok" to "Fayl tabıslı eksport qılındı", "clear" to "Tazalaw",
             "prev" to "Aldıńǵı", "next" to "Kelesi", "receipt" to "Chek",
             "voice_error" to "Dawıs arqalı kiritiw qátesi", "import_prefix" to "Import",
-            "pin_new" to "Jańa PIN", "pin_repeat" to "PINdı qaytalań"
+            "pin_new" to "Jańa PIN", "pin_repeat" to "PINdı qaytalań",
+            "delete_confirm_title" to "Óshirilsinbe?",
+            "delete_confirm_text" to "Iseniz bekkem be? Bul ámeldi biykar etiw múmkin emes.",
+            "category_in_use" to "Bul kategoriyada operatsiyalar bar. Olar 'Basqa'ǵa ótkeriledi.",
+            "empty_tx" to "Házirshe operatsiyalar joq.\nQosıw ushın + túymesin basıń.",
+            "hold_to_voice" to "Dawıs arqalı kiritiw ushın uslap turıń",
+            "yes" to "Awa", "no" to "Yaq"
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -198,7 +228,13 @@ object Translations {
             "export_ok" to "Файл сәтті экспортталды", "clear" to "Тазалау",
             "prev" to "Алдыңғы", "next" to "Келесі", "receipt" to "Чек",
             "voice_error" to "Дауыспен енгізу қатесі", "import_prefix" to "Импорт",
-            "pin_new" to "Жаңа PIN", "pin_repeat" to "PIN кодты қайталаңыз"
+            "pin_new" to "Жаңа PIN", "pin_repeat" to "PIN кодты қайталаңыз",
+            "delete_confirm_title" to "Жою керек пе?",
+            "delete_confirm_text" to "Сенімдісіз бе? Бұл әрекетті болдырмау мүмкін емес.",
+            "category_in_use" to "Бұл санатта транзакциялар бар. Олар 'Басқа' санатына ауыстырылады.",
+            "empty_tx" to "Әзірге транзакциялар жоқ.\nҚосу үшін + түймесін басыңыз.",
+            "hold_to_voice" to "Дауыспен енгізу үшін ұстап тұрыңыз",
+            "yes" to "Иә", "no" to "Жоқ"
         )
     )
 
