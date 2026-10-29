@@ -29,8 +29,19 @@ fun GoalManagerDialog(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, l
     var name by remember { mutableStateOf("") }; var targetAmount by remember { mutableStateOf("") }
     var depositGoal by remember { mutableStateOf<SavingsGoalEntity?>(null) }; var depositAmount by remember { mutableStateOf("") }
     var depositCardId by remember { mutableStateOf(cards.firstOrNull()?.id ?: "CASH") }
+    var goalToDelete by remember { mutableStateOf<SavingsGoalEntity?>(null) } // ПОДТВЕРЖДЕНИЕ
     val t = { key: String -> Translations.t(key, lang) }
     val currentDepositGoal = depositGoal
+
+    if (goalToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { goalToDelete = null },
+            title = { Text(t("delete_confirm_title")) },
+            text = { Text(t("delete_confirm_text")) },
+            confirmButton = { TextButton(onClick = { onDeleteGoal(goalToDelete!!); goalToDelete = null }) { Text(t("yes"), color = RED) } },
+            dismissButton = { TextButton(onClick = { goalToDelete = null }) { Text(t("no")) } }
+        )
+    }
 
     if (currentDepositGoal != null) {
         AlertDialog(onDismissRequest = { depositGoal = null }, title = { Text("${t("deposit")}: ${currentDepositGoal.name}") },
@@ -47,7 +58,7 @@ fun GoalManagerDialog(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, l
                 Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
                 Text(t("goals") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
                 if (goals.isEmpty()) Text(t("no_found"), color = Color.Gray)
-                goals.forEach { goal -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(goal.name, fontWeight = FontWeight.Bold); Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton(onClick = { depositGoal = goal }) { Icon(Icons.Default.Add, t("deposit"), tint = GREEN) }; IconButton(onClick = { onDeleteGoal(goal) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+                goals.forEach { goal -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(goal.name, fontWeight = FontWeight.Bold); Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton(onClick = { depositGoal = goal }) { Icon(Icons.Default.Add, t("deposit"), tint = GREEN) }; IconButton(onClick = { goalToDelete = goal }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
             } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
     }
 }
@@ -56,6 +67,7 @@ fun GoalManagerDialog(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, l
 fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, allTxs: List<Tx>, onSave: (CardEntity) -> Unit, onDelete: (String) -> Unit, onAdjustBalance: (String, Long) -> Unit, currentLang: AppLanguage, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit) {
     var last4 by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var initialBalance by remember { mutableStateOf("") }; var currency by remember { mutableStateOf("UZS") }
     var editingCard by remember { mutableStateOf<CardEntity?>(null) }; var actualBalanceInput by remember { mutableStateOf("") }
+    var cardToDelete by remember { mutableStateOf<String?>(null) } // ПОДТВЕРЖДЕНИЕ
     val t = { key: String -> Translations.t(key, currentLang) }
 
     val voiceCardLauncher = rememberLauncherForActivityResult(
@@ -83,6 +95,16 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
             try { voiceCardLauncher.launch(intent) } catch (e2: Exception) { }
         }
+    }
+
+    if (cardToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { cardToDelete = null },
+            title = { Text(t("delete_confirm_title")) },
+            text = { Text(t("delete_confirm_text")) },
+            confirmButton = { TextButton(onClick = { onDelete(cardToDelete!!); cardToDelete = null }) { Text(t("yes"), color = RED) } },
+            dismissButton = { TextButton(onClick = { cardToDelete = null }) { Text(t("no")) } }
+        )
     }
 
     if (editingCard != null) {
@@ -131,8 +153,10 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                 cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) };
                         IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) };
-                        if (c.id != "CASH") {
-                            IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
+                        
+                        // ЗАЩИТА ОТ УДАЛЕНИЯ НАЛИЧНЫХ
+                        if (c.id != "CASH" && c.last4 != "CASH") {
+                            IconButton({ cardToDelete = c.id }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
                         }
                     }
                 }
@@ -144,7 +168,18 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
 fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<String>, onSave: (BudgetEntity) -> Unit, onDelete: (String) -> Unit, currentLang: AppLanguage, onDismiss: () -> Unit) {
     var selectedCategory by remember { mutableStateOf(expenseCategories.firstOrNull() ?: "📦 Другое") }; var limitInput by remember { mutableStateOf("") }
     var showCategoryMenu by remember { mutableStateOf(false) }
+    var budgetToDelete by remember { mutableStateOf<String?>(null) } // ПОДТВЕРЖДЕНИЕ
     val t = { key: String -> Translations.t(key, currentLang) }
+
+    if (budgetToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { budgetToDelete = null },
+            title = { Text(t("delete_confirm_title")) },
+            text = { Text(t("delete_confirm_text")) },
+            confirmButton = { TextButton(onClick = { onDelete(budgetToDelete!!); budgetToDelete = null }) { Text(t("yes"), color = RED) } },
+            dismissButton = { TextButton(onClick = { budgetToDelete = null }) { Text(t("no")) } }
+        )
+    }
 
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("budgets")) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -168,7 +203,7 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("budgets") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             if (budgets.isEmpty()) Text(t("no_found"), color = Color.Gray)
-            budgets.forEach { b -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(Translations.translateCategory(b.category, currentLang), fontWeight = FontWeight.Bold); Text("${t("limit")}: ${b.limitMinor.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton({ onDelete(b.category) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+            budgets.forEach { b -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(Translations.translateCategory(b.category, currentLang), fontWeight = FontWeight.Bold); Text("${t("limit")}: ${b.limitMinor.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton({ budgetToDelete = b.category }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
         } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
 }
 
@@ -177,10 +212,21 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
 fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEntity>, expenseCategories: List<String>, incomeCategories: List<String>, currentLang: AppLanguage, onSave: (RecurringEntity) -> Unit, onDelete: (RecurringEntity) -> Unit, onDismiss: () -> Unit) {
     var type by remember { mutableStateOf(TxType.EXPENSE) }; var category by remember { mutableStateOf(expenseCategories.lastOrNull() ?: "📦 Другое") }
     var amount by remember { mutableStateOf("") }; var selectedCardId by remember { mutableStateOf("CASH") }; var desc by remember { mutableStateOf("") }; var dayOfMonth by remember { mutableStateOf("1") }
+    var recToDelete by remember { mutableStateOf<RecurringEntity?>(null) } // ПОДТВЕРЖДЕНИЕ
     val t = { key: String -> Translations.t(key, currentLang) }
 
     var showTypeMenu by remember { mutableStateOf(false) }
     var showCategoryMenu by remember { mutableStateOf(false) }
+
+    if (recToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { recToDelete = null },
+            title = { Text(t("delete_confirm_title")) },
+            text = { Text(t("delete_confirm_text")) },
+            confirmButton = { TextButton(onClick = { onDelete(recToDelete!!); recToDelete = null }) { Text(t("yes"), color = RED) } },
+            dismissButton = { TextButton(onClick = { recToDelete = null }) { Text(t("no")) } }
+        )
+    }
 
     LaunchedEffect(type) { val currentList = if (type == TxType.INCOME) incomeCategories else expenseCategories; if (!currentList.contains(category)) category = currentList.lastOrNull() ?: "📦 Другое" }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("recurring")) },
@@ -226,7 +272,7 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("recurring") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             if (recurring.isEmpty()) Text(t("no_found"), color = Color.Gray)
-            recurring.forEach { r -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(r.description.ifBlank { Translations.translateCategory(r.category, currentLang) }, fontWeight = FontWeight.Bold); Text("${r.amountMinor.money()} UZS · ${r.dayOfMonth}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton({ onDelete(r) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+            recurring.forEach { r -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(r.description.ifBlank { Translations.translateCategory(r.category, currentLang) }, fontWeight = FontWeight.Bold); Text("${r.amountMinor.money()} UZS · ${r.dayOfMonth}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton({ recToDelete = r }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
         } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
 }
 
@@ -234,6 +280,18 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
 @Composable
 fun CategoryManagerDialog(categories: List<CategoryEntity>, lang: AppLanguage, onSave: (CategoryEntity) -> Unit, onDelete: (String) -> Unit, onDismiss: () -> Unit) {
     var isIncome by remember { mutableStateOf(false) }; var name by remember { mutableStateOf("") }; val t = { key: String -> Translations.t(key, lang) }
+    var catToDelete by remember { mutableStateOf<String?>(null) } // ПОДТВЕРЖДЕНИЕ
+
+    if (catToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { catToDelete = null },
+            title = { Text(t("delete_confirm_title")) },
+            text = { Column { Text(t("delete_confirm_text")); Spacer(Modifier.height(8.dp)); Text(t("category_in_use"), style = MaterialTheme.typography.bodySmall, color = Color.Gray) } },
+            confirmButton = { TextButton(onClick = { onDelete(catToDelete!!); catToDelete = null }) { Text(t("yes"), color = RED) } },
+            dismissButton = { TextButton(onClick = { catToDelete = null }) { Text(t("no")) } }
+        )
+    }
+
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("categories")) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("add_cat") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
@@ -242,9 +300,9 @@ fun CategoryManagerDialog(categories: List<CategoryEntity>, lang: AppLanguage, o
             Button(onClick = { if (name.isNotBlank() && !categories.any { it.name == name }) { onSave(CategoryEntity(name = name.trim(), type = if (isIncome) TxType.INCOME else TxType.EXPENSE)); name = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("expense") + ":", style = MaterialTheme.typography.titleSmall, color = RED)
-            categories.filter { it.type == TxType.EXPENSE }.forEach { c -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge); IconButton({ onDelete(c.name) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+            categories.filter { it.type == TxType.EXPENSE }.forEach { c -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge); IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
             Spacer(Modifier.height(16.dp)); Text(t("income") + ":", style = MaterialTheme.typography.titleSmall, color = GREEN)
-            categories.filter { it.type == TxType.INCOME }.forEach { c -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge); IconButton({ onDelete(c.name) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+            categories.filter { it.type == TxType.INCOME }.forEach { c -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge); IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
         } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
 }
 
