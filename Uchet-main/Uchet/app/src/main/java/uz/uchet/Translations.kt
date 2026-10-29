@@ -28,7 +28,12 @@ object Translations {
             "debug_not_found" to "Найдено карт регуляркой: 0", "debug_what_ocr" to "Что прочитал ML Kit:", "debug_empty" to "[ПУСТО!] ML Kit не увидел текст",
             "voice_input" to "Голосовой ввод", "voice_prompt" to "Назовите операцию...",
             "voice_not_available" to "Голосовой ввод недоступен на устройстве",
-            "voice_card_hint" to "Назовите банк и 4 цифры, например: Kapitalbank 5678"
+            "voice_card_hint" to "Назовите банк и 4 цифры, например: Kapitalbank 5678",
+            "transfer" to "Перевод", "adjustment" to "Корректировка",
+            "export_ok" to "Файл успешно экспортирован", "clear" to "Очистить",
+            "prev" to "Предыдущий", "next" to "Следующий", "receipt" to "Чек",
+            "voice_error" to "Ошибка голосового ввода", "import_prefix" to "Импорт",
+            "pin_new" to "Новый PIN", "pin_repeat" to "Повторите PIN"
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -56,7 +61,12 @@ object Translations {
             "debug_not_found" to "Kartalar topilmadi: 0", "debug_what_ocr" to "ML Kit o'qigan matn:", "debug_empty" to "[BO'SH!] ML Kit matnni ko'rmadi",
             "voice_input" to "Ovozli kiritish", "voice_prompt" to "Operatsiyani ayting...",
             "voice_not_available" to "Qurilmada ovozli kiritish mavjud emas",
-            "voice_card_hint" to "Bank nomi va 4 ta raqamni ayting, masalan: Kapitalbank 5678"
+            "voice_card_hint" to "Bank nomi va 4 ta raqamni ayting, masalan: Kapitalbank 5678",
+            "transfer" to "O'tkazma", "adjustment" to "Tuzatish",
+            "export_ok" to "Fayl muvaffaqiyatli eksport qilindi", "clear" to "Tozalash",
+            "prev" to "Oldingi", "next" to "Keyingi", "receipt" to "Chek",
+            "voice_error" to "Ovozli kiritish xatosi", "import_prefix" to "Import",
+            "pin_new" to "Yangi PIN", "pin_repeat" to "PINni takrorlang"
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -84,7 +94,12 @@ object Translations {
             "debug_not_found" to "Cards found: 0", "debug_what_ocr" to "What ML Kit read:", "debug_empty" to "[EMPTY!] ML Kit saw no text",
             "voice_input" to "Voice input", "voice_prompt" to "Say the operation...",
             "voice_not_available" to "Voice input is not available on this device",
-            "voice_card_hint" to "Say bank name and 4 digits, e.g. Kapitalbank 5678"
+            "voice_card_hint" to "Say bank name and 4 digits, e.g. Kapitalbank 5678",
+            "transfer" to "Transfer", "adjustment" to "Adjustment",
+            "export_ok" to "File exported successfully", "clear" to "Clear",
+            "prev" to "Previous", "next" to "Next", "receipt" to "Receipt",
+            "voice_error" to "Voice input error", "import_prefix" to "Import",
+            "pin_new" to "New PIN", "pin_repeat" to "Repeat PIN"
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -112,7 +127,12 @@ object Translations {
             "debug_not_found" to "Кортҳо ёфт нашуданд: 0", "debug_what_ocr" to "ML Kit чӣ хонд:", "debug_empty" to "[ХОЛӢ!] ML Kit матнро надид",
             "voice_input" to "Воридоти овозӣ", "voice_prompt" to "Амалиётро гӯед...",
             "voice_not_available" to "Воридоти овозӣ дар дастгоҳ дастрас нест",
-            "voice_card_hint" to "Номи бонк ва 4 рақамро гӯед, масалан: Kapitalbank 5678"
+            "voice_card_hint" to "Номи бонк ва 4 рақамро гӯед, масалан: Kapitalbank 5678",
+            "transfer" to "Интиқол", "adjustment" to "Ислоҳ",
+            "export_ok" to "Файл бомуваффақият содир шуд", "clear" to "Тоза кардан",
+            "prev" to "Пешина", "next" to "Баъдӣ", "receipt" to "Чек",
+            "voice_error" to "Хатои воридоти овозӣ", "import_prefix" to "Воридот",
+            "pin_new" to "PIN-и нав", "pin_repeat" to "PIN-ро такрор кунед"
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -140,7 +160,12 @@ object Translations {
             "debug_not_found" to "Kartalar tabılmadı: 0", "debug_what_ocr" to "ML Kit oqıǵan tekst:", "debug_empty" to "[BOS!] ML Kit tekstti kórmey qaldı",
             "voice_input" to "Dawıs arqalı kiritiw", "voice_prompt" to "Operatsiyanı aytıń...",
             "voice_not_available" to "Qurılmada dawıs arqalı kiritiw joq",
-            "voice_card_hint" to "Bank atı hám 4 sandı aytıń, mısalı: Kapitalbank 5678"
+            "voice_card_hint" to "Bank atı hám 4 sandı aytıń, mısalı: Kapitalbank 5678",
+            "transfer" to "O'tkeriw", "adjustment" to "Tuzetiw",
+            "export_ok" to "Fayl tabıslı eksport qılındı", "clear" to "Tazalaw",
+            "prev" to "Aldıńǵı", "next" to "Kelesi", "receipt" to "Chek",
+            "voice_error" to "Dawıs arqalı kiritiw qátesi", "import_prefix" to "Import",
+            "pin_new" to "Jańa PIN", "pin_repeat" to "PINdı qaytalań"
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -168,7 +193,12 @@ object Translations {
             "debug_not_found" to "Карталар табылмады: 0", "debug_what_ocr" to "ML Kit не оқыды:", "debug_empty" to "[БОС!] ML Kit мәтінді көрмеді",
             "voice_input" to "Дауыспен енгізу", "voice_prompt" to "Операцияны айтыңыз...",
             "voice_not_available" to "Құрылғыда дауыспен енгізу қолжетімсіз",
-            "voice_card_hint" to "Банк атауы мен 4 санды айтыңыз, мысалы: Kapitalbank 5678"
+            "voice_card_hint" to "Банк атауы мен 4 санды айтыңыз, мысалы: Kapitalbank 5678",
+            "transfer" to "Аударым", "adjustment" to "Түзету",
+            "export_ok" to "Файл сәтті экспортталды", "clear" to "Тазалау",
+            "prev" to "Алдыңғы", "next" to "Келесі", "receipt" to "Чек",
+            "voice_error" to "Дауыспен енгізу қатесі", "import_prefix" to "Импорт",
+            "pin_new" to "Жаңа PIN", "pin_repeat" to "PIN кодты қайталаңыз"
         )
     )
 
