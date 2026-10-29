@@ -1,7 +1,6 @@
 package uz.uchet
 
 import android.Manifest
-import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,17 +13,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -34,10 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
@@ -49,202 +41,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.room.withTransaction
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
-import java.math.BigDecimal
-import java.math.RoundingMode
-import java.net.HttpURLConnection
-import java.net.URL
-import java.time.*
-import java.time.format.DateTimeFormatter
-
-class VM(app: Application) : AndroidViewModel(app) {
-    private val db = AppDb.get(app)
-    private val dao = db.dao()
-    val month = MutableStateFlow(YearMonth.now())
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val txs = month.flatMapLatest { m ->
-        val z = ZoneId.systemDefault()
-        dao.observe(m.atDay(1).atStartOfDay(z).toInstant().toEpochMilli(), m.plusMonths(1).atDay(1).atStartOfDay(z).toInstant().toEpochMilli())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val allTxs = dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val cards = dao.observeCards().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val budgets = dao.observeBudgets().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val recurring = dao.observeRecurring().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val categories = dao.observeCategories().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CategoryEntity>())
-    val goals = dao.observeGoals().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<SavingsGoalEntity>())
-    val rates = dao.observeRates().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ExchangeRateEntity>())
-
-    init {
-        viewModelScope.launch {
-            checkAndExecuteRecurring(); seedDefaultCategories(); ensureCashAccount(); updateRates()
-        }
-    }
-
-    private suspend fun seedDefaultCategories() {
-        if (dao.getCategoriesList().isEmpty()) {
-            DEFAULT_EXPENSE_CATEGORIES.forEach { dao.upsertCategory(CategoryEntity(it, TxType.EXPENSE)) }
-            DEFAULT_INCOME_CATEGORIES.forEach { dao.upsertCategory(CategoryEntity(it, TxType.INCOME)) }
-        }
-    }
-
-    private suspend fun ensureCashAccount() {
-        if (cards.first().none { it.id == "CASH" }) {
-            dao.upsertCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
-        }
-    }
-
-    fun updateRates() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val url = URL("https://cbu.uz/ru/arkhiv-kursov-valyut/json/")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                val response = connection.inputStream.bufferedReader().use { it.readText() }
-                val jsonArray = JSONArray(response)
-                for (i in 0 until jsonArray.length()) {
-                    val obj = jsonArray.getJSONObject(i)
-                    val ccy = obj.getString("Ccy")
-                    if (ccy in listOf("USD", "EUR", "RUB")) {
-                        val rate = obj.getString("Rate").toDouble()
-                        dao.upsertRate(ExchangeRateEntity(ccy, rate))
-                    }
-                }
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    private suspend fun checkAndExecuteRecurring() {
-        val now = LocalDate.now(); val currentMonthStr = YearMonth.now().toString(); val currentDay = now.dayOfMonth
-        val templates = dao.getRecurringList()
-        for (t in templates) {
-            val effectiveDay = minOf(t.dayOfMonth, now.lengthOfMonth())
-            if (effectiveDay <= currentDay && t.lastExecutedMonth != currentMonthStr) {
-                val tx = Tx(amountMinor = t.amountMinor, type = t.type, cardId = t.cardId, description = t.description, category = t.category, timestamp = now.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), source = "AUTO")
-                dao.upsert(tx); dao.upsertRecurring(t.copy(lastExecutedMonth = currentMonthStr))
-            }
-        }
-    }
-
-    fun save(t: Tx) { viewModelScope.launch { dao.upsert(t) } }
-    fun bulkSave(txs: List<Tx>) { viewModelScope.launch { dao.insertAll(txs) } }
-    fun delete(t: Tx) { viewModelScope.launch { dao.delete(t) } }
-    fun shift(n: Long) { month.value = month.value.plusMonths(n) }
-    fun saveCard(card: CardEntity) { viewModelScope.launch { dao.upsertCard(card) } }
-    fun deleteCard(id: String) { if (id != "CASH") viewModelScope.launch { dao.deleteCard(id) } }
-    fun saveBudget(budget: BudgetEntity) { viewModelScope.launch { dao.upsertBudget(budget) } }
-    fun deleteBudget(category: String) { viewModelScope.launch { dao.deleteBudget(category) } }
-    fun saveRecurring(r: RecurringEntity) { viewModelScope.launch { dao.upsertRecurring(r) } }
-    fun deleteRecurring(r: RecurringEntity) { viewModelScope.launch { dao.deleteRecurring(r) } }
-    fun saveCategory(c: CategoryEntity) { viewModelScope.launch { dao.upsertCategory(c) } }
-    fun deleteCategory(name: String) { viewModelScope.launch { dao.deleteCategory(name) } }
-    fun saveGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.upsertGoal(goal) } }
-    fun deleteGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.deleteGoal(goal) } }
-
-    fun adjustBalance(cardId: String, diffMinor: Long) {
-        if (diffMinor == 0L) return
-        val tx = Tx(
-            amountMinor = kotlin.math.abs(diffMinor),
-            type = if (diffMinor > 0) TxType.INCOME else TxType.EXPENSE,
-            cardId = cardId,
-            description = "Корректировка баланса",
-            category = "⚙️ Система",
-            timestamp = System.currentTimeMillis(),
-            source = "ADJUSTMENT"
-        )
-        viewModelScope.launch { dao.upsert(tx) }
-    }
-
-    fun depositToGoal(goal: SavingsGoalEntity, cardId: String, amountMinor: Long) {
-        viewModelScope.launch {
-            val tx = Tx(amountMinor = amountMinor, type = TxType.TRANSFER, cardId = cardId, toCardId = "GOAL_${goal.id}", description = goal.name, category = "🏦 Копилка", timestamp = System.currentTimeMillis(), source = "SAVINGS")
-            dao.upsert(tx); dao.upsertGoal(goal.copy(currentAmountMinor = goal.currentAmountMinor + amountMinor))
-        }
-    }
-
-    fun createBackup(onResult: (String) -> Unit) {
-        viewModelScope.launch {
-            try {
-                val allTx = allTxs.first(); val allCards = cards.first(); val allBudgets = budgets.first(); val allRecurring = dao.getRecurringList(); val allCats = dao.getCategoriesList(); val allGoals = goals.first()
-                val root = JSONObject()
-                val txsArray = JSONArray(); allTx.forEach { t -> txsArray.put(JSONObject().apply { put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name); put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL); put("description", t.description); put("category", t.category); put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL) }) }; root.put("txs", txsArray)
-                val cardsArray = JSONArray(); allCards.forEach { c -> cardsArray.put(JSONObject().apply { put("id", c.id); put("last4", c.last4); put("name", c.name); put("currency", c.currency); put("initialBalanceMinor", c.initialBalanceMinor) }) }; root.put("cards", cardsArray)
-                val budgetsArray = JSONArray(); allBudgets.forEach { b -> budgetsArray.put(JSONObject().apply { put("category", b.category); put("limitMinor", b.limitMinor) }) }; root.put("budgets", budgetsArray)
-                val recurringArray = JSONArray(); allRecurring.forEach { r -> recurringArray.put(JSONObject().apply { put("id", r.id); put("amountMinor", r.amountMinor); put("type", r.type.name); put("cardId", r.cardId ?: JSONObject.NULL); put("description", r.description); put("category", r.category); put("dayOfMonth", r.dayOfMonth); put("lastExecutedMonth", r.lastExecutedMonth) }) }; root.put("recurring", recurringArray)
-                val catsArray = JSONArray(); allCats.forEach { c -> catsArray.put(JSONObject().apply { put("name", c.name); put("type", c.type.name) }) }; root.put("categories", catsArray)
-                val goalsArray = JSONArray(); allGoals.forEach { g -> goalsArray.put(JSONObject().apply { put("id", g.id); put("name", g.name); put("targetAmountMinor", g.targetAmountMinor); put("currentAmountMinor", g.currentAmountMinor) }) }; root.put("goals", goalsArray)
-                onResult(root.toString(2))
-            } catch (e: Exception) { onResult("") }
-        }
-    }
-
-    fun restoreBackup(jsonString: String, onResult: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            try {
-                val root = JSONObject(jsonString)
-
-                val txsList = mutableListOf<Tx>()
-                val txsArray = root.optJSONArray("txs")
-                if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); txsList.add(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
-
-                val cardsList = mutableListOf<CardEntity>()
-                val cardsArray = root.optJSONArray("cards")
-                if (cardsArray != null) { for (i in 0 until cardsArray.length()) { val o = cardsArray.getJSONObject(i); cardsList.add(CardEntity(id = o.getString("id"), last4 = o.getString("last4"), name = o.getString("name"), currency = o.getString("currency"), initialBalanceMinor = o.getLong("initialBalanceMinor"))) } }
-
-                val budgetsList = mutableListOf<BudgetEntity>()
-                val budgetsArray = root.optJSONArray("budgets")
-                if (budgetsArray != null) { for (i in 0 until budgetsArray.length()) { val o = budgetsArray.getJSONObject(i); budgetsList.add(BudgetEntity(category = o.getString("category"), limitMinor = o.getLong("limitMinor"))) } }
-
-                val recurringList = mutableListOf<RecurringEntity>()
-                val recurringArray = root.optJSONArray("recurring")
-                if (recurringArray != null) { for (i in 0 until recurringArray.length()) { val o = recurringArray.getJSONObject(i); recurringList.add(RecurringEntity(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), description = o.optString("description"), category = o.optString("category"), dayOfMonth = o.getInt("dayOfMonth"), lastExecutedMonth = o.optString("lastExecutedMonth"))) } }
-
-                val catsList = mutableListOf<CategoryEntity>()
-                val catsArray = root.optJSONArray("categories")
-                if (catsArray != null) { for (i in 0 until catsArray.length()) { val o = catsArray.getJSONObject(i); catsList.add(CategoryEntity(name = o.getString("name"), type = TxType.valueOf(o.getString("type")))) } }
-
-                val goalsList = mutableListOf<SavingsGoalEntity>()
-                val goalsArray = root.optJSONArray("goals")
-                if (goalsArray != null) { for (i in 0 until goalsArray.length()) { val o = goalsArray.getJSONObject(i); goalsList.add(SavingsGoalEntity(id = o.optLong("id"), name = o.getString("name"), targetAmountMinor = o.getLong("targetAmountMinor"), currentAmountMinor = o.getLong("currentAmountMinor"))) } }
-
-                db.withTransaction {
-                    dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
-                    dao.clearCategories(); dao.clearGoals()
-
-                    dao.insertAll(txsList)
-                    cardsList.forEach { dao.upsertCard(it) }
-                    budgetsList.forEach { dao.upsertBudget(it) }
-                    recurringList.forEach { dao.upsertRecurring(it) }
-                    catsList.forEach { dao.upsertCategory(it) }
-                    goalsList.forEach { dao.upsertGoal(it) }
-                }
-
-                ensureCashAccount()
-                onResult(true)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                onResult(false)
-            }
-        }
-    }
-}
+import java.time.Instant
+import java.time.YearMonth
+import java.time.ZoneId
 
 class MainActivity : FragmentActivity() {
     private val pendingCheckTrigger = mutableStateOf(0)
@@ -756,124 +564,4 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         if (showBudgetManager) BudgetManagerDialog(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
         if (showRecurringManager) RecurringManagerDialog(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AnalyticsScreen(txs: List<Tx>, allTxs: List<Tx>, currentLang: AppLanguage, onBack: () -> Unit) {
-    val t = { key: String -> Translations.t(key, currentLang) }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(t("analytics")) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) } }
-            )
-        }
-    ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-            if (txs.any { it.type == TxType.EXPENSE }) {
-                Text(t("daily_chart"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(16.dp))
-                DailyExpenseChart(txs = txs, yearMonth = YearMonth.now())
-                Spacer(Modifier.height(32.dp))
-            }
-            if (allTxs.any { it.type == TxType.EXPENSE }) {
-                Text(t("monthly_chart"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(16.dp))
-                MonthlyExpenseChart(allTxs = allTxs)
-                Spacer(Modifier.height(32.dp))
-            }
-            val expensesByCategory = txs.filter { it.type == TxType.EXPENSE }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
-            if (expensesByCategory.isNotEmpty()) {
-                Text(t("exp_by_cat"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(16.dp))
-                CategoryPieChart(expensesByCategory, currentLang)
-            }
-        }
-    }
-}
-
-@Composable
-fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
-    val daysInMonth = yearMonth.lengthOfMonth(); val zone = ZoneId.systemDefault()
-    val dailyExpenses = (1..daysInMonth).associateWith { day -> txs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.dayOfMonth == day && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
-    val maxExpense = (dailyExpenses.values.maxOrNull() ?: 1L).toFloat()
-
-    val barColor = MaterialTheme.colorScheme.primary
-    val selectedBarColor = MaterialTheme.colorScheme.secondary
-
-    var selectedDay by remember { mutableStateOf<Int?>(null) }
-
-    Column {
-        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp).pointerInput(Unit) {
-            detectTapGestures { offset ->
-                val step = size.width / daysInMonth
-                val clickedDay = (offset.x / step).toInt() + 1
-                selectedDay = if (selectedDay == clickedDay) null else clickedDay
-            }
-        }) {
-            val width = size.width; val height = size.height; val barWidth = (width / daysInMonth) * 0.6f; val step = width / daysInMonth
-            dailyExpenses.forEach { (day, amount) ->
-                if (amount > 0) {
-                    val isSelected = selectedDay == day
-                    val currentBarColor = if (isSelected) selectedBarColor else barColor
-                    val barHeight = (amount / maxExpense) * height
-                    val x = (day - 1) * step + (step - barWidth) / 2
-                    drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        if (selectedDay != null) {
-            Text("${Translations.t("day", AppLanguage.RU)}: $selectedDay. ${Translations.t("total", AppLanguage.RU)}: ${dailyExpenses[selectedDay]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = selectedBarColor)
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("15", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("$daysInMonth", style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
-        }
-    }
-}
-
-@Composable
-fun MonthlyExpenseChart(allTxs: List<Tx>) {
-    val currentYear = Year.now(); val zone = ZoneId.systemDefault()
-    val monthlyExpenses = (1..12).associateWith { m -> allTxs.filter { val date = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(); date.year == currentYear.value && date.monthValue == m && it.type == TxType.EXPENSE }.sumOf { it.amountMinor } }
-    val maxExpense = (monthlyExpenses.values.maxOrNull() ?: 1L).toFloat()
-
-    val barColor = MaterialTheme.colorScheme.secondary
-    val selectedBarColor = MaterialTheme.colorScheme.primary
-
-    var selectedMonth by remember { mutableStateOf<Int?>(null) }
-
-    Column {
-        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp).pointerInput(Unit) {
-            detectTapGestures { offset ->
-                val step = size.width / 12
-                val clickedMonth = (offset.x / step).toInt() + 1
-                selectedMonth = if (selectedMonth == clickedMonth) null else clickedMonth
-            }
-        }) {
-            val width = size.width; val height = size.height; val step = width / 12; val barWidth = step * 0.6f
-            monthlyExpenses.forEach { (month, amount) ->
-                if (amount > 0) {
-                    val isSelected = selectedMonth == month
-                    val currentBarColor = if (isSelected) selectedBarColor else barColor
-                    val barHeight = (amount / maxExpense) * height
-                    val x = (month - 1) * step + (step - barWidth) / 2
-                    drawRoundRect(color = currentBarColor, topLeft = Offset(x, height - barHeight), size = Size(barWidth, barHeight), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()))
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        if (selectedMonth != null) {
-            Text("${Translations.t("date", AppLanguage.RU)}: $selectedMonth. ${Translations.t("total", AppLanguage.RU)}: ${monthlyExpenses[selectedMonth]?.money()} UZS", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = selectedBarColor)
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("4", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("7", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("10", style = MaterialTheme.typography.labelSmall, color = Color.Gray); Text("12", style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
-        }
-    }
-}
-
-@Composable
-fun CategoryPieChart(data: Map<String, Long>, lang: AppLanguage) {
-    val total = data.values.sum().toFloat(); if (total == 0f) return; val colors = listOf(Color(0xFFE57373), Color(0xFF81C784), Color(0xFF64B5F6), Color(0xFFFFB74D), Color(0xFFBA68C8), Color(0xFF4DB6AC), Color(0xFFA1887F)); val sortedData = data.entries.sortedByDescending { it.value }
-    Row(Modifier.fillMaxWidth().height(120.dp), verticalAlignment = Alignment.CenterVertically) { Canvas(modifier = Modifier.size(110.dp).padding(8.dp)) { var startAngle = -90f; sortedData.forEachIndexed { index, entry -> val sweepAngle = (entry.value / total) * 360f; drawArc(color = colors[index % colors.size], startAngle = startAngle, sweepAngle = sweepAngle, useCenter = true); startAngle += sweepAngle } }
-        Spacer(Modifier.width(16.dp)); Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { sortedData.take(4).forEachIndexed { index, entry -> Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(10.dp).background(colors[index % colors.size], shape = CircleShape)); Spacer(Modifier.width(6.dp)); Text("${Translations.translateCategory(entry.key, lang)}: ${(entry.value / total * 100).toInt()}%", style = MaterialTheme.typography.bodySmall) } } } }
 }
