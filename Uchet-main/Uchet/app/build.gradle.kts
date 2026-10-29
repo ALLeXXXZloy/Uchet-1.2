@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.google.devtools.ksp") // Или kotlin-kapt, если используете kapt
+    id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -57,15 +57,15 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // Room Database
-    val roomVersion = "2.6.1"
+    // Room Database — ОБНОВЛЕНО ДО 2.7.0
+    val roomVersion = "2.7.0"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    ksp("androidx.room:room-compiler:$roomVersion") // Замените на kapt(), если используете kapt
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     // Security & Biometric
     implementation("androidx.biometric:biometric:1.2.0-alpha05")
-    implementation("androidx.security:security-crypto:1.1.0-alpha06") // Для EncryptedSharedPreferences
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // ML Kit (OCR & Barcode)
     implementation("com.google.mlkit:text-recognition:16.0.0")
