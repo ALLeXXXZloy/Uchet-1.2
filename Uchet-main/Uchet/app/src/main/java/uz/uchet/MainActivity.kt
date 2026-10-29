@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.speech.RecognizerIntent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -150,7 +151,10 @@ object Translations {
             "new_sms_not_found" to "Новых СМС не найдено", "rates_updated" to "Курсы обновлены", "file_read_error" to "Ошибка чтения файла", "no_tx_found" to "Не найдено транзакций",
             "deleted" to "Удалено", "undo" to "Отменить", "error" to "Ошибка", "close" to "Закрыть", "add_tx" to "Добавить", "add_new_cat" to "+ Новая категория", "add_new_card" to "+ Новая карта",
             "back" to "Назад", "ocr_debug" to "Отладка импорта карт", "image_error" to "Не удалось открыть изображение", "debug_size" to "Размер картинки",
-            "debug_not_found" to "Найдено карт регуляркой: 0", "debug_what_ocr" to "Что прочитал ML Kit:", "debug_empty" to "[ПУСТО!] ML Kit не увидел текст"
+            "debug_not_found" to "Найдено карт регуляркой: 0", "debug_what_ocr" to "Что прочитал ML Kit:", "debug_empty" to "[ПУСТО!] ML Kit не увидел текст",
+            "voice_input" to "Голосовой ввод", "voice_prompt" to "Назовите операцию...",
+            "voice_not_available" to "Голосовой ввод недоступен на устройстве",
+            "voice_card_hint" to "Назовите банк и 4 цифры, например: Kapitalbank 5678"
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -175,7 +179,10 @@ object Translations {
             "new_sms_not_found" to "Yangi SMS topilmadi", "rates_updated" to "Kurslar yangilandi", "file_read_error" to "Faylni o'qish xatosi", "no_tx_found" to "Operatsiyalar topilmadi",
             "deleted" to "O'chirildi", "undo" to "Bekor qilish", "error" to "Xato", "close" to "Yopish", "add_tx" to "Qo'shish", "add_new_cat" to "+ Yangi kategoriya", "add_new_card" to "+ Yangi karta",
             "back" to "Orqaga", "ocr_debug" to "Kartalarni import qilishni sozlash", "image_error" to "Rasmni ochib bo'lmadi", "debug_size" to "Rasm o'lchami",
-            "debug_not_found" to "Kartalar topilmadi: 0", "debug_what_ocr" to "ML Kit o'qigan matn:", "debug_empty" to "[BO'SH!] ML Kit matnni ko'rmadi"
+            "debug_not_found" to "Kartalar topilmadi: 0", "debug_what_ocr" to "ML Kit o'qigan matn:", "debug_empty" to "[BO'SH!] ML Kit matnni ko'rmadi",
+            "voice_input" to "Ovozli kiritish", "voice_prompt" to "Operatsiyani ayting...",
+            "voice_not_available" to "Qurilmada ovozli kiritish mavjud emas",
+            "voice_card_hint" to "Bank nomi va 4 ta raqamni ayting, masalan: Kapitalbank 5678"
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -200,7 +207,10 @@ object Translations {
             "new_sms_not_found" to "No new SMS found", "rates_updated" to "Rates updated", "file_read_error" to "File read error", "no_tx_found" to "No transactions found",
             "deleted" to "Deleted", "undo" to "Undo", "error" to "Error", "close" to "Close", "add_tx" to "Add", "add_new_cat" to "+ New category", "add_new_card" to "+ New card",
             "back" to "Back", "ocr_debug" to "Card import debug", "image_error" to "Failed to open image", "debug_size" to "Image size",
-            "debug_not_found" to "Cards found: 0", "debug_what_ocr" to "What ML Kit read:", "debug_empty" to "[EMPTY!] ML Kit saw no text"
+            "debug_not_found" to "Cards found: 0", "debug_what_ocr" to "What ML Kit read:", "debug_empty" to "[EMPTY!] ML Kit saw no text",
+            "voice_input" to "Voice input", "voice_prompt" to "Say the operation...",
+            "voice_not_available" to "Voice input is not available on this device",
+            "voice_card_hint" to "Say bank name and 4 digits, e.g. Kapitalbank 5678"
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -225,7 +235,10 @@ object Translations {
             "new_sms_not_found" to "СМС-и нав ёфт нашуд", "rates_updated" to "Курсҳо нав карда шуданд", "file_read_error" to "Хатои хониши файл", "no_tx_found" to "Транзаксия ёфт нашуд",
             "deleted" to "Нест карда шуд", "undo" to "Бекор кардан", "error" to "Хатогӣ", "close" to "Пӯшидан", "add_tx" to "Илова", "add_new_cat" to "+ Категорияи нав", "add_new_card" to "+ Корти нав",
             "back" to "Бозгашт", "ocr_debug" to "Ислоҳи воридоти кортҳо", "image_error" to "Тасвирро кушодан нашуд", "debug_size" to "Андозаи тасвир",
-            "debug_not_found" to "Кортҳо ёфт нашуданд: 0", "debug_what_ocr" to "ML Kit чӣ хонд:", "debug_empty" to "[ХОЛӢ!] ML Kit матнро надид"
+            "debug_not_found" to "Кортҳо ёфт нашуданд: 0", "debug_what_ocr" to "ML Kit чӣ хонд:", "debug_empty" to "[ХОЛӢ!] ML Kit матнро надид",
+            "voice_input" to "Воридоти овозӣ", "voice_prompt" to "Амалиётро гӯед...",
+            "voice_not_available" to "Воридоти овозӣ дар дастгоҳ дастрас нест",
+            "voice_card_hint" to "Номи бонк ва 4 рақамро гӯед, масалан: Kapitalbank 5678"
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -250,7 +263,10 @@ object Translations {
             "new_sms_not_found" to "Jańa SMS tabılmadı", "rates_updated" to "Kurslar jańalandı", "file_read_error" to "Fayldı oqıw qátesi", "no_tx_found" to "Operatsiyalar tabılmadı",
             "deleted" to "Óshirildi", "undo" to "Biykar etiw", "error" to "Qáte", "close" to "Jabıw", "add_tx" to "Qosıw", "add_new_cat" to "+ Jańa kategoriya", "add_new_card" to "+ Jańa karta",
             "back" to "Artqa", "ocr_debug" to "Kartalardı import qılıw sazlaw", "image_error" to "Súwretti aship bolmadı", "debug_size" to "Súwret ólshemi",
-            "debug_not_found" to "Kartalar tabılmadı: 0", "debug_what_ocr" to "ML Kit oqıǵan tekst:", "debug_empty" to "[BOS!] ML Kit tekstti kórmey qaldı"
+            "debug_not_found" to "Kartalar tabılmadı: 0", "debug_what_ocr" to "ML Kit oqıǵan tekst:", "debug_empty" to "[BOS!] ML Kit tekstti kórmey qaldı",
+            "voice_input" to "Dawıs arqalı kiritiw", "voice_prompt" to "Operatsiyanı aytıń...",
+            "voice_not_available" to "Qurılmada dawıs arqalı kiritiw joq",
+            "voice_card_hint" to "Bank atı hám 4 sandı aytıń, mısalı: Kapitalbank 5678"
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -275,7 +291,10 @@ object Translations {
             "new_sms_not_found" to "Жаңа СМС табылмады", "rates_updated" to "Бағамдар жаңартылды", "file_read_error" to "Файлды оқу қатесі", "no_tx_found" to "Транзакциялар табылмады",
             "deleted" to "Жойылды", "undo" to "Болдырмау", "error" to "Қате", "close" to "Жабу", "add_tx" to "Қосу", "add_new_cat" to "+ Жаңа санат", "add_new_card" to "+ Жаңа карта",
             "back" to "Артқа", "ocr_debug" to "Карталарды импорттау диагностикасы", "image_error" to "Суретті ашу мүмкін болмады", "debug_size" to "Сурет өлшемі",
-            "debug_not_found" to "Карталар табылмады: 0", "debug_what_ocr" to "ML Kit не оқыды:", "debug_empty" to "[БОС!] ML Kit мәтінді көрмеді"
+            "debug_not_found" to "Карталар табылмады: 0", "debug_what_ocr" to "ML Kit не оқыды:", "debug_empty" to "[БОС!] ML Kit мәтінді көрмеді",
+            "voice_input" to "Дауыспен енгізу", "voice_prompt" to "Операцияны айтыңыз...",
+            "voice_not_available" to "Құрылғыда дауыспен енгізу қолжетімсіз",
+            "voice_card_hint" to "Банк атауы мен 4 санды айтыңыз, мысалы: Kapitalbank 5678"
         )
     )
 
@@ -988,6 +1007,37 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
 
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
+    val voiceLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spoken.isNullOrBlank()) {
+                val parsed = VoiceParser.parseTransaction(spoken, expenseCategories, incomeCategories)
+                parsed.type?.let { type = it }
+                parsed.amountMinor?.let { amount = BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() }
+                if (parsed.isCash) selectedCardId = "CASH"
+                else parsed.cardLast4?.let { l4 -> cards.find { it.last4 == l4 }?.let { selectedCardId = it.id } }
+                parsed.categoryName?.let { category = it }
+                if (parsed.description.isNotBlank()) desc = parsed.description
+            }
+        }
+    }
+
+    fun startVoiceInput() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (currentLang == AppLanguage.UZ) "uz-UZ" else "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, t("voice_prompt"))
+        }
+        try {
+            voiceLauncher.launch(intent)
+        } catch (e: Exception) {
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            try { voiceLauncher.launch(intent) } catch (e2: Exception) { }
+        }
+    }
+
     val cameraLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.TakePicture()) { success ->
         if (success) {
             val currentUri = tempCameraUri
@@ -1152,6 +1202,11 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
 
                         Button(onClick = { qrLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) {
                             Icon(Icons.Default.QrCodeScanner, contentDescription = t("scan_qr"))
+                        }
+
+                        Button(onClick = { startVoiceInput() }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)) {
+                            Icon(Icons.Default.Mic, contentDescription = t("voice_input"))
                         }
                     }
                 }
@@ -1386,6 +1441,141 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
 fun parseSmsText(text: String): ParsedSms? = SmsParser.parseForOcr(text)
+
+// ====== ГОЛОСОВОЙ ПАРСЕР ======
+object VoiceParser {
+
+    data class VoiceTxResult(
+        val amountMinor: Long?,
+        val type: TxType?,
+        val cardLast4: String?,
+        val isCash: Boolean,
+        val categoryName: String?,
+        val description: String
+    )
+
+    data class VoiceCardResult(val bankName: String?, val last4: String)
+
+    private val ones = mapOf(
+        "ноль" to 0L, "один" to 1L, "одна" to 1L, "два" to 2L, "две" to 2L, "три" to 3L,
+        "четыре" to 4L, "пять" to 5L, "шесть" to 6L, "семь" to 7L, "восемь" to 8L, "девять" to 9L,
+        "nol" to 0L, "bir" to 1L, "ikki" to 2L, "uch" to 3L, "to'rt" to 4L, "tort" to 4L,
+        "besh" to 5L, "olti" to 6L, "yetti" to 7L, "sakkiz" to 8L, "to'qqiz" to 9L, "toqqiz" to 9L
+    )
+    private val tens = mapOf(
+        "десять" to 10L, "двадцать" to 20L, "тридцать" to 30L, "сорок" to 40L,
+        "пятьдесят" to 50L, "шестьдесят" to 60L, "семьдесят" to 70L, "восемьдесят" to 80L,
+        "девяносто" to 90L,
+        "o'n" to 10L, "on" to 10L, "yigirma" to 20L, "o'ttiz" to 30L, "ottiz" to 30L,
+        "qirq" to 40L, "ellik" to 50L, "oltmish" to 60L, "yetmish" to 70L,
+        "sakson" to 80L, "to'qson" to 90L, "toqson" to 90L
+    )
+    private val hundreds = mapOf(
+        "сто" to 100L, "двести" to 200L, "триста" to 300L, "четыреста" to 400L,
+        "пятьсот" to 500L, "шестьсот" to 600L, "семьсот" to 700L, "восемьсот" to 800L,
+        "девятьсот" to 900L, "yuz" to 100L
+    )
+    private val multipliers = mapOf(
+        "тысяча" to 1000L, "тысячи" to 1000L, "тысяч" to 1000L, "тыс" to 1000L,
+        "минг" to 1000L, "ming" to 1000L,
+        "миллион" to 1000000L, "миллиона" to 1000000L, "миллионов" to 1000000L, "млн" to 1000000L,
+        "million" to 1000000L, "mln" to 1000000L
+    )
+
+    fun parseTransaction(text: String, expenseCategories: List<String>, incomeCategories: List<String>): VoiceTxResult {
+        val lower = text.lowercase().replace("ё", "е")
+
+        val expenseKw = listOf("потратил", "потратила", "купил", "купила", "оплатил", "оплатила",
+            "расход", "оплата", "трата", "sarfladim", "sotib oldim", "to'ladim", "toladim", "xarajat", "harajat")
+        val incomeKw = listOf("получил", "получила", "зарплата", "доход", "приход", "заработал",
+            "заработала", "oldim", "maosh", "daromad", "kirim", "ishladim")
+        val type: TxType? = when {
+            expenseKw.any { lower.contains(it) } -> TxType.EXPENSE
+            incomeKw.any { lower.contains(it) } -> TxType.INCOME
+            else -> null
+        }
+
+        val isCash = listOf("наличные", "наличкой", "наличными", "кэш", "naqd", "нал ").any { lower.contains(it) }
+        val cardLast4 = Regex("""(?:карт[а-я]*|karta[s]?)\s+(\d{4})""").find(lower)?.groupValues?.get(1)
+
+        val amountMinor = parseAmount(lower)
+        val categoryList = if (type == TxType.INCOME) incomeCategories else expenseCategories
+        val categoryName = findCategory(lower, categoryList)
+
+        return VoiceTxResult(amountMinor, type, cardLast4, isCash, categoryName, text.trim())
+    }
+
+    fun parseCard(text: String): VoiceCardResult? {
+        val lower = text.lowercase()
+        val m = Regex("""\b(\d{4})\b""").find(lower) ?: return null
+        val banks = listOf("kapitalbank", "uzum", "anorbank", "tbc", "humo", "uzcard",
+            "aloqa", "agrobank", "sberbank", "ipoteka", "trast", "asakabank")
+        val bank = banks.firstOrNull { lower.contains(it) }
+        return VoiceCardResult(bank, m.groupValues[1])
+    }
+
+    private fun parseAmount(text: String): Long? {
+        val clean = text
+            .replace(Regex("""(?:карт[а-я]*|karta[s]?)\s+\d{4}"""), "")
+            .replace(Regex("""\b\d{4}\b"""), "")
+
+        val withUnit = Regex("""(\d[\d\s]*)\s*(тысяч[а-я]*|тыс\b|минг|ming|миллион[а-я]*|млн|million|mln|сум|so['`]?m|som)""",
+            RegexOption.IGNORE_CASE).find(clean)
+        if (withUnit != null) {
+            val num = withUnit.groupValues[1].replace(" ", "").toLongOrNull()
+            if (num != null) {
+                val u = withUnit.groupValues[2].lowercase()
+                val mult = when {
+                    u.startsWith("тыс") || u.startsWith("минг") || u.contains("ming") -> 1000L
+                    u.startsWith("миллион") || u == "млн" || u.contains("million") || u.contains("mln") -> 1000000L
+                    else -> 1L
+                }
+                return num * mult * 100
+            }
+        }
+
+        val words = clean.split(Regex("[\\s,]+"))
+        var total = 0L; var current = 0L; var found = false
+        for (w in words) {
+            val c = w.replace(Regex("[^\\p{L}']"), "")
+            when {
+                ones.containsKey(c) -> { current += ones[c]!!; found = true }
+                tens.containsKey(c) -> { current += tens[c]!!; found = true }
+                hundreds.containsKey(c) -> { current += hundreds[c]!!; found = true }
+                multipliers.containsKey(c) -> {
+                    total += (if (current == 0L) 1L else current) * multipliers[c]!!
+                    current = 0L; found = true
+                }
+            }
+        }
+        total += current
+        if (found && total > 0) return total * 100
+
+        val plain = Regex("""\b(\d+)\b""").findAll(clean).mapNotNull { it.groupValues[1].toLongOrNull() }
+            .filter { it.toString().length != 4 }.firstOrNull()
+        return plain?.times(100)
+    }
+
+    private fun findCategory(text: String, categories: List<String>): String? {
+        val map = mapOf(
+            "🍔 Еда" to listOf("еда", "еду", "обед", "ужин", "завтрак", "кафе", "ресторан", "кофе", "перекус", "ovqat", "tushlik", "nonushta", "kafe", "restoran", "kofe"),
+            "🚕 Транспорт" to listOf("такси", "транспорт", "автобус", "метро", "бензин", "бензина", "проезд", "taksi", "transport", "avtobus", "metro", "benzin"),
+            "🏠 Жилье" to listOf("жилье", "жильё", "квартира", "аренда", "коммунал", "свет", "газ", "вода", "uy", "kvartira", "arenda", "kommunal"),
+            "🛒 Покупки" to listOf("покупк", "магазин", "продукт", "xarid", "do'kon", "dokon", "mahsulot"),
+            "💊 Здоровье" to listOf("здоровье", "аптека", "лекарств", "врач", "больниц", "salomatlik", "apteka", "dori", "shifokor"),
+            "🎉 Развлечения" to listOf("развлечен", "кино", "игр", "отдых", "ko'ngilochar", "kongilochar", "kino", "o'yin", "oyin"),
+            "💵 Зарплата" to listOf("зарплат", "аванс", "maosh", "oylik"),
+            "🎁 Подарок" to listOf("подарок", "подар", "sovg'a", "sovga"),
+            "💸 Перевод" to listOf("перевод", "перевел", "перевела", "o'tkazma", "otkazma", "perevod"),
+            "📈 Инвестиции" to listOf("инвестиц", "дивиденд", "investitsiya", "dividend")
+        )
+        for (cat in categories) {
+            val kws = map[cat] ?: continue
+            if (kws.any { text.contains(it) }) return cat
+        }
+        return null
+    }
+}
 
 @Composable
 fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
@@ -1658,6 +1848,33 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
     var editingCard by remember { mutableStateOf<CardEntity?>(null) }; var actualBalanceInput by remember { mutableStateOf("") }
     val t = { key: String -> Translations.t(key, currentLang) }
 
+    val voiceCardLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spoken.isNullOrBlank()) {
+                VoiceParser.parseCard(spoken)?.let { parsed ->
+                    last4 = parsed.last4
+                    name = parsed.bankName?.let { bn -> "${getShortBankName(bn)} ${parsed.last4}" }
+                        ?: "Bank ${parsed.last4}"
+                }
+            }
+        }
+    }
+
+    fun startVoiceCard() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (currentLang == AppLanguage.UZ) "uz-UZ" else "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, t("voice_card_hint"))
+        }
+        try { voiceCardLauncher.launch(intent) } catch (e: Exception) {
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            try { voiceCardLauncher.launch(intent) } catch (e2: Exception) { }
+        }
+    }
+
     if (editingCard != null) {
         val card = editingCard!!; val currentMathBalance = cardBalances[card.id] ?: card.initialBalanceMinor
         AlertDialog(onDismissRequest = { editingCard = null }, title = { Text("${card.name} (${card.currency})") },
@@ -1678,7 +1895,13 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
     } else {
         AlertDialog(onDismissRequest = onDismiss, title = { Text(t("my_accounts")) },
             text = { Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(t("add") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(t("add") + ":", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { startVoiceCard() }) {
+                        Icon(Icons.Default.Mic, contentDescription = t("voice_input"), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true); Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(value = last4, onValueChange = { last4 = it.uppercase() }, label = { Text(t("account")) }, modifier = Modifier.weight(1f), singleLine = true)
