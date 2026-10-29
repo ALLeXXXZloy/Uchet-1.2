@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -32,6 +34,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -145,9 +148,16 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val incomeCategories = categories.filter { it.type == TxType.INCOME }.map { it.name }
     val t = { key: String -> Translations.t(key, currentLang.value) }
 
+    // ГАРАНТИРУЕМ, ЧТО "НАЛИЧНЫЕ" ВСЕГДА СУЩЕСТВУЮТ
+    LaunchedEffect(cards) {
+        if (cards.none { it.id == "CASH" }) {
+            vm.saveCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
+        }
+    }
+
     var editing by remember { mutableStateOf<Tx?>(null) }
     var adding by remember { mutableStateOf(false) }
-    var isVoiceTxAdding by remember { mutableStateOf(false) } // НОВОЕ: Флаг для голосового ввода
+    var isVoiceTxAdding by remember { mutableStateOf(false) }
     var isPendingSms by remember { mutableStateOf(false) }
     var showCardManager by remember { mutableStateOf(false) }; var showBudgetManager by remember { mutableStateOf(false) }
     var showRecurringManager by remember { mutableStateOf(false) }; var showCategoryManager by remember { mutableStateOf(false) }
@@ -265,7 +275,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
     val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
 
-    // ПОИСК ПО СУММЕ И ТЕКСТУ
     val filteredTxs by remember(txs, searchQuery, filterType, currentLang.value) {
         derivedStateOf {
             val queryNumbers = searchQuery.filter { it.isDigit() }
@@ -453,12 +462,23 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 )
             },
             floatingActionButton = { 
-                FloatingActionButton(
-                    onClick = { adding = true },
-                    modifier = Modifier.pointerInput(Unit) {
-                        detectTapGestures(onLongPress = { isVoiceTxAdding = true; adding = true })
-                    }
-                ) { Icon(Icons.Default.Add, t("add_tx")) } 
+                // КАСТОМНАЯ КНОПКА FAB ДЛЯ ПОДДЕРЖКИ ДОЛГОГО НАЖАТИЯ
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .shadow(6.dp, CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                        .combinedClickable(
+                            onClick = { adding = true },
+                            onLongClick = {
+                                isVoiceTxAdding = true
+                                adding = true
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = t("add_tx"), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
             }
         ) { pad ->
             LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
@@ -555,7 +575,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     }
                 }
                 
-                // КРАСИВОЕ ПУСТОЕ СОСТОЯНИЕ
                 if (filteredTxs.isEmpty()) {
                     item {
                         Column(
