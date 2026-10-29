@@ -118,10 +118,9 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
     val useBiometric = prefs.getBoolean("use_biometric", true)
 
     val biometricManager = BiometricManager.from(activity)
-    // Используем ТОЛЬКО BIOMETRIC_STRONG для совместимости с CryptoObject
+    // ВАЖНО: сравнение с BIOMETRIC_SUCCESS обязательно, иначе тип будет Int
     val canUseBiometric = useBiometric &&
-        biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-            == BiometricManager.BIOMETRIC_SUCCESS
+        biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
 
     val t = { key: String -> Translations.t(key, lang) }
 
@@ -161,7 +160,6 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
                 biometricError = null
                 val executor = ContextCompat.getMainExecutor(activity)
 
-                // Пытаемся создать CryptoObject. Если не выходит — откатываемся на обычную биометрию.
                 val cryptoObject: BiometricPrompt.CryptoObject? = try {
                     BiometricPrompt.CryptoObject(SecurityHelper.getCryptoObject())
                 } catch (e: Exception) {
@@ -181,11 +179,9 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
                         super.onAuthenticationSucceeded(result)
                         onUnlocked()
                     }
-
                     override fun onAuthenticationFailed() {
                         super.onAuthenticationFailed()
                     }
-
                     override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                         super.onAuthenticationError(errorCode, errString)
                         biometricError = errString.toString()
@@ -194,7 +190,6 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
                 }
 
                 val biometricPrompt = BiometricPrompt(activity, executor, callback)
-
                 try {
                     if (cryptoObject != null) {
                         biometricPrompt.authenticate(promptInfo, cryptoObject)
@@ -237,7 +232,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val incomeCategories = categories.filter { it.type == TxType.INCOME }.map { it.name }
     val t = { key: String -> Translations.t(key, currentLang.value) }
 
-    // ГАРАНТИРУЕМ НАЛИЧИЕ "НАЛИЧНЫХ"
+    // Защита: «Наличные» всегда существуют
     LaunchedEffect(cards) {
         if (cards.none { it.id == "CASH" }) {
             vm.saveCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
@@ -258,7 +253,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
 
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
-
     var showAnalytics by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
 
@@ -278,7 +272,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     fun checkPendingSms() {
         if (editing != null || adding) return
         val pendingObj = PendingQueue.peek(context) ?: return
-
         try {
             val pendingTx = Tx(
                 id = 0,
@@ -326,38 +319,24 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val cardImagePicker = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { scope.launch {
             val bitmap = uriToBitmap(context, it)
-            if (bitmap == null) {
-                ocrDebugInfo = "${t("image_error")}\n$it"
-                return@launch
-            }
-
+            if (bitmap == null) { ocrDebugInfo = "${t("image_error")}\n$it"; return@launch }
             val imageInfo = "${t("debug_size")}: ${bitmap.width}x${bitmap.height}"
             val image = InputImage.fromBitmap(bitmap, 0)
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-
             recognizer.process(image).addOnSuccessListener { visionText ->
                 val rawText = visionText.text
                 val parsedCards = parseCardsFromScreenshot(rawText)
-
-                if (parsedCards.isNotEmpty()) {
-                    importedCards = parsedCards
-                    showCardImportConfirm = true
-                } else {
+                if (parsedCards.isNotEmpty()) { importedCards = parsedCards; showCardImportConfirm = true }
+                else {
                     ocrDebugInfo = buildString {
                         appendLine("--- ${t("ocr_debug")} ---")
                         appendLine(imageInfo)
                         appendLine("\n${t("debug_not_found")}")
                         appendLine("\n--- ${t("debug_what_ocr")} ---")
-                        if (rawText.isBlank()) {
-                            appendLine(t("debug_empty"))
-                        } else {
-                            appendLine(rawText)
-                        }
+                        if (rawText.isBlank()) appendLine(t("debug_empty")) else appendLine(rawText)
                     }
                 }
-            }.addOnFailureListener { e ->
-                ocrDebugInfo = "${t("error")} ML KIT:\n${e.message}"
-            }
+            }.addOnFailureListener { e -> ocrDebugInfo = "${t("error")} ML KIT:\n${e.message}" }
         } }
     }
 
@@ -368,13 +347,11 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         derivedStateOf {
             val queryNumbers = searchQuery.filter { it.isDigit() }
             val hasNumbers = queryNumbers.isNotEmpty()
-            
             txs.filter { tx ->
-                val matchesSearch = searchQuery.isEmpty() || 
-                    tx.description.contains(searchQuery, true) || 
+                val matchesSearch = searchQuery.isEmpty() ||
+                    tx.description.contains(searchQuery, true) ||
                     Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true) ||
                     (hasNumbers && tx.amountMinor.toString().contains(queryNumbers))
-                
                 matchesSearch && (filterType == null || tx.type == filterType)
             }
         }
@@ -393,11 +370,9 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
             val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
             val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.toAmountMinor ?: it.amountMinor }
-
             val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
             val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
             val balanceInUzs = (balanceInCardCurrency.toDouble() * rate).toLong()
-
             card.id to balanceInUzs
         }
     }
@@ -445,9 +420,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         importedTxs = null
                     }) { Text(t("confirm"), color = GREEN) }
                 },
-                dismissButton = {
-                    TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) }
-                }
+                dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } }
             )
         }
 
@@ -463,22 +436,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             AlertDialog(
                 onDismissRequest = { ocrDebugInfo = null },
                 title = { Text(t("ocr_debug")) },
-                text = {
-                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                        SelectionContainer {
-                            Text(
-                                text = ocrDebugInfo!!,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { ocrDebugInfo = null }) {
-                        Text(t("close"))
-                    }
-                }
+                text = { Column(Modifier.verticalScroll(rememberScrollState())) { SelectionContainer { Text(ocrDebugInfo!!, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) } } },
+                confirmButton = { TextButton(onClick = { ocrDebugInfo = null }) { Text(t("close")) } }
             )
         }
 
@@ -499,25 +458,15 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     title = {
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, t("prev")) }
-
                             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                 val monthTitle = "${getMonthName(month.monthValue, currentLang.value)} ${month.year}"
-
-                                Text(
-                                    monthTitle,
-                                    modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp),
-                                    textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium
-                                )
+                                Text(monthTitle, modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                                 DropdownMenu(expanded = showMonthPicker, onDismissRequest = { showMonthPicker = false }) {
                                     (1..12).forEach { m ->
-                                        DropdownMenuItem(
-                                            text = { Text("${getMonthName(m, currentLang.value)} ${month.year}") },
-                                            onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false }
-                                        )
+                                        DropdownMenuItem(text = { Text("${getMonthName(m, currentLang.value)} ${month.year}") }, onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false })
                                     }
                                 }
                             }
-
                             IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, t("next")) }
                         }
                     },
@@ -528,11 +477,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                                 DropdownMenuItem(text = { Text(t("scan_sms")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
                                     showMenu = false
                                     scanInboxSms(context, allTxs) { found ->
-                                        if (found.isNotEmpty()) {
-                                            importedTxs = found; showImportConfirm = true
-                                        } else {
-                                            scope.launch { snackbarHostState.showSnackbar(t("new_sms_not_found")) }
-                                        }
+                                        if (found.isNotEmpty()) { importedTxs = found; showImportConfirm = true }
+                                        else { scope.launch { snackbarHostState.showSnackbar(t("new_sms_not_found")) } }
                                     }
                                 })
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
@@ -550,7 +496,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     }
                 )
             },
-            floatingActionButton = { 
+            floatingActionButton = {
                 Box(
                     modifier = Modifier
                         .size(56.dp)
@@ -558,10 +504,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
                         .combinedClickable(
                             onClick = { adding = true },
-                            onLongClick = {
-                                isVoiceTxAdding = true
-                                adding = true
-                            }
+                            onLongClick = { isVoiceTxAdding = true; adding = true }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -580,9 +523,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         singleLine = true,
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = t("clear"))
-                                }
+                                IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, contentDescription = t("clear")) }
                             }
                         }
                     )
@@ -592,9 +533,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         FilterChip(selected = filterType == TxType.INCOME, onClick = { filterType = TxType.INCOME }, label = { Text(t("income")) })
                         FilterChip(selected = filterType == TxType.EXPENSE, onClick = { filterType = TxType.EXPENSE }, label = { Text(t("expense")) })
                     }
-
                     Spacer(Modifier.height(12.dp))
-
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAnalytics = true }.padding(8.dp)) { Icon(Icons.Default.BarChart, contentDescription = t("analytics"), tint = MaterialTheme.colorScheme.primary); Text(t("analytics"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showGoalManager = true }.padding(8.dp)) { Icon(Icons.Default.Savings, contentDescription = t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
@@ -602,9 +541,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showRecurringManager = true }.padding(8.dp)) { Icon(Icons.Default.Autorenew, contentDescription = t("recurring"), tint = MaterialTheme.colorScheme.primary); Text(t("recurring"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showBudgetManager = true }.padding(8.dp)) { Icon(Icons.Default.AccountBalanceWallet, contentDescription = t("budgets"), tint = MaterialTheme.colorScheme.primary); Text(t("budgets"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                     }
-
                     Spacer(Modifier.height(16.dp))
-
                     Card(modifier = Modifier.fillMaxWidth().clickable { showBalanceDetails = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                         Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(t("total_balance"), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -662,25 +599,17 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         }
                     }
                 }
-                
+
                 if (filteredTxs.isEmpty()) {
                     item {
-                        Column(
-                            Modifier.fillMaxWidth().padding(top = 64.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
+                        Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Inbox, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Gray.copy(alpha = 0.5f))
                             Spacer(Modifier.height(16.dp))
-                            Text(
-                                if (searchQuery.isEmpty()) t("empty_tx") else t("no_found"), 
-                                style = MaterialTheme.typography.bodyLarge, 
-                                color = Color.Gray,
-                                textAlign = TextAlign.Center
-                            )
+                            Text(if (searchQuery.isEmpty()) t("empty_tx") else t("no_found"), style = MaterialTheme.typography.bodyLarge, color = Color.Gray, textAlign = TextAlign.Center)
                         }
                     }
                 }
-                
+
                 byDay.forEach { (day, list) ->
                     item { Text(day.format(DATE_FMT), Modifier.padding(top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = Color.Gray) }
                     items(list, key = { it.id }) { tx -> TxRow(tx, currentLang.value) { editing = tx } }
