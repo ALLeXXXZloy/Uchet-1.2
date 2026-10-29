@@ -63,7 +63,6 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         PDFBoxResourceLoader.init(applicationContext)
         
-        // МИГРАЦИЯ СТАРЫХ НАСТРОЕК В ЗАШИФРОВАННЫЕ (из пункта 1.13)
         val oldPrefs = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
         val newPrefs = SecurityHelper.getEncryptedPrefs(this)
         if (oldPrefs.contains("pin") && !newPrefs.contains("pin")) {
@@ -103,11 +102,8 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> Unit) {
     var pin by remember { mutableStateOf("") }; var error by remember { mutableStateOf(false) }
-    
-    // ЗАШИФРОВАННЫЕ НАСТРОЙКИ
     val prefs = SecurityHelper.getEncryptedPrefs(activity)
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val useBiometric = prefs.getBoolean("use_biometric", true)
-    
     val biometricManager = BiometricManager.from(activity)
     val canUseBiometric = useBiometric && biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
     val t = { key: String -> Translations.t(key, lang) }
@@ -117,28 +113,17 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
         Spacer(Modifier.height(16.dp)); Text(t("locked"), style = MaterialTheme.typography.titleLarge); Spacer(Modifier.height(24.dp))
         OutlinedTextField(value = pin, onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4); error = false }, label = { Text(t("pin")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), singleLine = true, isError = error, supportingText = { if (error) Text(t("wrong_pin"), color = RED) })
         Spacer(Modifier.height(16.dp)); Button(onClick = { if (pin == savedPin) onUnlocked() else { pin = ""; error = true } }, modifier = Modifier.fillMaxWidth()) { Text(t("login")) }
-        
         if (canUseBiometric) {
             Spacer(Modifier.height(8.dp)); TextButton(onClick = {
                 val executor = ContextCompat.getMainExecutor(activity)
                 try {
-                    // БЕЗОПАСНАЯ БИОМЕТРИЯ (CryptoObject)
                     val cryptoObject = BiometricPrompt.CryptoObject(SecurityHelper.getCryptoObject())
                     val biometricPrompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
-                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { 
-                            super.onAuthenticationSucceeded(result); onUnlocked() 
-                        }
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { super.onAuthenticationSucceeded(result); onUnlocked() }
                     })
-                    val promptInfo = BiometricPrompt.PromptInfo.Builder()
-                        .setTitle(t("login"))
-                        .setSubtitle(t("fingerprint"))
-                        .setNegativeButtonText(t("pin"))
-                        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK)
-                        .build()
+                    val promptInfo = BiometricPrompt.PromptInfo.Builder().setTitle(t("login")).setSubtitle(t("fingerprint")).setNegativeButtonText(t("pin")).setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK).build()
                     biometricPrompt.authenticate(promptInfo, cryptoObject)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
+                } catch (e: Exception) { e.printStackTrace() }
             }) { Icon(Icons.Default.Fingerprint, null); Spacer(Modifier.width(8.dp)); Text(t("fingerprint")) }
         }
     }
@@ -218,8 +203,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? -> uri?.let { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }; scope.launch { snackbarHostState.showSnackbar("CSV OK!") } } catch (e: Exception) { } } }
-    val jsonExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? -> uri?.let { vm.createBackup { j -> if (j.isNotEmpty()) { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(j.toByteArray()) }; scope.launch { snackbarHostState.showSnackbar("JSON OK!") } } catch (e: Exception) { } } } } }
+    val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? -> uri?.let { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }; scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } } } }
+    val jsonExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? -> uri?.let { vm.createBackup { j -> if (j.isNotEmpty()) { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(j.toByteArray()) }; scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } } } } } }
     val jsonImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? -> uri?.let { try { context.contentResolver.openInputStream(it)?.use { s -> pendingRestoreJson = s.bufferedReader().readText(); showRestoreConfirm = true } } catch (e: Exception) { } } }
 
     val fileImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -290,15 +275,12 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         }
     }
 
-    // ОБНОВЛЕННЫЙ РАСЧЕТ БАЛАНСА (с учетом toAmountMinor)
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
         cards.associate { card ->
             val cardTxs = allTxs.filter { it.cardId == card.id }
             val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
             val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
             val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
-            
-            // Используем toAmountMinor, если он есть (для мультивалютных переводов)
             val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.toAmountMinor ?: it.amountMinor }
 
             val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
@@ -317,9 +299,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     LaunchedEffect(totalForWidget) {
         val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
         prefs.edit().putLong("total_balance", totalForWidget).apply()
-        val appWidgetManager = android.appwidget.AppWidgetManager.getInstance(context)
-        val componentName = android.content.ComponentName(context, BalanceWidget::class.java)
-        appWidgetManager.getAppWidgetIds(componentName).forEach { id -> BalanceWidget.updateWidget(context, appWidgetManager, id) }
+        BalanceWidget.updateAll(context)
     }
 
     if (showAnalytics) {
@@ -328,7 +308,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     } else {
         if (showRestoreConfirm) {
             AlertDialog(onDismissRequest = { showRestoreConfirm = false }, title = { Text(t("restore")) }, text = { Text(t("restore") + "?") },
-                confirmButton = { TextButton(onClick = { vm.restoreBackup(pendingRestoreJson) { success -> if (success) scope.launch { snackbarHostState.showSnackbar("OK!") } else scope.launch { snackbarHostState.showSnackbar(t("error")) } }; showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } },
+                confirmButton = { TextButton(onClick = { vm.restoreBackup(pendingRestoreJson) { success -> if (success) scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } else scope.launch { snackbarHostState.showSnackbar(t("error")) } }; showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } },
                 dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
         }
 
@@ -345,7 +325,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                             if (!existingCardIds.contains(cardId)) {
                                 val last4 = cardId.split("_").firstOrNull() ?: "0000"
                                 val currency = cardId.split("_").getOrNull(1) ?: "UZS"
-                                vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "Импорт *$last4", currency = currency, initialBalanceMinor = 0))
+                                vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "${t("import_prefix")} *$last4", currency = currency, initialBalanceMinor = 0))
                             }
                         }
                         vm.bulkSave(txsToImport)
@@ -407,7 +387,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 TopAppBar(
                     title = {
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, "Prev") }
+                            IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, t("prev")) }
 
                             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                 val monthTitle = "${getMonthName(month.monthValue, currentLang.value)} ${month.year}"
@@ -427,7 +407,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                                 }
                             }
 
-                            IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, "Next") }
+                            IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, t("next")) }
                         }
                     },
                     actions = {
@@ -473,7 +453,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Очистить")
+                                    Icon(Icons.Default.Clear, contentDescription = t("clear"))
                                 }
                             }
                         }
