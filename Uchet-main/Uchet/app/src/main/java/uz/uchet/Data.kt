@@ -2,6 +2,7 @@ package uz.uchet
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
@@ -156,7 +157,6 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertRate(rate: ExchangeRateEntity)
 
-    // ----- Очистка для restoreBackup (пункт 1.5) -----
     @Query("DELETE FROM txs")
     suspend fun clearTxs()
 
@@ -174,8 +174,6 @@ interface AppDao {
 
     @Query("DELETE FROM goals")
     suspend fun clearGoals()
-
-    // rates намеренно НЕ очищаем — курсы общие и всегда актуальны.
 }
 
 @Database(
@@ -193,9 +191,6 @@ abstract class AppDb : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDb? = null
 
-        // v2 → v3: добавляем индексы для ускорения запросов.
-        // Схема индексов должна совпадать 1:1 с @Entity(Tx::indices),
-        // иначе Room упадёт с "Migration didn't properly handle".
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_timestamp` ON `txs` (`timestamp`)")
@@ -213,8 +208,6 @@ abstract class AppDb : RoomDatabase() {
                     "uchet_database"
                 )
                 .addMigrations(MIGRATION_2_3)
-                // fallbackToDestructiveMigration УБРАН НАВСЕГДА.
-                // Любая новая версия — только через MIGRATION_X_Y.
                 .build()
                 INSTANCE = instance
                 instance
