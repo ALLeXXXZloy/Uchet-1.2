@@ -2,6 +2,7 @@ package uz.uchet
 
 import android.content.Context
 import androidx.room.*
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 enum class TxType(val label: String) {
@@ -11,13 +12,21 @@ enum class TxType(val label: String) {
     ADJUSTMENT("Корректировка")
 }
 
-@Entity(tableName = "txs")
+@Entity(
+    tableName = "txs",
+    indices = [
+        Index(value = ["timestamp"], name = "index_txs_timestamp"),
+        Index(value = ["cardId"],    name = "index_txs_cardId"),
+        Index(value = ["toCardId"],  name = "index_txs_toCardId"),
+        Index(value = ["category"],  name = "index_txs_category")
+    ]
+)
 data class Tx(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val amountMinor: Long,
     val type: TxType,
     val cardId: String? = null,
-    val toCardId: String? = null, // ПУНКТ 9: Куда переводим
+    val toCardId: String? = null,
     val description: String = "",
     val category: String = "",
     val timestamp: Long,
@@ -147,6 +156,7 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertRate(rate: ExchangeRateEntity)
 
+    // ----- Очистка для restoreBackup (пункт 1.5) -----
     @Query("DELETE FROM txs")
     suspend fun clearTxs()
 
@@ -158,11 +168,22 @@ interface AppDao {
 
     @Query("DELETE FROM recurring")
     suspend fun clearRecurring()
+
+    @Query("DELETE FROM categories")
+    suspend fun clearCategories()
+
+    @Query("DELETE FROM goals")
+    suspend fun clearGoals()
+
+    // rates намеренно НЕ очищаем — курсы общие и всегда актуальны.
 }
 
 @Database(
-    entities = [Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class, CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class],
-    version = 2, // ПОДНЯЛИ ВЕРСИЮ ДЛЯ ОБНОВЛЕНИЯ БД
+    entities = [
+        Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
+        CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class
+    ],
+    version = 3,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -172,6 +193,18 @@ abstract class AppDb : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDb? = null
 
+        // v2 → v3: добавляем индексы для ускорения запросов.
+        // Схема индексов должна совпадать 1:1 с @Entity(Tx::indices),
+        // иначе Room упадёт с "Migration didn't properly handle".
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_timestamp` ON `txs` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_cardId`    ON `txs` (`cardId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_toCardId`  ON `txs` (`toCardId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_category`  ON `txs` (`category`)")
+            }
+        }
+
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -179,7 +212,9 @@ abstract class AppDb : RoomDatabase() {
                     AppDb::class.java,
                     "uchet_database"
                 )
-                .fallbackToDestructiveMigration()
+                .addMigrations(MIGRATION_2_3)
+                // fallbackToDestructiveMigration УБРАН НАВСЕГДА.
+                // Любая новая версия — только через MIGRATION_X_Y.
                 .build()
                 INSTANCE = instance
                 instance
