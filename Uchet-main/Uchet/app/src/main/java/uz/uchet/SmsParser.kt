@@ -26,8 +26,9 @@ data class BankTx(
 
 object SmsParser {
 
+    // Fix 3.9: Добавлена поддержка запятой как разделителя тысяч (50,000 UZS)
     private val AMOUNT_RE = Regex(
-        """([+-]?)(\d{1,3}(?:[ \u00A0]\d{3})*|\d+)(?:[.,](\d{1,2}))?(?:\s*,\s*|\s+)(?:UZS\b|so[''`]?m\b|сум\b|sum\b)""",
+        """([+-]?)(\d{1,3}(?:[ \u00A0,]\d{3})*|\d+)(?:[.,](\d{1,2}))?(?:\s*,\s*|\s+)(?:UZS\b|so[''`]?m\b|сум\b|sum\b|сўм)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -133,14 +134,15 @@ object SmsParser {
     fun classify(sender: String, body: String, timestamp: Long): Pair<SmsCategory, BankTx?> {
         val lower = body.lowercase()
 
-        if (OTP_WARNINGS.any { lower.contains(it) }) return SmsCategory.OTP to null
+        // Fix 1.8: Сначала пробуем распарсить транзакцию, и только потом проверяем OTP.
+        // Иначе банки, приписывающие "никому не сообщайте код" к чеку, теряются.
+        val tx = tryParseTransaction(sender, body, timestamp, lower)
+        if (tx != null) return SmsCategory.TRANSACTION to tx
 
+        if (OTP_WARNINGS.any { lower.contains(it) }) return SmsCategory.OTP to null
         val hasCompletion = COMPLETION_VERBS.any { lower.contains(it) }
         if (!hasCompletion && STRONG_DEBT.any { lower.contains(it) })
             return SmsCategory.DEBT_REMINDER to null
-
-        val tx = tryParseTransaction(sender, body, timestamp, lower)
-        if (tx != null) return SmsCategory.TRANSACTION to tx
 
         if (isWeakOtp(lower)) return SmsCategory.OTP to null
         if (DEBT_MARKERS.any { lower.contains(it) }) return SmsCategory.DEBT_REMINDER to null
@@ -178,18 +180,31 @@ object SmsParser {
         return result
     }
 
-    fun parseImportedFile(text: String): List<Tx> {
+    // Fix 1.6: Добавлен параметр existing для отсечения дубликатов при импорте
+    fun parseImportedFile(text: String, existing: List<Tx> = emptyList()): List<Tx> {
         val clean = text.removePrefix("\uFEFF")
         val lines = clean.lines()
         val headerIdx = lines.indexOfFirst { line ->
             val l = line.trim().lowercase()
             l.startsWith("datetime") && l.contains("direction") && l.contains("content")
         }
-        return if (headerIdx >= 0) {
+        
+        val parsed = if (headerIdx >= 0) {
             val csv = lines.subList(headerIdx, lines.size).joinToString("\n")
             parseCsvExport(csv)
         } else {
             parsePdfText(clean)
+        }
+
+        if (existing.isEmpty()) return parsed
+
+        return parsed.filterNot { newTx ->
+            existing.any { old ->
+                old.amountMinor == newTx.amountMinor &&
+                old.type == newTx.type &&
+                old.cardId == newTx.cardId &&
+                kotlin.math.abs(old.timestamp - newTx.timestamp) < 60_000L
+            }
         }
     }
 
@@ -215,9 +230,10 @@ object SmsParser {
                 null, text.take(60).replace("\n", " ").trim(), "📦 Другое"
             )
         }
-        val first = extractAmounts(text).firstOrNull() ?: return null
+        // Fix 3.10: Берем последнее число (обычно "итого" находится в конце чека)
+        val last = extractAmounts(text).lastOrNull() ?: return null
         return ParsedSms(
-            BigDecimal(first.value).movePointLeft(2).stripTrailingZeros().toPlainString(),
+            BigDecimal(last.value).movePointLeft(2).stripTrailingZeros().toPlainString(),
             null, text.take(60).replace("\n", " ").trim(), "📦 Другое"
         )
     }
@@ -247,7 +263,8 @@ object SmsParser {
             val (cat, tx) = classify(sender, content, ts)
             if (cat != SmsCategory.TRANSACTION || tx == null) continue
 
-            val key = "${tx.amountMinor}_${tx.type}_${tx.cardLast4}_${ts / 60_000L}"
+            // Fix 1.7: Используем полный timestamp и хвост мерчанта, чтобы не удалять легитимные операции в одну минуту
+            val key = "${tx.amountMinor}_${tx.type}_${tx.cardLast4}_${ts}_${tx.merchant.take(20)}"
             if (!seen.add(key)) continue
 
             result.add(tx.toTx("IMPORT"))
@@ -287,15 +304,10 @@ object SmsParser {
         return records.filter { it.isNotEmpty() }
     }
 
-    // ====================================================================
-    // PDF (Kapitalbank / Uzum Bank) - ИСПРАВЛЕНО
-    // ====================================================================
     private fun parsePdfText(text: String): List<Tx> {
         val result = mutableListOf<Tx>()
-        // Склеиваем все переносы строк в один сплошной текст
         val normText = text.replace(Regex("\\s+"), " ")
 
-        // Ищем дату, опциональный знак, сумму и описание до следующей даты
         val txRegex = Regex(
             """(?<date>\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})(?:\s+\d{2}:\d{2}:\d{2})?(?:\s+\d{2}\.\d{2}\.\d{4})?(?:\s+\d+)?\s*(?<sign>[+-])?\s*(?<amount>[\d\s\u00A0]+[.,]\d{2})\s*(?<desc>.+?)(?=(?:\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2}))|(?:\d{2}\.\d{2}\.\d{4})|$)""",
             RegexOption.DOT_MATCHES_ALL
@@ -307,22 +319,18 @@ object SmsParser {
             val desc = match.groups["desc"]?.value?.trim() ?: ""
             val sign = match.groups["sign"]?.value ?: ""
 
-            // 1. Дата
             val formatter = if (dateStr.contains("-")) DateTimeFormatter.ofPattern("yyyy-MM-dd") else DateTimeFormatter.ofPattern("dd.MM.yyyy")
             val ts = try {
                 LocalDate.parse(dateStr, formatter).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
             } catch (e: Exception) { System.currentTimeMillis() }
 
-            // 2. Сумма
             val cleanAmount = amountStr.replace(" ", "").replace("\u00A0", "").replace(",", ".")
             val amountMinor = cleanAmount.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: 0L
             if (amountMinor == 0L) continue
 
-            // 3. Карта (используем нашу новую универсальную функцию)
             val cardLast4 = extractCardLast4(desc)
             val cardId = cardLast4?.let { "${it}_UZS" }
 
-            // 4. Тип операции (доход/расход)
             val lowerDesc = desc.lowercase()
             val isExpense = sign == "-" ||
                             lowerDesc.contains("списание") ||
@@ -348,7 +356,6 @@ object SmsParser {
                 else -> TxType.EXPENSE
             }
 
-            // 5. Категория
             val category = when {
                 lowerDesc.contains("кешбек") || lowerDesc.contains("cashback") -> "🎁 Подарок"
                 lowerDesc.contains("перевод") || lowerDesc.contains("p2p") -> "💸 Перевод"
@@ -358,7 +365,6 @@ object SmsParser {
                 else -> "📦 Другое"
             }
 
-            // 6. Очищаем описание для отображения
             val displayDesc = desc.replace(Regex("""[;:]"""), "").take(80).trim()
 
             result.add(Tx(
@@ -378,8 +384,12 @@ object SmsParser {
         sender: String, body: String, timestamp: Long, lower: String
     ): BankTx? {
         if (SERVICE_BLACKLIST.any { lower.contains(it) }) return null
-        if (!listOf("karta", "карта", "*", "uzs", "sum", "сум", "balans",
-                "dostupno", "ostatok", "qoldiq").any { lower.contains(it) }) return null
+        
+        // Fix 1.9: Расширенный whitelist (добавлены so'm, usd, eur, сўм и т.д.)
+        if (!listOf(
+                "karta", "карта", "*", "uzs", "sum", "сум", "so'm", "so‘m", "so`m", "сўм", "usd", "eur",
+                "balans", "dostupno", "ostatok", "qoldiq", "oplata", "оплата", "spisanie", "списание"
+            ).any { lower.contains(it) }) return null
 
         val amounts = extractAmounts(body)
         if (amounts.isEmpty()) return null
@@ -431,7 +441,7 @@ object SmsParser {
     private fun extractAmounts(text: String): List<AmountMatch> {
         val out = mutableListOf<AmountMatch>()
         for (m in AMOUNT_RE.findAll(text)) {
-            val intPart = m.groupValues[2].replace(Regex("[ \u00A0]"), "")
+            val intPart = m.groupValues[2].replace(Regex("[ \u00A0,]"), "")
             val frac = m.groupValues[3].ifEmpty { "00" }.padEnd(2, '0').take(2)
             val value = try { intPart.toLong() * 100L + frac.toLong() } catch (_: Exception) { continue }
             val preceding = text.substring(maxOf(0, m.range.first - 50), m.range.first).lowercase()
@@ -440,20 +450,16 @@ object SmsParser {
         return out
     }
 
-    // ИСПРАВЛЕНО: Универсальный поиск карты (4 цифры после * или 16 цифр подряд)
     private fun extractCardLast4(body: String): String? {
-        // 1. Ищем 16 цифр подряд (возможно с пробелами) - стандарт номера карты
         val fullCardRegex = Regex("""\b(?:\d[ -]*?){13,16}\b""")
         val fullMatch = fullCardRegex.find(body)?.value?.replace(Regex("[^0-9]"), "")
         if (fullMatch != null && fullMatch.length >= 16) {
             return fullMatch.takeLast(4)
         }
 
-        // 2. Ищем 4 цифры после звездочек (например, **** 1226)
         val maskedCardRegex = Regex("""\*+\s*(\d{4})\b""")
         maskedCardRegex.find(body)?.let { return it.groupValues[1] }
 
-        // 3. Старый формат со скобками на всякий случай (*1226)
         val parenRegex = Regex("""\(\*(\d{4})\)""")
         parenRegex.find(body)?.let { return it.groupValues[1] }
 
@@ -470,7 +476,8 @@ object SmsParser {
             val s = p.find(body)?.groupValues?.get(1)?.trim() ?: continue
             if (s.length >= 3 && !s.all { it.isDigit() || it.isWhitespace() }) return s.take(60)
         }
-        return body.replace(Regex("[\\r\\n]+"), " ").take(60).trim()
+        // Fix 3.8: Возвращаем пустую строку вместо сырого тела СМС
+        return ""
     }
 
     private fun guessCategory(lower: String, merchant: String): String {
@@ -487,9 +494,10 @@ object SmsParser {
                 "somsa", "cafe", "coffee") -> "🍔 Еда"
             hit("pharm", "dorixona", "med", "clinic", "klinika", "hospital",
                 "shifo") -> "💊 Здоровье"
+            // Fix 3.7: Снятие наличных - это не перевод
             hit("atm", "nalichnyh", "nalichnykh", "vidacha", "выдача",
-                "снятие", "naqd yechish", "perevod", "перевод", "transfer",
-                "p2p", "card2card") -> "💸 Перевод"
+                "снятие", "naqd yechish") -> "📦 Другое"
+            hit("perevod", "перевод", "transfer", "p2p", "card2card") -> "💸 Перевод"
             hit("salary", "zarplata", "maosh", "зарплата", "aliment") -> "💵 Зарплата"
             else -> "📦 Другое"
         }
@@ -498,7 +506,7 @@ object SmsParser {
     private fun isWeakOtp(lower: String): Boolean {
         if (!OTP_MARKERS.any { lower.contains(it) }) return false
         return Regex("""\b\d{4,8}\b""").containsMatchIn(lower) ||
-               Regex("""\b[A-Z0-9]{5,8}\b""").containsMatchIn(lower.uppercase())
+               Regex("""\b[A-Z]*\d[A-Z0-9]{3,6}\b""").containsMatchIn(lower.uppercase())
     }
 
     private fun parseDateTime(str: String): Long? {
@@ -523,10 +531,11 @@ object SmsParser {
             .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
     } catch (_: Exception) { null }
 
+    // Fix 1.3: Используем реальную валюту транзакции вместо хардкода UZS
     private fun BankTx.toTx(source: String) = Tx(
         amountMinor = amountMinor,
         type = type,
-        cardId = cardLast4?.let { "${it}_UZS" },
+        cardId = cardLast4?.let { "${it}_$currency" },
         description = merchant,
         category = category,
         timestamp = timestamp,
