@@ -28,7 +28,7 @@ data class Tx(
     val type: TxType,
     val cardId: String? = null,
     val toCardId: String? = null,
-    val toAmountMinor: Long? = null, // <-- НОВОЕ ПОЛЕ (сколько зачислено при переводе в другой валюте)
+    val toAmountMinor: Long? = null,
     val description: String = "",
     val category: String = "",
     val timestamp: Long,
@@ -84,6 +84,17 @@ data class ExchangeRateEntity(
     val rateToUzs: Double
 )
 
+@Entity(tableName = "plan_items")
+data class PlanItemEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val type: TxType,
+    val amountMinor: Long,
+    val startMonth: String,
+    val endMonth: String,
+    val isFixed: Boolean = true
+)
+
 @Dao
 interface AppDao {
     @Query("SELECT * FROM txs WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp DESC")
@@ -109,8 +120,7 @@ interface AppDao {
 
     @Query("DELETE FROM cards WHERE id = :id")
     suspend fun deleteCard(id: String)
-    
-    // Обнуляем привязку к удаленной карте, чтобы транзакции не пропали
+
     @Query("UPDATE txs SET cardId = NULL WHERE cardId = :cardId")
     suspend fun unlinkCardTransactions(cardId: String)
 
@@ -146,8 +156,7 @@ interface AppDao {
 
     @Query("DELETE FROM categories WHERE name = :name")
     suspend fun deleteCategory(name: String)
-    
-    // Переносим транзакции в "Другое" при удалении категории
+
     @Query("UPDATE txs SET category = :newCategory WHERE category = :oldCategory")
     suspend fun replaceCategory(oldCategory: String, newCategory: String)
 
@@ -166,6 +175,23 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertRate(rate: ExchangeRateEntity)
 
+    // ----- ПРОГНОЗ -----
+    @Query("SELECT * FROM plan_items")
+    fun observePlanItems(): Flow<List<PlanItemEntity>>
+
+    @Query("SELECT * FROM plan_items")
+    suspend fun getPlanItemsList(): List<PlanItemEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertPlanItem(item: PlanItemEntity)
+
+    @Query("DELETE FROM plan_items WHERE id = :id")
+    suspend fun deletePlanItem(id: Long)
+
+    @Query("DELETE FROM plan_items")
+    suspend fun clearPlanItems()
+
+    // ----- Очистка -----
     @Query("DELETE FROM txs")
     suspend fun clearTxs()
 
@@ -188,9 +214,10 @@ interface AppDao {
 @Database(
     entities = [
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
-        CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class
+        CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class,
+        PlanItemEntity::class
     ],
-    version = 4, // <-- ПОДНЯЛИ ВЕРСИЮ
+    version = 5,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -208,11 +235,26 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_category`  ON `txs` (`category`)")
             }
         }
-        
-        // МИГРАЦИЯ ДЛЯ НОВОГО ПОЛЯ
+
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE txs ADD COLUMN toAmountMinor INTEGER DEFAULT NULL")
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `plan_items` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`type` TEXT NOT NULL, " +
+                        "`amountMinor` INTEGER NOT NULL, " +
+                        "`startMonth` TEXT NOT NULL, " +
+                        "`endMonth` TEXT NOT NULL, " +
+                        "`isFixed` INTEGER NOT NULL" +
+                    ")"
+                )
             }
         }
 
@@ -223,7 +265,7 @@ abstract class AppDb : RoomDatabase() {
                     AppDb::class.java,
                     "uchet_database"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 INSTANCE = instance
                 instance
