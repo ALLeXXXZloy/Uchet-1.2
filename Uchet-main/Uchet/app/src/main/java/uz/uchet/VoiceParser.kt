@@ -10,7 +10,12 @@ object VoiceParser {
         val description: String
     )
 
-    data class VoiceCardResult(val bankName: String?, val last4: String)
+    // НОВОЕ ПОЛЕ balanceMinor
+    data class VoiceCardResult(
+        val bankName: String?,
+        val last4: String,
+        val balanceMinor: Long? = null
+    )
 
     private val ones = mapOf(
         "ноль" to 0L, "один" to 1L, "одна" to 1L, "два" to 2L, "две" to 2L, "три" to 3L,
@@ -64,10 +69,16 @@ object VoiceParser {
     fun parseCard(text: String): VoiceCardResult? {
         val lower = text.lowercase()
         val m = Regex("""\b(\d{4})\b""").find(lower) ?: return null
-        val banks = listOf("kapitalbank", "uzum", "anorbank", "tbc", "humo", "uzcard",
-            "aloqa", "agrobank", "sberbank", "ipoteka", "trast", "asakabank")
+        val banks = listOf(
+            "kapitalbank", "uzum", "anorbank", "tbc", "humo", "uzcard",
+            "aloqa", "agrobank", "sberbank", "ipoteka", "trast", "asakabank"
+        )
         val bank = banks.firstOrNull { lower.contains(it) }
-        return VoiceCardResult(bank, m.groupValues[1])
+        
+        // ПЫТАЕМСЯ ИЗВЛЕЧЬ ОСТАТОК
+        val balanceMinor = parseAmount(lower)
+        
+        return VoiceCardResult(bank, m.groupValues[1], balanceMinor)
     }
 
     private fun parseAmount(text: String): Long? {
@@ -75,10 +86,13 @@ object VoiceParser {
             .replace(Regex("""(?:карт[а-я]*|karta[s]?)\s+\d{4}"""), "")
             .replace(Regex("""\b\d{4}\b"""), "")
 
-        val withUnit = Regex("""(\d[\d\s]*)\s*(тысяч[а-я]*|тыс\b|минг|ming|миллион[а-я]*|млн|million|mln|сум|so['`]?m|som)""",
-            RegexOption.IGNORE_CASE).find(clean)
+        // 1. Число + единица (500 тысяч, 1 миллион, 500 000 сум)
+        val withUnit = Regex(
+            """(\d[\d\s\u00A0]*)\s*(тысяч[а-я]*|тыс\b|минг|ming|миллион[а-я]*|млн|million|mln|сум|сўм|so['`]?m|som)""",
+            RegexOption.IGNORE_CASE
+        ).find(clean)
         if (withUnit != null) {
-            val num = withUnit.groupValues[1].replace(" ", "").toLongOrNull()
+            val num = withUnit.groupValues[1].replace(Regex("[\\s\u00A0]"), "").toLongOrNull()
             if (num != null) {
                 val u = withUnit.groupValues[2].lowercase()
                 val mult = when {
@@ -90,6 +104,7 @@ object VoiceParser {
             }
         }
 
+        // 2. Числа словами (пятьсот тысяч)
         val words = clean.split(Regex("[\\s,]+"))
         var total = 0L; var current = 0L; var found = false
         for (w in words) {
@@ -107,9 +122,16 @@ object VoiceParser {
         total += current
         if (found && total > 0) return total * 100
 
-        val plain = Regex("""\b(\d+)\b""").findAll(clean).mapNotNull { it.groupValues[1].toLongOrNull() }
-            .filter { it.toString().length != 4 }.firstOrNull()
-        return plain?.times(100)
+        // 3. Просто число (с поддержкой пробела, точки, запятой как разделителя тысяч)
+        val plainMatch = Regex("""(\d+(?:[.,\s\u00A0]\d{3})*)""").find(clean)
+        if (plainMatch != null) {
+            val cleaned = plainMatch.groupValues[1].replace(Regex("[.,\\s\u00A0]"), "")
+            val parsed = cleaned.toLongOrNull()
+            if (parsed != null && parsed.toString().length != 4) {
+                return parsed * 100
+            }
+        }
+        return null
     }
 
     private fun findCategory(text: String, categories: List<String>): String? {
