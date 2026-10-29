@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -108,30 +109,118 @@ class MainActivity : FragmentActivity() {
 
 @Composable
 fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> Unit) {
-    var pin by remember { mutableStateOf("") }; var error by remember { mutableStateOf(false) }
+    var pin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+    var biometricError by remember { mutableStateOf<String?>(null) }
+
     val prefs = SecurityHelper.getEncryptedPrefs(activity)
-    val savedPin = prefs.getString("pin", "0000") ?: "0000"; val useBiometric = prefs.getBoolean("use_biometric", true)
+    val savedPin = prefs.getString("pin", "0000") ?: "0000"
+    val useBiometric = prefs.getBoolean("use_biometric", true)
+
     val biometricManager = BiometricManager.from(activity)
-    val canUseBiometric = useBiometric && biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
+    // Используем ТОЛЬКО BIOMETRIC_STRONG для совместимости с CryptoObject
+    val canUseBiometric = useBiometric &&
+        biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+            == BiometricManager.BIOMETRIC_SUCCESS
+
     val t = { key: String -> Translations.t(key, lang) }
 
-    Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
         Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(16.dp)); Text(t("locked"), style = MaterialTheme.typography.titleLarge); Spacer(Modifier.height(24.dp))
-        OutlinedTextField(value = pin, onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4); error = false }, label = { Text(t("pin")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), singleLine = true, isError = error, supportingText = { if (error) Text(t("wrong_pin"), color = RED) })
-        Spacer(Modifier.height(16.dp)); Button(onClick = { if (pin == savedPin) onUnlocked() else { pin = ""; error = true } }, modifier = Modifier.fillMaxWidth()) { Text(t("login")) }
+        Spacer(Modifier.height(16.dp))
+        Text(t("locked"), style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = pin,
+            onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4); error = false },
+            label = { Text(t("pin")) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = PasswordVisualTransformation(),
+            singleLine = true,
+            isError = error,
+            supportingText = { if (error) Text(t("wrong_pin"), color = RED) }
+        )
+
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = {
+                if (pin == savedPin) onUnlocked()
+                else { pin = ""; error = true }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(t("login")) }
+
         if (canUseBiometric) {
-            Spacer(Modifier.height(8.dp)); TextButton(onClick = {
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = {
+                biometricError = null
                 val executor = ContextCompat.getMainExecutor(activity)
+
+                // Пытаемся создать CryptoObject. Если не выходит — откатываемся на обычную биометрию.
+                val cryptoObject: BiometricPrompt.CryptoObject? = try {
+                    BiometricPrompt.CryptoObject(SecurityHelper.getCryptoObject())
+                } catch (e: Exception) {
+                    Log.e("BiometricDebug", "cryptoObject creation failed: ${e.message}", e)
+                    null
+                }
+
+                val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                    .setTitle(t("login"))
+                    .setSubtitle(t("fingerprint"))
+                    .setNegativeButtonText(t("pin"))
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    .build()
+
+                val callback = object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        onUnlocked()
+                    }
+
+                    override fun onAuthenticationFailed() {
+                        super.onAuthenticationFailed()
+                    }
+
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        super.onAuthenticationError(errorCode, errString)
+                        biometricError = errString.toString()
+                        Log.e("BiometricDebug", "auth error $errorCode: $errString")
+                    }
+                }
+
+                val biometricPrompt = BiometricPrompt(activity, executor, callback)
+
                 try {
-                    val cryptoObject = BiometricPrompt.CryptoObject(SecurityHelper.getCryptoObject())
-                    val biometricPrompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
-                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { super.onAuthenticationSucceeded(result); onUnlocked() }
-                    })
-                    val promptInfo = BiometricPrompt.PromptInfo.Builder().setTitle(t("login")).setSubtitle(t("fingerprint")).setNegativeButtonText(t("pin")).setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK).build()
-                    biometricPrompt.authenticate(promptInfo, cryptoObject)
-                } catch (e: Exception) { e.printStackTrace() }
-            }) { Icon(Icons.Default.Fingerprint, null); Spacer(Modifier.width(8.dp)); Text(t("fingerprint")) }
+                    if (cryptoObject != null) {
+                        biometricPrompt.authenticate(promptInfo, cryptoObject)
+                    } else {
+                        biometricPrompt.authenticate(promptInfo)
+                    }
+                } catch (e: Exception) {
+                    Log.e("BiometricDebug", "authenticate() failed: ${e.message}", e)
+                    biometricError = e.localizedMessage ?: "Ошибка биометрии"
+                }
+            }) {
+                Icon(Icons.Default.Fingerprint, null)
+                Spacer(Modifier.width(8.dp))
+                Text(t("fingerprint"))
+            }
+
+            biometricError?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    it,
+                    color = RED,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }
@@ -148,7 +237,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val incomeCategories = categories.filter { it.type == TxType.INCOME }.map { it.name }
     val t = { key: String -> Translations.t(key, currentLang.value) }
 
-    // ГАРАНТИРУЕМ, ЧТО "НАЛИЧНЫЕ" ВСЕГДА СУЩЕСТВУЮТ
+    // ГАРАНТИРУЕМ НАЛИЧИЕ "НАЛИЧНЫХ"
     LaunchedEffect(cards) {
         if (cards.none { it.id == "CASH" }) {
             vm.saveCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
@@ -462,7 +551,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 )
             },
             floatingActionButton = { 
-                // КАСТОМНАЯ КНОПКА FAB ДЛЯ ПОДДЕРЖКИ ДОЛГОГО НАЖАТИЯ
                 Box(
                     modifier = Modifier
                         .size(56.dp)
