@@ -3,10 +3,11 @@ package uz.uchet
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.widget.RemoteViews
-import java.util.Locale
 
 class BalanceWidget : AppWidgetProvider() {
     override fun onUpdate(
@@ -19,16 +20,28 @@ class BalanceWidget : AppWidgetProvider() {
         }
     }
 
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        // Очистка данных при удалении виджета (если нужно)
+    }
+
     companion object {
+        fun updateAll(context: Context) {
+            val mgr = AppWidgetManager.getInstance(context)
+            val ids = mgr.getAppWidgetIds(ComponentName(context, BalanceWidget::class.java))
+            val views = buildViews(context)
+            mgr.updateAppWidget(ids, views)
+        }
+
         fun updateWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
+            appWidgetManager.updateAppWidget(appWidgetId, buildViews(context))
+        }
+
+        private fun buildViews(context: Context): RemoteViews {
             val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
             val totalBalanceMinor = prefs.getLong("total_balance", 0L)
 
-            val abs = kotlin.math.abs(totalBalanceMinor)
-            val whole = String.format(Locale.US, "%,d", abs / 100).replace(',', ' ')
-            val frac = abs % 100
-            val sign = if (totalBalanceMinor < 0) "-" else ""
-            val balanceText = "$sign$whole.%02d UZS".format(frac)
+            // ИСПОЛЬЗУЕМ ОБЩУЮ ФУНКЦИЮ money()
+            val balanceText = "${totalBalanceMinor.money()} UZS"
 
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
             views.setTextViewText(R.id.widget_balance_text, balanceText)
@@ -39,7 +52,7 @@ class BalanceWidget : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_balance_text, pendingIntent)
 
-            appWidgetManager.updateAppWidget(appWidgetId, views)
+            return views
         }
     }
 }
