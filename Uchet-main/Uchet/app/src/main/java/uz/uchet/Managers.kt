@@ -189,13 +189,13 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
 
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(type.label)
+                    Text(type.localizedLabel(currentLang))
                     Spacer(Modifier.weight(1f))
                     Icon(Icons.Default.ArrowDropDown, null)
                 }
                 DropdownMenu(expanded = showTypeMenu, onDismissRequest = { showTypeMenu = false }) {
                     listOf(TxType.INCOME, TxType.EXPENSE).forEach { tt ->
-                        DropdownMenuItem(text = { Text(tt.label) }, onClick = { type = tt; showTypeMenu = false })
+                        DropdownMenuItem(text = { Text(tt.localizedLabel(currentLang)) }, onClick = { type = tt; showTypeMenu = false })
                     }
                 }
             }
@@ -251,7 +251,6 @@ fun CategoryManagerDialog(categories: List<CategoryEntity>, lang: AppLanguage, o
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsDialog(context: android.content.Context, onDismiss: () -> Unit, snackbarHostState: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope, currentTheme: MutableState<AppTheme>, currentLang: MutableState<AppLanguage>, vm: VM) {
-    // ЗАШИФРОВАННЫЕ НАСТРОЙКИ ДЛЯ PIN
     val prefs = SecurityHelper.getEncryptedPrefs(context)
     val settingsPrefs = context.getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE)
     
@@ -284,15 +283,15 @@ fun SettingsDialog(context: android.content.Context, onDismiss: () -> Unit, snac
             Spacer(Modifier.height(16.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("change_pin"), style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = oldPin, onValueChange = { oldPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
-            OutlinedTextField(value = newPin, onValueChange = { newPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin") + " (new)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
-            OutlinedTextField(value = confirmPin, onValueChange = { confirmPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin") + " (repeat)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = newPin, onValueChange = { newPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin_new")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = confirmPin, onValueChange = { confirmPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin_repeat")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
             
             Button(onClick = { when { 
                 oldPin != savedPin -> scope.launch { snackbarHostState.showSnackbar(t("wrong_pin")) }
                 newPin.length != 4 -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }
                 newPin != confirmPin -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }
                 else -> { 
-                    prefs.edit().putString("pin", newPin).apply() // ШИФРУЕМ
+                    prefs.edit().putString("pin", newPin).apply()
                     oldPin = ""; newPin = ""; confirmPin = ""
                     scope.launch { snackbarHostState.showSnackbar(t("pin_ok")) } 
                 } 
