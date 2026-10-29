@@ -37,7 +37,20 @@ import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<String>, incomeCategories: List<String>, currentLang: AppLanguage, isPendingSms: Boolean = false, rates: List<ExchangeRateEntity>, vm: VM, onDismiss: () -> Unit, onSave: (Tx) -> Unit, onDelete: (() -> Unit)?) {
+fun TxDialog(
+    initial: Tx?, 
+    cards: List<CardEntity>, 
+    expenseCategories: List<String>, 
+    incomeCategories: List<String>, 
+    currentLang: AppLanguage, 
+    isPendingSms: Boolean = false, 
+    autoStartVoice: Boolean = false, // НОВЫЙ ПАРАМЕТР
+    rates: List<ExchangeRateEntity>, 
+    vm: VM, 
+    onDismiss: () -> Unit, 
+    onSave: (Tx) -> Unit, 
+    onDelete: (() -> Unit)?
+) {
     val context = LocalContext.current
     val zone = ZoneId.systemDefault()
     val initDt = initial?.let { Instant.ofEpochMilli(it.timestamp).atZone(zone) } ?: ZonedDateTime.now(zone)
@@ -56,7 +69,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var photoPath by remember { mutableStateOf(initial?.photoPath) }
     var error by remember { mutableStateOf<String?>(null) }
     
-    // ИНДИКАТОР ЗАГРУЗКИ
     var isLoading by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -110,6 +122,13 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
             voiceLauncher.launch(intent)
         } catch (e: Exception) {
             scope.launch { snackbarHostState.showSnackbar(t("voice_not_available")) }
+        }
+    }
+
+    // Автоматический запуск микрофона (если открыто долгим нажатием на +)
+    LaunchedEffect(Unit) {
+        if (autoStartVoice && !isPendingSms) {
+            startVoiceInput()
         }
     }
 
