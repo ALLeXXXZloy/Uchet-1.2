@@ -89,13 +89,29 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun delete(t: Tx) { viewModelScope.launch { dao.delete(t) } }
     fun shift(n: Long) { month.value = month.value.plusMonths(n) }
     fun saveCard(card: CardEntity) { viewModelScope.launch { dao.upsertCard(card) } }
-    fun deleteCard(id: String) { if (id != "CASH") viewModelScope.launch { dao.deleteCard(id) } }
+    
+    // БЕЗОПАСНОЕ УДАЛЕНИЕ КАРТЫ
+    fun deleteCard(id: String) { 
+        if (id != "CASH") viewModelScope.launch { 
+            dao.unlinkCardTransactions(id) 
+            dao.deleteCard(id) 
+        } 
+    }
+    
     fun saveBudget(budget: BudgetEntity) { viewModelScope.launch { dao.upsertBudget(budget) } }
     fun deleteBudget(category: String) { viewModelScope.launch { dao.deleteBudget(category) } }
     fun saveRecurring(r: RecurringEntity) { viewModelScope.launch { dao.upsertRecurring(r) } }
     fun deleteRecurring(r: RecurringEntity) { viewModelScope.launch { dao.deleteRecurring(r) } }
     fun saveCategory(c: CategoryEntity) { viewModelScope.launch { dao.upsertCategory(c) } }
-    fun deleteCategory(name: String) { viewModelScope.launch { dao.deleteCategory(name) } }
+    
+    // БЕЗОПАСНОЕ УДАЛЕНИЕ КАТЕГОРИИ
+    fun deleteCategory(name: String) { 
+        viewModelScope.launch { 
+            dao.replaceCategory(name, "📦 Другое")
+            dao.deleteCategory(name) 
+        } 
+    }
+    
     fun saveGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.upsertGoal(goal) } }
     fun deleteGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.deleteGoal(goal) } }
 
@@ -125,7 +141,7 @@ class VM(app: Application) : AndroidViewModel(app) {
             try {
                 val allTx = allTxs.first(); val allCards = cards.first(); val allBudgets = budgets.first(); val allRecurring = dao.getRecurringList(); val allCats = dao.getCategoriesList(); val allGoals = goals.first()
                 val root = JSONObject()
-                val txsArray = JSONArray(); allTx.forEach { t -> txsArray.put(JSONObject().apply { put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name); put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL); put("description", t.description); put("category", t.category); put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL) }) }; root.put("txs", txsArray)
+                val txsArray = JSONArray(); allTx.forEach { t -> txsArray.put(JSONObject().apply { put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name); put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL); put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL); put("description", t.description); put("category", t.category); put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL) }) }; root.put("txs", txsArray)
                 val cardsArray = JSONArray(); allCards.forEach { c -> cardsArray.put(JSONObject().apply { put("id", c.id); put("last4", c.last4); put("name", c.name); put("currency", c.currency); put("initialBalanceMinor", c.initialBalanceMinor) }) }; root.put("cards", cardsArray)
                 val budgetsArray = JSONArray(); allBudgets.forEach { b -> budgetsArray.put(JSONObject().apply { put("category", b.category); put("limitMinor", b.limitMinor) }) }; root.put("budgets", budgetsArray)
                 val recurringArray = JSONArray(); allRecurring.forEach { r -> recurringArray.put(JSONObject().apply { put("id", r.id); put("amountMinor", r.amountMinor); put("type", r.type.name); put("cardId", r.cardId ?: JSONObject.NULL); put("description", r.description); put("category", r.category); put("dayOfMonth", r.dayOfMonth); put("lastExecutedMonth", r.lastExecutedMonth) }) }; root.put("recurring", recurringArray)
@@ -143,7 +159,7 @@ class VM(app: Application) : AndroidViewModel(app) {
 
                 val txsList = mutableListOf<Tx>()
                 val txsArray = root.optJSONArray("txs")
-                if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); txsList.add(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
+                if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); txsList.add(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"), toAmountMinor = if (o.isNull("toAmountMinor")) null else o.optLong("toAmountMinor"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
 
                 val cardsList = mutableListOf<CardEntity>()
                 val cardsArray = root.optJSONArray("cards")
