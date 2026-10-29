@@ -9,7 +9,7 @@ val DATE_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
 // ---------- Цвета ----------
 val GREEN = Color(0xFF2E7D32)
-val RED = Color(0xFF2C2C28)
+val RED = Color(0xFFC62828)
 val YELLOW = Color(0xFFF9A825)
 val BLUE = Color(0xFF1976D2)
 
@@ -26,6 +26,16 @@ val DEFAULT_INCOME_CATEGORIES = listOf(
 // ---------- Enums приложения ----------
 enum class AppTheme { SYSTEM, LIGHT, DARK }
 enum class AppLanguage { RU, UZ, EN, TG, KAA, KK }
+
+// ---------- Локализация типов операций ----------
+fun TxType.localizedLabel(lang: AppLanguage): String {
+    return when (this) {
+        TxType.INCOME -> Translations.t("income", lang)
+        TxType.EXPENSE -> Translations.t("expense", lang)
+        TxType.TRANSFER -> Translations.t("transfer", lang)
+        TxType.ADJUSTMENT -> Translations.t("adjustment", lang)
+    }
+}
 
 // ---------- Названия месяцев ----------
 fun getMonthName(month: Int, lang: AppLanguage): String {
