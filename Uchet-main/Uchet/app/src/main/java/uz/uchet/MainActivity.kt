@@ -59,6 +59,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.room.withTransaction
 import coil.compose.AsyncImage
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
@@ -89,7 +90,6 @@ private val RED = Color(0xFFC62828)
 private val YELLOW = Color(0xFFF9A825)
 private val BLUE = Color(0xFF1976D2)
 
-// Полная локализация месяцев для 6 языков
 fun getMonthName(month: Int, lang: AppLanguage): String {
     val ru = listOf("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
     val uz = listOf("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr")
@@ -337,7 +337,8 @@ fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) ->
 }
 
 class VM(app: Application) : AndroidViewModel(app) {
-    private val dao = AppDb.get(app).dao()
+    private val db = AppDb.get(app)
+    private val dao = db.dao()
     val month = MutableStateFlow(YearMonth.now())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -397,7 +398,9 @@ class VM(app: Application) : AndroidViewModel(app) {
         val now = LocalDate.now(); val currentMonthStr = YearMonth.now().toString(); val currentDay = now.dayOfMonth
         val templates = dao.getRecurringList()
         for (t in templates) {
-            if (t.dayOfMonth <= currentDay && t.lastExecutedMonth != currentMonthStr) {
+            // Fix 1.12: Учитываем конец месяца (например, если платеж на 31-е, а в месяце 28 дней)
+            val effectiveDay = minOf(t.dayOfMonth, now.lengthOfMonth())
+            if (effectiveDay <= currentDay && t.lastExecutedMonth != currentMonthStr) {
                 val tx = Tx(amountMinor = t.amountMinor, type = t.type, cardId = t.cardId, description = t.description, category = t.category, timestamp = now.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), source = "AUTO")
                 dao.upsert(tx); dao.upsertRecurring(t.copy(lastExecutedMonth = currentMonthStr))
             }
@@ -460,16 +463,51 @@ class VM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val root = JSONObject(jsonString)
-                dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
-                val txsArray = root.optJSONArray("txs"); if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); dao.upsert(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
-                val cardsArray = root.optJSONArray("cards"); if (cardsArray != null) { for (i in 0 until cardsArray.length()) { val o = cardsArray.getJSONObject(i); dao.upsertCard(CardEntity(id = o.getString("id"), last4 = o.getString("last4"), name = o.getString("name"), currency = o.getString("currency"), initialBalanceMinor = o.getLong("initialBalanceMinor"))) } }
-                val budgetsArray = root.optJSONArray("budgets"); if (budgetsArray != null) { for (i in 0 until budgetsArray.length()) { val o = budgetsArray.getJSONObject(i); dao.upsertBudget(BudgetEntity(category = o.getString("category"), limitMinor = o.getLong("limitMinor"))) } }
-                val recurringArray = root.optJSONArray("recurring"); if (recurringArray != null) { for (i in 0 until recurringArray.length()) { val o = recurringArray.getJSONObject(i); dao.upsertRecurring(RecurringEntity(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), description = o.optString("description"), category = o.optString("category"), dayOfMonth = o.getInt("dayOfMonth"), lastExecutedMonth = o.optString("lastExecutedMonth"))) } }
-                val catsArray = root.optJSONArray("categories"); if (catsArray != null) { for (i in 0 until catsArray.length()) { val o = catsArray.getJSONObject(i); dao.upsertCategory(CategoryEntity(name = o.getString("name"), type = TxType.valueOf(o.getString("type")))) } }
-                val goalsArray = root.optJSONArray("goals"); if (goalsArray != null) { for (i in 0 until goalsArray.length()) { val o = goalsArray.getJSONObject(i); dao.upsertGoal(SavingsGoalEntity(id = o.optLong("id"), name = o.getString("name"), targetAmountMinor = o.getLong("targetAmountMinor"), currentAmountMinor = o.getLong("currentAmountMinor"))) } }
+                
+                // 1. Сначала парсим всё в память (если упадет здесь - база цела)
+                val txsList = mutableListOf<Tx>()
+                val txsArray = root.optJSONArray("txs")
+                if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); txsList.add(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
+
+                val cardsList = mutableListOf<CardEntity>()
+                val cardsArray = root.optJSONArray("cards")
+                if (cardsArray != null) { for (i in 0 until cardsArray.length()) { val o = cardsArray.getJSONObject(i); cardsList.add(CardEntity(id = o.getString("id"), last4 = o.getString("last4"), name = o.getString("name"), currency = o.getString("currency"), initialBalanceMinor = o.getLong("initialBalanceMinor"))) } }
+
+                val budgetsList = mutableListOf<BudgetEntity>()
+                val budgetsArray = root.optJSONArray("budgets")
+                if (budgetsArray != null) { for (i in 0 until budgetsArray.length()) { val o = budgetsArray.getJSONObject(i); budgetsList.add(BudgetEntity(category = o.getString("category"), limitMinor = o.getLong("limitMinor"))) } }
+
+                val recurringList = mutableListOf<RecurringEntity>()
+                val recurringArray = root.optJSONArray("recurring")
+                if (recurringArray != null) { for (i in 0 until recurringArray.length()) { val o = recurringArray.getJSONObject(i); recurringList.add(RecurringEntity(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), description = o.optString("description"), category = o.optString("category"), dayOfMonth = o.getInt("dayOfMonth"), lastExecutedMonth = o.optString("lastExecutedMonth"))) } }
+
+                val catsList = mutableListOf<CategoryEntity>()
+                val catsArray = root.optJSONArray("categories")
+                if (catsArray != null) { for (i in 0 until catsArray.length()) { val o = catsArray.getJSONObject(i); catsList.add(CategoryEntity(name = o.getString("name"), type = TxType.valueOf(o.getString("type")))) } }
+
+                val goalsList = mutableListOf<SavingsGoalEntity>()
+                val goalsArray = root.optJSONArray("goals")
+                if (goalsArray != null) { for (i in 0 until goalsArray.length()) { val o = goalsArray.getJSONObject(i); goalsList.add(SavingsGoalEntity(id = o.optLong("id"), name = o.getString("name"), targetAmountMinor = o.getLong("targetAmountMinor"), currentAmountMinor = o.getLong("currentAmountMinor"))) } }
+
+                // 2. Всё распарсилось успешно. Очищаем БД и вставляем данные в одной транзакции
+                db.withTransaction {
+                    dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
+                    dao.clearCategories(); dao.clearGoals() // Fix 1.5: Очищаем категории и цели
+                    
+                    dao.insertAll(txsList)
+                    cardsList.forEach { dao.upsertCard(it) }
+                    budgetsList.forEach { dao.upsertBudget(it) }
+                    recurringList.forEach { dao.upsertRecurring(it) }
+                    catsList.forEach { dao.upsertCategory(it) }
+                    goalsList.forEach { dao.upsertGoal(it) }
+                }
+                
                 ensureCashAccount()
                 onResult(true)
-            } catch (e: Exception) { e.printStackTrace(); onResult(false) }
+            } catch (e: Exception) { 
+                e.printStackTrace()
+                onResult(false) 
+            }
         }
     }
 }
@@ -579,13 +617,24 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
     fun checkPendingSms() {
         if (editing != null || adding) return
-        val prefs = context.getSharedPreferences("pending_sms", Context.MODE_PRIVATE)
-        val pendingJson = prefs.getString("pending", null) ?: return
+        val pendingObj = PendingQueue.peek(context) ?: return
+        
         try {
-            val obj = JSONObject(pendingJson)
-            val pendingTx = Tx(id = 0, amountMinor = obj.getLong("amountMinor"), type = TxType.valueOf(obj.getString("type")), cardId = if (obj.isNull("card")) null else obj.getString("card"), description = obj.optString("description"), category = obj.optString("category"), timestamp = obj.optLong("timestamp"), source = "SMS")
-            editing = pendingTx; isPendingSms = true
-        } catch (e: Exception) { prefs.edit().remove("pending").apply() }
+            val pendingTx = Tx(
+                id = 0,
+                amountMinor = pendingObj.getLong("amountMinor"),
+                type = TxType.valueOf(pendingObj.getString("type")),
+                cardId = if (pendingObj.isNull("card")) null else pendingObj.getString("card"),
+                description = pendingObj.optString("description"),
+                category = pendingObj.optString("category"),
+                timestamp = pendingObj.optLong("timestamp"),
+                source = "SMS"
+            )
+            editing = pendingTx
+            isPendingSms = true
+        } catch (e: Exception) {
+            PendingQueue.pop(context)
+        }
     }
 
     val trigger = pendingCheckTrigger?.value ?: 0
@@ -654,30 +703,49 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
     val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
     val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-    val filteredTxs = txs.filter { tx -> (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) && (filterType == null || tx.type == filterType) }
-    val byDay = filteredTxs.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
+    
+    // Fix 2.3: derivedStateOf для фильтрации
+    val filteredTxs by remember(txs, searchQuery, filterType, currentLang.value) {
+        derivedStateOf {
+            txs.filter { tx -> 
+                (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) && 
+                (filterType == null || tx.type == filterType) 
+            }
+        }
+    }
+    
+    val byDay by remember(filteredTxs) {
+        derivedStateOf {
+            filteredTxs.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
+        }
+    }
 
-    val cardBalancesInUzs = cards.associate { card ->
-        val cardTxs = allTxs.filter { it.cardId == card.id }
-        val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-        val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-        val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
+    // Fix 2.2: remember для балансов
+    val cardBalancesInUzs = remember(cards, allTxs, rates) {
+        cards.associate { card ->
+            val cardTxs = allTxs.filter { it.cardId == card.id }
+            val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
+            val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
+            val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
+            val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
 
-        val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
+            val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
+            val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
+            val balanceInUzs = (balanceInCardCurrency.toDouble() * rate).toLong()
 
-        val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
-
-        val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
-        val balanceInUzs = (balanceInCardCurrency.toDouble() * rate).toLong()
-
-        card.id to balanceInUzs
+            card.id to balanceInUzs
+        }
     }
     val totalLiquidBalanceUzs = cardBalancesInUzs.values.sum()
 
-    LaunchedEffect(cardBalancesInUzs, goals) {
-        val total = totalLiquidBalanceUzs + goals.sumOf { it.currentAmountMinor }
+    // Fix 2.4: обновляем виджет только когда меняется итоговая сумма
+    val totalForWidget = remember(totalLiquidBalanceUzs, goals) {
+        totalLiquidBalanceUzs + goals.sumOf { it.currentAmountMinor }
+    }
+
+    LaunchedEffect(totalForWidget) {
         val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putLong("total_balance", total).apply()
+        prefs.edit().putLong("total_balance", totalForWidget).apply()
         val appWidgetManager = android.appwidget.AppWidgetManager.getInstance(context)
         val componentName = android.content.ComponentName(context, BalanceWidget::class.java)
         appWidgetManager.getAppWidgetIds(componentName).forEach { id -> BalanceWidget.updateWidget(context, appWidgetManager, id) }
@@ -924,10 +992,32 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         }
 
         if (adding || editing != null) {
-            TxDialog(initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories, currentLang = currentLang.value, isPendingSms = isPendingSms, rates = rates, vm = vm,
-                onDismiss = { if (isPendingSms) { context.getSharedPreferences("pending_sms", Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
-                onSave = { vm.save(it); if (isPendingSms) { context.getSharedPreferences("pending_sms", Context.MODE_PRIVATE).edit().remove("pending").apply(); isPendingSms = false }; adding = false; editing = null },
-                onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
+            TxDialog(
+                initial = editing, 
+                cards = cards, 
+                expenseCategories = expenseCategories, 
+                incomeCategories = incomeCategories, 
+                currentLang = currentLang.value, 
+                isPendingSms = isPendingSms, 
+                rates = rates, 
+                vm = vm,
+                onDismiss = { 
+                    if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
+                    adding = false; editing = null 
+                },
+                onSave = { 
+                    vm.save(it)
+                    if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
+                    adding = false; editing = null 
+                },
+                onDelete = if (isPendingSms) null else editing?.let { e -> 
+                    { vm.delete(e); editing = null; scope.launch { 
+                        val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }
+                        val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite)
+                        timerJob.cancel()
+                        if (result == SnackbarResult.ActionPerformed) vm.save(e) 
+                    } } 
+                }
             )
         }
 
@@ -1355,15 +1445,11 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try { context.contentResolver.openInputStream(uri)?.use { inputStream -> val doc = PDDocument.load(inputStream); val stripper = PDFTextStripper(); val text = stripper.getText(doc); doc.close(); text } ?: "" } catch (e: Exception) { "" }
 }
 
-// ИСПРАВЛЕНО: Убран look-behind, который вызывал ошибку на Android
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
 
-    // Ищем суммы (например: 65 432 UZS, 0 UZS, 39.2 UZS)
     val amountRegex = Regex("""([0-9Oo\s\u00A0]+(?:[.,]\d{1,2})?)\s*(?:cyM|сум|UZS|USD|EUR|RUB|so['`]?m)""", RegexOption.IGNORE_CASE)
-    
-    // Ищем просто 4 цифры/буквы O. Никаких look-behind!
     val cardRegex = Regex("""\b([0-9Oo]{4})\b""")
 
     val pendingAmounts = mutableListOf<Long>()
@@ -1379,9 +1465,8 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
         else if (line.contains("VISA", ignoreCase = true)) currentBank = "Visa"
         else if (line.contains("MULTI", ignoreCase = true)) currentBank = "Multi"
 
-        if (line.contains("/")) continue // Пропускаем даты (12/30)
+        if (line.contains("/")) continue
 
-        // 1. Сначала ищем суммы
         val amtMatch = amountRegex.find(line)
         if (amtMatch != null) {
             if (line.contains("USD", true)) currentCurrency = "USD"
@@ -1394,36 +1479,30 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
                 .replace(",", ".")
                 .replace('O', '0').replace('o', '0')
             
-            // Нормализуем 39.2 -> 39.20
             val normalizedAmt = if (amtStr.contains(".") && amtStr.substringAfter(".").length == 1) "${amtStr}0" else amtStr
-            
             val parsedAmount = normalizedAmt.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong()
             if (parsedAmount != null) {
                 pendingAmounts.add(parsedAmount)
             }
-            continue // Переходим к следующей строке
+            continue
         }
 
-        // 2. Затем ищем карты
         val cardMatch = cardRegex.find(line)
         if (cardMatch != null) {
             val startIndex = cardMatch.range.first
             val prefix = line.substring(0, startIndex)
             
-            // Отсеиваем номера переводов, которые начинаются с ****
             if (prefix.contains("****")) continue
 
             val rawLast4 = cardMatch.groupValues[1]
             val last4 = rawLast4.replace('O', '0').replace('o', '0')
             
-            // Защита от годов (например, 2024)
             if (last4.startsWith("20")) continue
 
             val shortName = getShortBankName(currentBank)
             val finalName = "$shortName $last4"
 
             if (result.none { it.last4 == last4 }) {
-                // Берем первую сумму из очереди. Если очередь пуста, ставим 0.
                 val amountToAssign = if (pendingAmounts.isNotEmpty()) pendingAmounts.removeAt(0) else 0L
                 result.add(CardEntity(
                     id = "${last4}_$currentCurrency", 
@@ -1442,9 +1521,7 @@ data class ParsedSms(val amountStr: String, val card: String?, val description: 
 
 fun parseSmsText(text: String): ParsedSms? = SmsParser.parseForOcr(text)
 
-// ====== ГОЛОСОВОЙ ПАРСЕР ======
 object VoiceParser {
-
     data class VoiceTxResult(
         val amountMinor: Long?,
         val type: TxType?,
