@@ -47,6 +47,10 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
     var selectedCardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
     var toCardId by remember { mutableStateOf(initial?.toCardId) }
+    
+    // НОВОЕ ПОЛЕ ДЛЯ МУЛЬТИВАЛЮТНОСТИ
+    var toAmount by remember { mutableStateOf(initial?.toAmountMinor?.let { BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
+
     var isCustomCard by remember { mutableStateOf(initial?.cardId?.let { !cards.map { c -> c.id }.contains(it) } ?: false) }
     var desc by remember { mutableStateOf(initial?.description ?: "") }
     var date by remember { mutableStateOf(initDt.format(DATE_FMT)) }
@@ -68,6 +72,10 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var newCardCurrency by remember { mutableStateOf("UZS") }
 
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
+    
+    val fromCardCurrency = cards.find { it.id == selectedCardId }?.currency ?: "UZS"
+    val toCardCurrency = cards.find { it.id == toCardId }?.currency ?: "UZS"
+    val isCurrencyDiff = type == TxType.TRANSFER && fromCardCurrency != toCardCurrency
 
     val voiceLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -166,6 +174,13 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     LaunchedEffect(type) {
         val currentList = if (type == TxType.INCOME) incomeCategories else expenseCategories
         if (!currentList.contains(category) && !showAddCategoryDialog) category = currentList.lastOrNull() ?: "📦 Другое"
+    }
+
+    // Автоподстановка суммы зачисления при смене валюты (если поле пустое)
+    LaunchedEffect(isCurrencyDiff) {
+        if (isCurrencyDiff && toAmount.isEmpty()) {
+             // Если есть курсы, можно попытаться рассчитать (опционально). Пока оставляем пустым для ручного ввода.
+        }
     }
 
     if (showAddCategoryDialog) {
@@ -336,6 +351,18 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                             }
                         }
                     }
+                    
+                    // НОВОЕ ПОЛЕ: Если валюты разные, спрашиваем сумму к зачислению
+                    if (isCurrencyDiff) {
+                        OutlinedTextField(
+                            value = toAmount, 
+                            onValueChange = { toAmount = it }, 
+                            label = { Text("Сумма к зачислению (${toCardCurrency})") }, 
+                            singleLine = true, 
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), 
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
                 OutlinedTextField(desc, { desc = it }, label = { Text(t("desc")) })
@@ -353,15 +380,34 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                         amountMinor = (amountMinor.toDouble() * rateEntity.rateToUzs).toBigDecimal().setScale(0, RoundingMode.HALF_UP).toLong()
                     }
                 }
+                
+                // Парсим сумму зачисления, если она нужна
+                val toAmountMinor = if (isCurrencyDiff) {
+                    runCatching { BigDecimal(toAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
+                } else null
 
                 val d = runCatching { LocalDate.parse(date.trim(), DATE_FMT) }.getOrNull()
                 when {
                     amountMinor == null || amountMinor <= 0 -> error = t("error")
+                    isCurrencyDiff && (toAmountMinor == null || toAmountMinor <= 0) -> error = "Введите сумму зачисления"
                     d == null -> error = t("error")
                     type == TxType.TRANSFER && toCardId == null -> error = t("error")
                     else -> {
                         val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
-                        onSave(Tx(id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, toCardId = toCardId, description = desc.trim(), category = category, timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath))
+                        onSave(Tx(
+                            id = initial?.id ?: 0, 
+                            amountMinor = amountMinor, 
+                            type = type, 
+                            cardId = finalCardId, 
+                            toCardId = toCardId, 
+                            toAmountMinor = toAmountMinor, // Передаем новое поле
+                            description = desc.trim(), 
+                            category = category, 
+                            timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), 
+                            source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", 
+                            currency = currency, 
+                            photoPath = photoPath
+                        ))
                     }
                 }
             }) { Text(if (isPendingSms) t("confirm") else t("save")) }
