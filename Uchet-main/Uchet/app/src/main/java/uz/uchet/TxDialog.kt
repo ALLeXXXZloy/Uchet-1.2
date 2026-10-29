@@ -25,6 +25,7 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.launch
 import java.io.File
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -47,8 +48,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
     var selectedCardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
     var toCardId by remember { mutableStateOf(initial?.toCardId) }
-    
-    // НОВОЕ ПОЛЕ ДЛЯ МУЛЬТИВАЛЮТНОСТИ
     var toAmount by remember { mutableStateOf(initial?.toAmountMinor?.let { BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
 
     var isCustomCard by remember { mutableStateOf(initial?.cardId?.let { !cards.map { c -> c.id }.contains(it) } ?: false) }
@@ -56,7 +55,12 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
     var date by remember { mutableStateOf(initDt.format(DATE_FMT)) }
     var photoPath by remember { mutableStateOf(initial?.photoPath) }
     var error by remember { mutableStateOf<String?>(null) }
+    
+    // ИНДИКАТОР ЗАГРУЗКИ
     var isLoading by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     val t = { key: String -> Translations.t(key, currentLang) }
 
     var showTypeMenu by remember { mutableStateOf(false) }
@@ -91,6 +95,8 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                 parsed.categoryName?.let { category = it }
                 if (parsed.description.isNotBlank()) desc = parsed.description
             }
+        } else {
+            scope.launch { snackbarHostState.showSnackbar(t("voice_error")) }
         }
     }
 
@@ -103,8 +109,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         try {
             voiceLauncher.launch(intent)
         } catch (e: Exception) {
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            try { voiceLauncher.launch(intent) } catch (e2: Exception) { }
+            scope.launch { snackbarHostState.showSnackbar(t("voice_not_available")) }
         }
     }
 
@@ -176,13 +181,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         if (!currentList.contains(category) && !showAddCategoryDialog) category = currentList.lastOrNull() ?: "📦 Другое"
     }
 
-    // Автоподстановка суммы зачисления при смене валюты (если поле пустое)
-    LaunchedEffect(isCurrencyDiff) {
-        if (isCurrencyDiff && toAmount.isEmpty()) {
-             // Если есть курсы, можно попытаться рассчитать (опционально). Пока оставляем пустым для ручного ввода.
-        }
-    }
-
     if (showAddCategoryDialog) {
         AlertDialog(
             onDismissRequest = { showAddCategoryDialog = false },
@@ -246,17 +244,21 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
         title = { Text(when { isPendingSms -> t("sms_title"); initial == null -> t("new_tx"); else -> t("edit") }) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (isLoading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+
                 if (isPendingSms) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(12.dp)) { Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold); Text(t("sms_title"), style = MaterialTheme.typography.bodySmall) } } }
 
                 Box(Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(type.label)
+                        Text(type.localizedLabel(currentLang))
                         Spacer(Modifier.weight(1f))
                         Icon(Icons.Default.ArrowDropDown, null)
                     }
                     DropdownMenu(expanded = showTypeMenu, onDismissRequest = { showTypeMenu = false }) {
                         TxType.values().forEach { tt ->
-                            DropdownMenuItem(text = { Text(tt.label) }, onClick = { type = tt; showTypeMenu = false })
+                            DropdownMenuItem(text = { Text(tt.localizedLabel(currentLang)) }, onClick = { type = tt; showTypeMenu = false })
                         }
                     }
                 }
@@ -289,7 +291,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                 }
 
                 if (photoPath != null) {
-                    AsyncImage(model = File(photoPath!!), contentDescription = "Receipt", modifier = Modifier.fillMaxWidth().height(120.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                    AsyncImage(model = File(photoPath!!), contentDescription = t("receipt"), modifier = Modifier.fillMaxWidth().height(120.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -352,7 +354,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                         }
                     }
                     
-                    // НОВОЕ ПОЛЕ: Если валюты разные, спрашиваем сумму к зачислению
                     if (isCurrencyDiff) {
                         OutlinedTextField(
                             value = toAmount, 
@@ -371,7 +372,9 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
             }
         },
         confirmButton = {
-            TextButton({
+            TextButton(
+                enabled = !isLoading,
+                onClick = {
                 var amountMinor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
 
                 if (currency != "UZS" && amountMinor != null) {
@@ -381,7 +384,6 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                     }
                 }
                 
-                // Парсим сумму зачисления, если она нужна
                 val toAmountMinor = if (isCurrencyDiff) {
                     runCatching { BigDecimal(toAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                 } else null
@@ -400,7 +402,7 @@ fun TxDialog(initial: Tx?, cards: List<CardEntity>, expenseCategories: List<Stri
                             type = type, 
                             cardId = finalCardId, 
                             toCardId = toCardId, 
-                            toAmountMinor = toAmountMinor, // Передаем новое поле
+                            toAmountMinor = toAmountMinor,
                             description = desc.trim(), 
                             category = category, 
                             timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), 
