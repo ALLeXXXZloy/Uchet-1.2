@@ -84,254 +84,6 @@ import java.time.*
 import java.time.format.DateTimeFormatter
 import java.util.*
 
-private val DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy")
-private val GREEN = Color(0xFF2E7D32)
-private val RED = Color(0xFFC62828)
-private val YELLOW = Color(0xFFF9A825)
-private val BLUE = Color(0xFF1976D2)
-
-fun getMonthName(month: Int, lang: AppLanguage): String {
-    val ru = listOf("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
-    val uz = listOf("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr")
-    val en = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
-    val tg = listOf("Январ", "Феврал", "Март", "Апрел", "Май", "Июн", "Июл", "Август", "Сентябр", "Октябр", "Ноябр", "Декабр")
-    val kaa = listOf("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentyabr", "Oktyabr", "Noyabr", "Dekabr")
-    val kk = listOf("Қаңтар", "Ақпан", "Наурыз", "Сәуір", "Мамыр", "Маусым", "Шілде", "Тамыз", "Қыркүйек", "Қазан", "Қараша", "Желтоқсан")
-
-    return when (lang) {
-        AppLanguage.RU -> ru[month - 1]
-        AppLanguage.UZ -> uz[month - 1]
-        AppLanguage.EN -> en[month - 1]
-        AppLanguage.TG -> tg[month - 1]
-        AppLanguage.KAA -> kaa[month - 1]
-        AppLanguage.KK -> kk[month - 1]
-    }
-}
-
-fun getShortBankName(name: String): String {
-    val vowels = "aeiouyаеёиоуыэюяAEIOUYАЕЁИОУЫЭЮЯ"
-    val consonants = name.filter { it.isLetter() && it !in vowels }
-    return if (consonants.length >= 4) {
-        consonants.take(4).lowercase().replaceFirstChar { it.uppercase() }
-    } else if (consonants.isNotEmpty()) {
-        consonants.lowercase().replaceFirstChar { it.uppercase() }
-    } else {
-        "Bank"
-    }
-}
-
-val DEFAULT_EXPENSE_CATEGORIES = listOf("🍔 Еда", "🚕 Транспорт", "🏠 Жилье", "🛒 Покупки", "💊 Здоровье", "🎉 Развлечения", "📦 Другое")
-val DEFAULT_INCOME_CATEGORIES = listOf("💵 Зарплата", "🎁 Подарок", "💸 Перевод", "📈 Инвестиции", "📦 Другое")
-
-enum class AppTheme { SYSTEM, LIGHT, DARK }
-enum class AppLanguage { RU, UZ, EN, TG, KAA, KK }
-
-object Translations {
-    private val dict = mapOf(
-        "ru" to mapOf(
-            "my_accounts" to "Карты", "manage_cards" to "Управление картами", "scan_sms" to "Сканировать СМС (100)",
-            "exp_by_cat" to "Расходы по категориям", "daily_chart" to "Динамика расходов (по дням)", "monthly_chart" to "Расходы по месяцам (за год)",
-            "budgets_month" to "Бюджеты на месяц", "income" to "Доходы", "expense" to "Расходы", "total" to "Итого", "search" to "Поиск...", "all" to "Все", "add" to "Добавить",
-            "new_tx" to "Новая операция", "edit" to "Изменить", "amount" to "Сумма", "category" to "Категория", "account" to "Счет", "to_account" to "Куда", "other" to "Другая...",
-            "desc" to "Описание", "date" to "Дата (дд.мм.гггг)", "save" to "Сохранить", "cancel" to "Отмена", "delete" to "Удалить", "settings" to "Настройки",
-            "theme" to "Тема оформления", "language" to "Язык / Til / Language", "categories" to "Категории", "recurring" to "Регулярные", "budgets" to "Бюджеты",
-            "export" to "Экспорт в Excel (CSV)", "backup" to "Сохранить копию (JSON)", "restore" to "Загрузить копию (JSON)", "biometric" to "Вход по отпечатку",
-            "change_pin" to "Сменить PIN", "locked" to "Приложение заблокировано", "login" to "Войти", "fingerprint" to "Использовать отпечаток",
-            "sms_title" to "Проверьте операцию", "sms_data" to "Данные из СМС/Уведомления", "confirm" to "Подтвердить", "reject" to "Отклонить", "pin" to "PIN-код",
-            "wrong_pin" to "Неверный PIN-код", "pin_error" to "Ошибка PIN", "pin_ok" to "PIN изменен!", "no_found" to "Ничего не найдено", "limit" to "Лимит", "day" to "День месяца (1-31)", "set_limit" to "Сохранить лимит",
-            "add_cat" to "Добавить категорию", "add_temp" to "Добавить шаблон", "sys" to "Системная", "light" to "Светлая", "dark" to "Темная",
-            "cash" to "Наличные", "card" to "Карта", "upload_sms" to "СМС / Чек", "goals" to "Копилка", "add_goal" to "Добавить цель", "goal_name" to "Название цели",
-            "target_amount" to "Целевая сумма", "deposit" to "Пополнить", "deposit_amount" to "Сумма пополнения", "source_card" to "Списать с карты", "completed" to "Достигнуто!",
-            "import_csv" to "Импорт из CSV", "import_pdf" to "Импорт из PDF", "import_confirm" to "Найдено транзакций: ", "import_cards" to "Импорт карт (Скрин)",
-            "analytics" to "Аналитика", "total_balance" to "Общий баланс", "take_photo" to "Сделать фото", "choose_photo" to "Из галереи", "scan_qr" to "Сканировать QR",
-            "currency" to "Валюта", "sms_debug" to "Принимать все СМС (Тест)", "update_rates" to "Обновить курсы валют",
-            "new_cat" to "Новая категория", "name" to "Название", "new_card" to "Новая карта", "card_name" to "Название карты", "last4" to "4 цифры",
-            "current_bal" to "Текущий расчетный баланс:", "enter_fact" to "Введите фактический баланс для корректировки:",
-            "found_cards" to "Найдено карт:", "cards_added" to "Карты добавлены!", "import_data" to "Импорт данных",
-            "new_sms_not_found" to "Новых СМС не найдено", "rates_updated" to "Курсы обновлены", "file_read_error" to "Ошибка чтения файла", "no_tx_found" to "Не найдено транзакций",
-            "deleted" to "Удалено", "undo" to "Отменить", "error" to "Ошибка", "close" to "Закрыть", "add_tx" to "Добавить", "add_new_cat" to "+ Новая категория", "add_new_card" to "+ Новая карта",
-            "back" to "Назад", "ocr_debug" to "Отладка импорта карт", "image_error" to "Не удалось открыть изображение", "debug_size" to "Размер картинки",
-            "debug_not_found" to "Найдено карт регуляркой: 0", "debug_what_ocr" to "Что прочитал ML Kit:", "debug_empty" to "[ПУСТО!] ML Kit не увидел текст",
-            "voice_input" to "Голосовой ввод", "voice_prompt" to "Назовите операцию...",
-            "voice_not_available" to "Голосовой ввод недоступен на устройстве",
-            "voice_card_hint" to "Назовите банк и 4 цифры, например: Kapitalbank 5678"
-        ),
-        "uz" to mapOf(
-            "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
-            "exp_by_cat" to "Kategoriyalar bo'yicha xarajatlar", "daily_chart" to "Xarajatlar dinamikasi (kunlik)", "monthly_chart" to "Xarajatlar (oylik)",
-            "budgets_month" to "Oylik byudjetlar", "income" to "Daromadlar", "expense" to "Xarajatlar", "total" to "Jami", "search" to "Qidirish...", "all" to "Barchasi", "add" to "Qo'shish",
-            "new_tx" to "Yangi operatsiya", "edit" to "O'zgartirish", "amount" to "Summa", "category" to "Kategoriya", "account" to "Hisob", "to_account" to "Qayerga", "other" to "Boshqa...",
-            "desc" to "Tavsif", "date" to "Sana (kk.oo.yyyy)", "save" to "Saqlash", "cancel" to "Bekor qilish", "delete" to "O'chirish", "settings" to "Sozlamalar",
-            "theme" to "Mavzu", "language" to "Язык / Til / Language", "categories" to "Kategoriyalar", "recurring" to "Muntazam", "budgets" to "Byudjetlar",
-            "export" to "Excel (CSV) ga eksport", "backup" to "Zaxira nusxasini saqlash (JSON)", "restore" to "Zaxirani yuklash (JSON)", "biometric" to "Barmoq izi bilan kirish",
-            "change_pin" to "PIN kodni o'zgartirish", "locked" to "Ilova bloklangan", "login" to "Kirish", "fingerprint" to "Barmoq izidan foydalanish",
-            "sms_title" to "Operatsiyani tekshiring", "sms_data" to "SMS/Bildirishnoma ma'lumotlari", "confirm" to "Tasdiqlash", "reject" to "Rad etish", "pin" to "PIN kod",
-            "wrong_pin" to "Noto'g'ri PIN kod", "pin_error" to "PIN xatosi", "pin_ok" to "PIN o'zgartirildi!", "no_found" to "Hech narsa topilmadi", "limit" to "Limit", "day" to "Oy kuni (1-31)", "set_limit" to "Limitni saqlash",
-            "add_cat" to "Kategoriya qo'shish", "add_temp" to "Shablon qo'shish", "sys" to "Tizim", "light" to "Yorug'", "dark" to "Qorong'i",
-            "cash" to "Naqd", "card" to "Karta", "upload_sms" to "SMS / Chek", "goals" to "Jamg'arma", "add_goal" to "Maqsad qo'shish", "goal_name" to "Maqsad nomi",
-            "target_amount" to "Maqsad summasi", "deposit" to "To'ldirish", "deposit_amount" to "To'ldirish summasi", "source_card" to "Kartadan yechish", "completed" to "Erishildi!",
-            "import_csv" to "CSV dan import", "import_pdf" to "PDF dan import", "import_confirm" to "Topilgan operatsiyalar: ", "import_cards" to "Kartalarni import qilish",
-            "analytics" to "Analitika", "total_balance" to "Umumiy balans", "take_photo" to "Rasmga olish", "choose_photo" to "Galereyadan", "scan_qr" to "QR skanerlash",
-            "currency" to "Valyuta", "sms_debug" to "Barcha SMSlarni qabul qilish", "update_rates" to "Valyuta kurslarini yangilash",
-            "new_cat" to "Yangi kategoriya", "name" to "Nomi", "new_card" to "Yangi karta", "card_name" to "Karta nomi", "last4" to "4 ta raqam",
-            "current_bal" to "Joriy hisob balansi:", "enter_fact" to "Tuzatish uchun haqiqiy balansni kiriting:",
-            "found_cards" to "Topilgan kartalar:", "cards_added" to "Kartalar qo'shildi!", "import_data" to "Ma'lumotlarni import qilish",
-            "new_sms_not_found" to "Yangi SMS topilmadi", "rates_updated" to "Kurslar yangilandi", "file_read_error" to "Faylni o'qish xatosi", "no_tx_found" to "Operatsiyalar topilmadi",
-            "deleted" to "O'chirildi", "undo" to "Bekor qilish", "error" to "Xato", "close" to "Yopish", "add_tx" to "Qo'shish", "add_new_cat" to "+ Yangi kategoriya", "add_new_card" to "+ Yangi karta",
-            "back" to "Orqaga", "ocr_debug" to "Kartalarni import qilishni sozlash", "image_error" to "Rasmni ochib bo'lmadi", "debug_size" to "Rasm o'lchami",
-            "debug_not_found" to "Kartalar topilmadi: 0", "debug_what_ocr" to "ML Kit o'qigan matn:", "debug_empty" to "[BO'SH!] ML Kit matnni ko'rmadi",
-            "voice_input" to "Ovozli kiritish", "voice_prompt" to "Operatsiyani ayting...",
-            "voice_not_available" to "Qurilmada ovozli kiritish mavjud emas",
-            "voice_card_hint" to "Bank nomi va 4 ta raqamni ayting, masalan: Kapitalbank 5678"
-        ),
-        "en" to mapOf(
-            "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
-            "exp_by_cat" to "Expenses by Category", "daily_chart" to "Daily Expense Dynamics", "monthly_chart" to "Monthly Expenses",
-            "budgets_month" to "Monthly Budgets", "income" to "Income", "expense" to "Expenses", "total" to "Total", "search" to "Search...", "all" to "All", "add" to "Add",
-            "new_tx" to "New Transaction", "edit" to "Edit", "amount" to "Amount", "category" to "Category", "account" to "Account", "to_account" to "To", "other" to "Other...",
-            "desc" to "Description", "date" to "Date (dd.mm.yyyy)", "save" to "Save", "cancel" to "Cancel", "delete" to "Delete", "settings" to "Settings",
-            "theme" to "Theme", "language" to "Language", "categories" to "Categories", "recurring" to "Recurring", "budgets" to "Budgets",
-            "export" to "Export (CSV)", "backup" to "Backup (JSON)", "restore" to "Restore (JSON)", "biometric" to "Biometric Login",
-            "change_pin" to "Change PIN", "locked" to "App is Locked", "login" to "Login", "fingerprint" to "Use Fingerprint",
-            "sms_title" to "Check Transaction", "sms_data" to "SMS/Notification Data", "confirm" to "Confirm", "reject" to "Reject", "pin" to "PIN",
-            "wrong_pin" to "Wrong PIN", "pin_error" to "PIN error", "pin_ok" to "PIN changed!", "no_found" to "Nothing found", "limit" to "Limit", "day" to "Day (1-31)", "set_limit" to "Set Limit",
-            "add_cat" to "Add Category", "add_temp" to "Add Template", "sys" to "System", "light" to "Light", "dark" to "Dark",
-            "cash" to "Cash", "card" to "Card", "upload_sms" to "SMS / Receipt", "goals" to "Savings", "add_goal" to "Add Goal", "goal_name" to "Goal Name",
-            "target_amount" to "Target", "deposit" to "Deposit", "deposit_amount" to "Amount", "source_card" to "Source", "completed" to "Completed!",
-            "import_csv" to "Import CSV", "import_pdf" to "Import PDF", "import_confirm" to "Found: ", "import_cards" to "Import Cards",
-            "analytics" to "Analytics", "total_balance" to "Total Balance", "take_photo" to "Take Photo", "choose_photo" to "Gallery", "scan_qr" to "Scan QR",
-            "currency" to "Currency", "sms_debug" to "Accept all SMS (Test)", "update_rates" to "Update Rates",
-            "new_cat" to "New category", "name" to "Name", "new_card" to "New card", "card_name" to "Card name", "last4" to "Last 4 digits",
-            "current_bal" to "Current calculated balance:", "enter_fact" to "Enter actual balance to adjust:",
-            "found_cards" to "Cards found:", "cards_added" to "Cards added!", "import_data" to "Import data",
-            "new_sms_not_found" to "No new SMS found", "rates_updated" to "Rates updated", "file_read_error" to "File read error", "no_tx_found" to "No transactions found",
-            "deleted" to "Deleted", "undo" to "Undo", "error" to "Error", "close" to "Close", "add_tx" to "Add", "add_new_cat" to "+ New category", "add_new_card" to "+ New card",
-            "back" to "Back", "ocr_debug" to "Card import debug", "image_error" to "Failed to open image", "debug_size" to "Image size",
-            "debug_not_found" to "Cards found: 0", "debug_what_ocr" to "What ML Kit read:", "debug_empty" to "[EMPTY!] ML Kit saw no text",
-            "voice_input" to "Voice input", "voice_prompt" to "Say the operation...",
-            "voice_not_available" to "Voice input is not available on this device",
-            "voice_card_hint" to "Say bank name and 4 digits, e.g. Kapitalbank 5678"
-        ),
-        "tg" to mapOf(
-            "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
-            "exp_by_cat" to "Хароҷот аз рӯи категорияҳо", "daily_chart" to "Динамикаи хароҷот (рӯзона)", "monthly_chart" to "Хароҷот (моҳона)",
-            "budgets_month" to "Буҷаҳои моҳона", "income" to "Даромадҳо", "expense" to "Хароҷот", "total" to "Ҳамагӣ", "search" to "Ҷустуҷӯ...", "all" to "Ҳама", "add" to "Илова кардан",
-            "new_tx" to "Амалиёти нав", "edit" to "Тағир додан", "amount" to "Маблағ", "category" to "Категория", "account" to "Ҳисоб", "to_account" to "Ба куҷо", "other" to "Дигар...",
-            "desc" to "Тавсиф", "date" to "Сана (рр.мм.сссс)", "save" to "Нигоҳ доштан", "cancel" to "Бекор кардан", "delete" to "Нест кардан", "settings" to "Танзимотҳо",
-            "theme" to "Мавзӯъ", "language" to "Забон", "categories" to "Категорияҳо", "recurring" to "Мунтазам", "budgets" to "Буҷаҳо",
-            "export" to "Содирот (CSV)", "backup" to "Нусхаи эҳтиётӣ (JSON)", "restore" to "Барқарорсозӣ (JSON)", "biometric" to "Воридшавӣ бо биометрия",
-            "change_pin" to "Иваз кардани PIN", "locked" to "Барнома баста аст", "login" to "Даромадан", "fingerprint" to "Истифодаи изи ангушта",
-            "sms_title" to "Амалиётро тафтиш кунед", "sms_data" to "Маълумот аз СМС/Огоҳинома", "confirm" to "Тасдиқ кардан", "reject" to "Рад кардан", "pin" to "PIN-код",
-            "wrong_pin" to "PIN-коди нодуруст", "pin_error" to "Хатои PIN", "pin_ok" to "PIN иваз шуд!", "no_found" to "Ҳеҷ чиз ёфт нашуд", "limit" to "Ҳудуд", "day" to "Рӯзи моҳ (1-31)", "set_limit" to "Нигоҳ доштани ҳудуд",
-            "add_cat" to "Илова кардани категория", "add_temp" to "Илова кардани шаблон", "sys" to "Системавӣ", "light" to "Равшан", "dark" to "Торик",
-            "cash" to "Нақд", "card" to "Корт", "upload_sms" to "СМС / Чек", "goals" to "Ҷамъоварӣ", "add_goal" to "Илова кардани мақсад", "goal_name" to "Номи мақсад",
-            "target_amount" to "Маблағи мақсад", "deposit" to "Пур кардан", "deposit_amount" to "Маблағи пуркунӣ", "source_card" to "Аз корт гирифтан", "completed" to "Иҷро шуд!",
-            "import_csv" to "Воридот аз CSV", "import_pdf" to "Воридот аз PDF", "import_confirm" to "Транзаксияҳои ёфтшуда: ", "import_cards" to "Воридот аз акс",
-            "analytics" to "Таҳлил", "total_balance" to "Баланси умумӣ", "take_photo" to "Акс гирифтан", "choose_photo" to "Аз галерея", "scan_qr" to "Сканкунии QR",
-            "currency" to "Асъор", "sms_debug" to "Қабули ҳамаи СМС (Тест)", "update_rates" to "Навсозии курсҳо",
-            "new_cat" to "Категорияи нав", "name" to "Ном", "new_card" to "Корти нав", "card_name" to "Номи корт", "last4" to "4 рақам",
-            "current_bal" to "Баланси ҳисобшудаи ҷорӣ:", "enter_fact" to "Барои ислоҳ баланси воқеиро ворид кунед:",
-            "found_cards" to "Кортҳои ёфтшуда:", "cards_added" to "Кортҳо илова шуданд!", "import_data" to "Воридоти маълумот",
-            "new_sms_not_found" to "СМС-и нав ёфт нашуд", "rates_updated" to "Курсҳо нав карда шуданд", "file_read_error" to "Хатои хониши файл", "no_tx_found" to "Транзаксия ёфт нашуд",
-            "deleted" to "Нест карда шуд", "undo" to "Бекор кардан", "error" to "Хатогӣ", "close" to "Пӯшидан", "add_tx" to "Илова", "add_new_cat" to "+ Категорияи нав", "add_new_card" to "+ Корти нав",
-            "back" to "Бозгашт", "ocr_debug" to "Ислоҳи воридоти кортҳо", "image_error" to "Тасвирро кушодан нашуд", "debug_size" to "Андозаи тасвир",
-            "debug_not_found" to "Кортҳо ёфт нашуданд: 0", "debug_what_ocr" to "ML Kit чӣ хонд:", "debug_empty" to "[ХОЛӢ!] ML Kit матнро надид",
-            "voice_input" to "Воридоти овозӣ", "voice_prompt" to "Амалиётро гӯед...",
-            "voice_not_available" to "Воридоти овозӣ дар дастгоҳ дастрас нест",
-            "voice_card_hint" to "Номи бонк ва 4 рақамро гӯед, масалан: Kapitalbank 5678"
-        ),
-        "kaa" to mapOf(
-            "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
-            "exp_by_cat" to "Kategoriyalar boyınsha shıǵınlar", "daily_chart" to "Shıǵınlar dinamikası (kúnlik)", "monthly_chart" to "Shıǵınlar (aylıq)",
-            "budgets_month" to "Aylıq byudjetler", "income" to "Kirimler", "expense" to "Shıǵınlar", "total" to "Jámi", "search" to "Izlew...", "all" to "Barlıǵı", "add" to "Qosıw",
-            "new_tx" to "Jańa operatsiya", "edit" to "Ózgertiw", "amount" to "Summa", "category" to "Kategoriya", "account" to "Esap", "to_account" to "Qayerga", "other" to "Basqa...",
-            "desc" to "Táriyip", "date" to "Sáne (kk.oo.jjjj)", "save" to "Saqlaw", "cancel" to "Biykar etiw", "delete" to "Óshiriw", "settings" to "Sazlamalar",
-            "theme" to "Tema", "language" to "Til", "categories" to "Kategoriyalar", "recurring" to "Muntazam", "budgets" to "Byudjetler",
-            "export" to "Eksport (CSV)", "backup" to "Zaxira nusqası (JSON)", "restore" to "Qayta tiklew (JSON)", "biometric" to "Barmoq izi menen kiriw",
-            "change_pin" to "PIN kodtı ózgertiw", "locked" to "Ilova bloklandı", "login" to "Kiriw", "fingerprint" to "Barmoq izin paydalanıw",
-            "sms_title" to "Operatsiyanı tekseriw", "sms_data" to "SMS/Bildiriw maǵlıwmatları", "confirm" to "Tastıyıqlaw", "reject" to "Rad etiw", "pin" to "PIN kod",
-            "wrong_pin" to "Qáte PIN kod", "pin_error" to "PIN qáteligi", "pin_ok" to "PIN ózgertildi!", "no_found" to "Hech nárse tabılmadı", "limit" to "Limit", "day" to "Ay kúni (1-31)", "set_limit" to "Limitti saqlaw",
-            "add_cat" to "Kategoriya qosıw", "add_temp" to "Shablon qosıw", "sys" to "Sistema", "light" to "Jaqtı", "dark" to "Qarańǵı",
-            "cash" to "Naqd", "card" to "Karta", "upload_sms" to "SMS / Chek", "goals" to "Jıynaq", "add_goal" to "Maqset qosıw", "goal_name" to "Maqset atı",
-            "target_amount" to "Maqset summası", "deposit" to "Toltırıw", "deposit_amount" to "Toltırıw summası", "source_card" to "Kartadan alıw", "completed" to "Ámelge astı!",
-            "import_csv" to "CSV dan import", "import_pdf" to "PDF dan import", "import_confirm" to "Tabılǵan operatsiyalar: ", "import_cards" to "Kartalardı import qılıw",
-            "analytics" to "Analitika", "total_balance" to "Ulıwma balans", "take_photo" to "Súwretke alıw", "choose_photo" to "Galereyadan", "scan_qr" to "QR skanerlew",
-            "currency" to "Valyuta", "sms_debug" to "Barlıq SMS lerdi qabıllaw (Test)", "update_rates" to "Valyuta kursların jańalaw",
-            "new_cat" to "Jańa kategoriya", "name" to "Atı", "new_card" to "Jańa karta", "card_name" to "Karta atı", "last4" to "4 san",
-            "current_bal" to "Házirgi esaplanǵan balans:", "enter_fact" to "Tuzetiw ushın haqıyqıy balanstı kiritiń:",
-            "found_cards" to "Tabılǵan kartalar:", "cards_added" to "Kartalar qosıldı!", "import_data" to "Maǵlıwmatlardı import qılıw",
-            "new_sms_not_found" to "Jańa SMS tabılmadı", "rates_updated" to "Kurslar jańalandı", "file_read_error" to "Fayldı oqıw qátesi", "no_tx_found" to "Operatsiyalar tabılmadı",
-            "deleted" to "Óshirildi", "undo" to "Biykar etiw", "error" to "Qáte", "close" to "Jabıw", "add_tx" to "Qosıw", "add_new_cat" to "+ Jańa kategoriya", "add_new_card" to "+ Jańa karta",
-            "back" to "Artqa", "ocr_debug" to "Kartalardı import qılıw sazlaw", "image_error" to "Súwretti aship bolmadı", "debug_size" to "Súwret ólshemi",
-            "debug_not_found" to "Kartalar tabılmadı: 0", "debug_what_ocr" to "ML Kit oqıǵan tekst:", "debug_empty" to "[BOS!] ML Kit tekstti kórmey qaldı",
-            "voice_input" to "Dawıs arqalı kiritiw", "voice_prompt" to "Operatsiyanı aytıń...",
-            "voice_not_available" to "Qurılmada dawıs arqalı kiritiw joq",
-            "voice_card_hint" to "Bank atı hám 4 sandı aytıń, mısalı: Kapitalbank 5678"
-        ),
-        "kk" to mapOf(
-            "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
-            "exp_by_cat" to "Санаттар бойынша шығыстар", "daily_chart" to "Шығыстар динамикасы (күнделікті)", "monthly_chart" to "Шығыстар (айлық)",
-            "budgets_month" to "Айлық бюджеттер", "income" to "Кірістер", "expense" to "Шығыстар", "total" to "Барлығы", "search" to "Іздеу...", "all" to "Барлығы", "add" to "Қосу",
-            "new_tx" to "Жаңа операция", "edit" to "Өзгерту", "amount" to "Сома", "category" to "Санат", "account" to "Шот", "to_account" to "Қайда", "other" to "Басқа...",
-            "desc" to "Сипаттама", "date" to "Күні (кк.аа.жжжж)", "save" to "Сақтау", "cancel" to "Болдырмау", "delete" to "Жою", "settings" to "Параметрлер",
-            "theme" to "Тақырып", "language" to "Тіл", "categories" to "Санаттар", "recurring" to "Тұрақты", "budgets" to "Бюджеттер",
-            "export" to "Экспорт (CSV)", "backup" to "Сақтық көшірме (JSON)", "restore" to "Қалпына келтіру (JSON)", "biometric" to "Биометриялық кіру",
-            "change_pin" to "PIN кодын өзгерту", "locked" to "Қолданба құлыпталған", "login" to "Кіру", "fingerprint" to "Саусақ ізін пайдалану",
-            "sms_title" to "Операцияны тексеріңіз", "sms_data" to "СМС/Хабарлама деректері", "confirm" to "Растау", "reject" to "Қабылдамау", "pin" to "PIN-код",
-            "wrong_pin" to "Қате PIN-код", "pin_error" to "PIN қатесі", "pin_ok" to "PIN өзгертілді!", "no_found" to "Ештеңе табылмады", "limit" to "Лимит", "day" to "Ай күні (1-31)", "set_limit" to "Лимитті сақтау",
-            "add_cat" to "Санат қосу", "add_temp" to "Үлгі қосу", "sys" to "Жүйелік", "light" to "Жарық", "dark" to "Қараңғы",
-            "cash" to "Қолма-қол", "card" to "Карта", "upload_sms" to "СМС / Чек", "goals" to "Жинақ", "add_goal" to "Мақсат қосу", "goal_name" to "Мақсат атауы",
-            "target_amount" to "Мақсат сомасы", "deposit" to "Толықтыру", "deposit_amount" to "Толықтыру сомасы", "source_card" to "Картадан алу", "completed" to "Орындалды!",
-            "import_csv" to "CSV-тен импорт", "import_pdf" to "PDF-тен импорт", "import_confirm" to "Табылған транзакциялар: ", "import_cards" to "Карталарды импорттау",
-            "analytics" to "Аналитика", "total_balance" to "Жалпы баланс", "take_photo" to "Суретке түсіру", "choose_photo" to "Галереядан", "scan_qr" to "QR сканерлеу",
-            "currency" to "Валюта", "sms_debug" to "Барлық СМС қабылдау (Тест)", "update_rates" to "Валюта бағамдарын жаңарту",
-            "new_cat" to "Жаңа санат", "name" to "Атауы", "new_card" to "Жаңа карта", "card_name" to "Карта атауы", "last4" to "4 сан",
-            "current_bal" to "Ағымдағы есептелген баланс:", "enter_fact" to "Түзету үшін нақты балансты енгізіңіз:",
-            "found_cards" to "Табылған карталар:", "cards_added" to "Карталар қосылды!", "import_data" to "Деректерді импорттау",
-            "new_sms_not_found" to "Жаңа СМС табылмады", "rates_updated" to "Бағамдар жаңартылды", "file_read_error" to "Файлды оқу қатесі", "no_tx_found" to "Транзакциялар табылмады",
-            "deleted" to "Жойылды", "undo" to "Болдырмау", "error" to "Қате", "close" to "Жабу", "add_tx" to "Қосу", "add_new_cat" to "+ Жаңа санат", "add_new_card" to "+ Жаңа карта",
-            "back" to "Артқа", "ocr_debug" to "Карталарды импорттау диагностикасы", "image_error" to "Суретті ашу мүмкін болмады", "debug_size" to "Сурет өлшемі",
-            "debug_not_found" to "Карталар табылмады: 0", "debug_what_ocr" to "ML Kit не оқыды:", "debug_empty" to "[БОС!] ML Kit мәтінді көрмеді",
-            "voice_input" to "Дауыспен енгізу", "voice_prompt" to "Операцияны айтыңыз...",
-            "voice_not_available" to "Құрылғыда дауыспен енгізу қолжетімсіз",
-            "voice_card_hint" to "Банк атауы мен 4 санды айтыңыз, мысалы: Kapitalbank 5678"
-        )
-    )
-
-    fun t(key: String, lang: AppLanguage): String {
-        val langKey = when(lang) {
-            AppLanguage.RU -> "ru"; AppLanguage.UZ -> "uz"; AppLanguage.EN -> "en"
-            AppLanguage.TG -> "tg"; AppLanguage.KAA -> "kaa"; AppLanguage.KK -> "kk"
-        }
-        return dict[langKey]?.get(key) ?: dict["en"]?.get(key) ?: key
-    }
-
-    fun translateCategory(cat: String, lang: AppLanguage): String {
-        if (lang == AppLanguage.RU) return cat
-        val langKey = when(lang) {
-            AppLanguage.UZ -> "uz"; AppLanguage.EN -> "en"
-            AppLanguage.TG -> "tg"; AppLanguage.KAA -> "kaa"; AppLanguage.KK -> "kk"
-            else -> "en"
-        }
-        val catMap = mapOf(
-            "uz" to mapOf("🍔 Еда" to "🍔 Ovqat", "🚕 Транспорт" to "🚕 Transport", "🏠 Жилье" to "🏠 Uy-joy", "🛒 Покупки" to "🛒 Xaridlar", "💊 Здоровье" to "💊 Salomatlik", "🎉 Развлечения" to "🎉 Ko'ngilochar", "📦 Другое" to "📦 Boshqa", "💵 Зарплата" to "💵 Maosh", "🎁 Подарок" to "🎁 Sovg'a", "💸 Перевод" to "💸 O'tkazma", "📈 Инвестиции" to "📈 Investitsiya"),
-            "en" to mapOf("🍔 Еда" to "🍔 Food", "🚕 Транспорт" to "🚕 Transport", "🏠 Жилье" to "🏠 Housing", "🛒 Покупки" to "🛒 Shopping", "💊 Здоровье" to "💊 Health", "🎉 Развлечения" to "🎉 Entertainment", "📦 Другое" to "📦 Other", "💵 Зарплата" to "💵 Salary", "🎁 Подарок" to "🎁 Gift", "💸 Перевод" to "💸 Transfer", "📈 Инвестиции" to "📈 Investment"),
-            "tg" to mapOf("🍔 Еда" to "🍔 Хӯрок", "🚕 Транспорт" to "🚕 Нақлиёт", "🏠 Жилье" to "🏠 Манзил", "🛒 Покупки" to "🛒 Харид", "💊 Здоровье" to "💊 Саломатӣ", "🎉 Развлечения" to "🎉 Фароғат", "📦 Другое" to "📦 Дигар", "💵 Зарплата" to "💵 Маош", "🎁 Подарок" to "🎁 Тӯҳфа", "💸 Перевод" to "💸 Интиқол", "📈 Инвестиции" to "📈 Сармоягузорӣ"),
-            "kaa" to mapOf("🍔 Еда" to "🍔 Awqat", "🚕 Транспорт" to "🚕 Transport", "🏠 Жилье" to "🏠 Turar-joy", "🛒 Покупки" to "🛒 Satıw alıw", "💊 Здоровье" to "💊 Densawlıq", "🎉 Развлечения" to "🎉 Oynap-kúliw", "📦 Другое" to "📦 Basqa", "💵 Зарплата" to "💵 Aylıq", "🎁 Подарок" to "🎁 Sıylıq", "💸 Перевод" to "💸 Awıspa", "📈 Инвестиции" to "📈 Investitsiya"),
-            "kk" to mapOf("🍔 Еда" to "🍔 Тамақ", "🚕 Транспорт" to "🚕 Көлік", "🏠 Жилье" to "🏠 Тұрғын үй", "🛒 Покупки" to "🛒 Сатып алу", "💊 Здоровье" to "💊 Денсаулық", "🎉 Развлечения" to "🎉 Ойын-сауық", "📦 Другое" to "📦 Басқа", "💵 Зарплата" to "💵 Жалақы", "🎁 Подарок" to "🎁 Сыйлық", "💸 Перевод" to "💸 Аударым", "📈 Инвестиции" to "📈 Инвестиция")
-        )
-        return catMap[langKey]?.get(cat) ?: cat
-    }
-}
-
-fun Long.money(): String {
-    val abs = kotlin.math.abs(this)
-    val whole = String.format(Locale.US, "%,d", abs / 100).replace(',', ' ')
-    val frac = abs % 100
-    val sign = if (this < 0) "-" else ""
-    return "$sign$whole.%02d".format(frac)
-}
-
 fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) -> Unit) {
     onFound(SmsParser.scanInbox(context, existingTxs))
 }
@@ -398,7 +150,6 @@ class VM(app: Application) : AndroidViewModel(app) {
         val now = LocalDate.now(); val currentMonthStr = YearMonth.now().toString(); val currentDay = now.dayOfMonth
         val templates = dao.getRecurringList()
         for (t in templates) {
-            // Fix 1.12: Учитываем конец месяца (например, если платеж на 31-е, а в месяце 28 дней)
             val effectiveDay = minOf(t.dayOfMonth, now.lengthOfMonth())
             if (effectiveDay <= currentDay && t.lastExecutedMonth != currentMonthStr) {
                 val tx = Tx(amountMinor = t.amountMinor, type = t.type, cardId = t.cardId, description = t.description, category = t.category, timestamp = now.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), source = "AUTO")
@@ -463,8 +214,7 @@ class VM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val root = JSONObject(jsonString)
-                
-                // 1. Сначала парсим всё в память (если упадет здесь - база цела)
+
                 val txsList = mutableListOf<Tx>()
                 val txsArray = root.optJSONArray("txs")
                 if (txsArray != null) { for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i); txsList.add(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")), cardId = if (o.isNull("cardId")) null else o.getString("cardId"), toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"), description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"), source = o.optString("source"), currency = o.optString("currency", "UZS"), photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"))) } }
@@ -489,11 +239,10 @@ class VM(app: Application) : AndroidViewModel(app) {
                 val goalsArray = root.optJSONArray("goals")
                 if (goalsArray != null) { for (i in 0 until goalsArray.length()) { val o = goalsArray.getJSONObject(i); goalsList.add(SavingsGoalEntity(id = o.optLong("id"), name = o.getString("name"), targetAmountMinor = o.getLong("targetAmountMinor"), currentAmountMinor = o.getLong("currentAmountMinor"))) } }
 
-                // 2. Всё распарсилось успешно. Очищаем БД и вставляем данные в одной транзакции
                 db.withTransaction {
                     dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
-                    dao.clearCategories(); dao.clearGoals() // Fix 1.5: Очищаем категории и цели
-                    
+                    dao.clearCategories(); dao.clearGoals()
+
                     dao.insertAll(txsList)
                     cardsList.forEach { dao.upsertCard(it) }
                     budgetsList.forEach { dao.upsertBudget(it) }
@@ -501,12 +250,12 @@ class VM(app: Application) : AndroidViewModel(app) {
                     catsList.forEach { dao.upsertCategory(it) }
                     goalsList.forEach { dao.upsertGoal(it) }
                 }
-                
+
                 ensureCashAccount()
                 onResult(true)
-            } catch (e: Exception) { 
+            } catch (e: Exception) {
                 e.printStackTrace()
-                onResult(false) 
+                onResult(false)
             }
         }
     }
@@ -596,7 +345,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var pendingRestoreJson by remember { mutableStateOf("") }
     var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }; var showImportConfirm by remember { mutableStateOf(false) }
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
-    
+
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
 
     var showAnalytics by remember { mutableStateOf(false) }
@@ -618,7 +367,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     fun checkPendingSms() {
         if (editing != null || adding) return
         val pendingObj = PendingQueue.peek(context) ?: return
-        
+
         try {
             val pendingTx = Tx(
                 id = 0,
@@ -656,7 +405,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
                 val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
-                // Fix 1.6: Передаем allTxs для защиты от дубликатов
                 val parsedTxs = SmsParser.parseImportedFile(text, allTxs)
                 if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true }
                 else { snackbarHostState.showSnackbar(t("no_tx_found")) }
@@ -671,19 +419,19 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 ocrDebugInfo = "${t("image_error")}\n$it"
                 return@launch
             }
-            
+
             val imageInfo = "${t("debug_size")}: ${bitmap.width}x${bitmap.height}"
             val image = InputImage.fromBitmap(bitmap, 0)
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            
+
             recognizer.process(image).addOnSuccessListener { visionText ->
                 val rawText = visionText.text
                 val parsedCards = parseCardsFromScreenshot(rawText)
-                
-                if (parsedCards.isNotEmpty()) { 
+
+                if (parsedCards.isNotEmpty()) {
                     importedCards = parsedCards
-                    showCardImportConfirm = true 
-                } else { 
+                    showCardImportConfirm = true
+                } else {
                     ocrDebugInfo = buildString {
                         appendLine("--- ${t("ocr_debug")} ---")
                         appendLine(imageInfo)
@@ -704,24 +452,22 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
     val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
     val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-    
-    // Fix 2.3: derivedStateOf для фильтрации
+
     val filteredTxs by remember(txs, searchQuery, filterType, currentLang.value) {
         derivedStateOf {
-            txs.filter { tx -> 
-                (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) && 
-                (filterType == null || tx.type == filterType) 
+            txs.filter { tx ->
+                (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) &&
+                (filterType == null || tx.type == filterType)
             }
         }
     }
-    
+
     val byDay by remember(filteredTxs) {
         derivedStateOf {
             filteredTxs.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
         }
     }
 
-    // Fix 2.2: remember для балансов
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
         cards.associate { card ->
             val cardTxs = allTxs.filter { it.cardId == card.id }
@@ -739,7 +485,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     }
     val totalLiquidBalanceUzs = cardBalancesInUzs.values.sum()
 
-    // Fix 2.4: обновляем виджет только когда меняется итоговая сумма
     val totalForWidget = remember(totalLiquidBalanceUzs, goals) {
         totalLiquidBalanceUzs + goals.sumOf { it.currentAmountMinor }
     }
@@ -802,21 +547,21 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             AlertDialog(
                 onDismissRequest = { ocrDebugInfo = null },
                 title = { Text(t("ocr_debug")) },
-                text = { 
-                    Column(Modifier.verticalScroll(rememberScrollState())) { 
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
                         SelectionContainer {
                             Text(
-                                text = ocrDebugInfo!!, 
+                                text = ocrDebugInfo!!,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace
-                            ) 
+                            )
                         }
-                    } 
+                    }
                 },
-                confirmButton = { 
-                    TextButton(onClick = { ocrDebugInfo = null }) { 
-                        Text(t("close")) 
-                    } 
+                confirmButton = {
+                    TextButton(onClick = { ocrDebugInfo = null }) {
+                        Text(t("close"))
+                    }
                 }
             )
         }
@@ -841,7 +586,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
                             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                 val monthTitle = "${getMonthName(month.monthValue, currentLang.value)} ${month.year}"
-                                
+
                                 Text(
                                     monthTitle,
                                     modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp),
@@ -994,30 +739,30 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
         if (adding || editing != null) {
             TxDialog(
-                initial = editing, 
-                cards = cards, 
-                expenseCategories = expenseCategories, 
-                incomeCategories = incomeCategories, 
-                currentLang = currentLang.value, 
-                isPendingSms = isPendingSms, 
-                rates = rates, 
+                initial = editing,
+                cards = cards,
+                expenseCategories = expenseCategories,
+                incomeCategories = incomeCategories,
+                currentLang = currentLang.value,
+                isPendingSms = isPendingSms,
+                rates = rates,
                 vm = vm,
-                onDismiss = { 
+                onDismiss = {
                     if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                    adding = false; editing = null 
+                    adding = false; editing = null
                 },
-                onSave = { 
+                onSave = {
                     vm.save(it)
                     if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                    adding = false; editing = null 
+                    adding = false; editing = null
                 },
-                onDelete = if (isPendingSms) null else editing?.let { e -> 
-                    { vm.delete(e); editing = null; scope.launch { 
+                onDelete = if (isPendingSms) null else editing?.let { e ->
+                    { vm.delete(e); editing = null; scope.launch {
                         val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }
                         val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite)
                         timerJob.cancel()
-                        if (result == SnackbarResult.ActionPerformed) vm.save(e) 
-                    } } 
+                        if (result == SnackbarResult.ActionPerformed) vm.save(e)
+                    } }
                 }
             )
         }
@@ -1479,7 +1224,7 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
                 .replace(" ", "").replace("\u00A0", "")
                 .replace(",", ".")
                 .replace('O', '0').replace('o', '0')
-            
+
             val normalizedAmt = if (amtStr.contains(".") && amtStr.substringAfter(".").length == 1) "${amtStr}0" else amtStr
             val parsedAmount = normalizedAmt.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong()
             if (parsedAmount != null) {
@@ -1492,12 +1237,12 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
         if (cardMatch != null) {
             val startIndex = cardMatch.range.first
             val prefix = line.substring(0, startIndex)
-            
+
             if (prefix.contains("****")) continue
 
             val rawLast4 = cardMatch.groupValues[1]
             val last4 = rawLast4.replace('O', '0').replace('o', '0')
-            
+
             if (last4.startsWith("20")) continue
 
             val shortName = getShortBankName(currentBank)
@@ -1506,10 +1251,10 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
             if (result.none { it.last4 == last4 }) {
                 val amountToAssign = if (pendingAmounts.isNotEmpty()) pendingAmounts.removeAt(0) else 0L
                 result.add(CardEntity(
-                    id = "${last4}_$currentCurrency", 
-                    last4 = last4, 
-                    name = finalName, 
-                    currency = currentCurrency, 
+                    id = "${last4}_$currentCurrency",
+                    last4 = last4,
+                    name = finalName,
+                    currency = currentCurrency,
                     initialBalanceMinor = amountToAssign
                 ))
             }
@@ -1521,139 +1266,6 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
 fun parseSmsText(text: String): ParsedSms? = SmsParser.parseForOcr(text)
-
-object VoiceParser {
-    data class VoiceTxResult(
-        val amountMinor: Long?,
-        val type: TxType?,
-        val cardLast4: String?,
-        val isCash: Boolean,
-        val categoryName: String?,
-        val description: String
-    )
-
-    data class VoiceCardResult(val bankName: String?, val last4: String)
-
-    private val ones = mapOf(
-        "ноль" to 0L, "один" to 1L, "одна" to 1L, "два" to 2L, "две" to 2L, "три" to 3L,
-        "четыре" to 4L, "пять" to 5L, "шесть" to 6L, "семь" to 7L, "восемь" to 8L, "девять" to 9L,
-        "nol" to 0L, "bir" to 1L, "ikki" to 2L, "uch" to 3L, "to'rt" to 4L, "tort" to 4L,
-        "besh" to 5L, "olti" to 6L, "yetti" to 7L, "sakkiz" to 8L, "to'qqiz" to 9L, "toqqiz" to 9L
-    )
-    private val tens = mapOf(
-        "десять" to 10L, "двадцать" to 20L, "тридцать" to 30L, "сорок" to 40L,
-        "пятьдесят" to 50L, "шестьдесят" to 60L, "семьдесят" to 70L, "восемьдесят" to 80L,
-        "девяносто" to 90L,
-        "o'n" to 10L, "on" to 10L, "yigirma" to 20L, "o'ttiz" to 30L, "ottiz" to 30L,
-        "qirq" to 40L, "ellik" to 50L, "oltmish" to 60L, "yetmish" to 70L,
-        "sakson" to 80L, "to'qson" to 90L, "toqson" to 90L
-    )
-    private val hundreds = mapOf(
-        "сто" to 100L, "двести" to 200L, "триста" to 300L, "четыреста" to 400L,
-        "пятьсот" to 500L, "шестьсот" to 600L, "семьсот" to 700L, "восемьсот" to 800L,
-        "девятьсот" to 900L, "yuz" to 100L
-    )
-    private val multipliers = mapOf(
-        "тысяча" to 1000L, "тысячи" to 1000L, "тысяч" to 1000L, "тыс" to 1000L,
-        "минг" to 1000L, "ming" to 1000L,
-        "миллион" to 1000000L, "миллиона" to 1000000L, "миллионов" to 1000000L, "млн" to 1000000L,
-        "million" to 1000000L, "mln" to 1000000L
-    )
-
-    fun parseTransaction(text: String, expenseCategories: List<String>, incomeCategories: List<String>): VoiceTxResult {
-        val lower = text.lowercase().replace("ё", "е")
-
-        val expenseKw = listOf("потратил", "потратила", "купил", "купила", "оплатил", "оплатила",
-            "расход", "оплата", "трата", "sarfladim", "sotib oldim", "to'ladim", "toladim", "xarajat", "harajat")
-        val incomeKw = listOf("получил", "получила", "зарплата", "доход", "приход", "заработал",
-            "заработала", "oldim", "maosh", "daromad", "kirim", "ishladim")
-        val type: TxType? = when {
-            expenseKw.any { lower.contains(it) } -> TxType.EXPENSE
-            incomeKw.any { lower.contains(it) } -> TxType.INCOME
-            else -> null
-        }
-
-        val isCash = listOf("наличные", "наличкой", "наличными", "кэш", "naqd", "нал ").any { lower.contains(it) }
-        val cardLast4 = Regex("""(?:карт[а-я]*|karta[s]?)\s+(\d{4})""").find(lower)?.groupValues?.get(1)
-
-        val amountMinor = parseAmount(lower)
-        val categoryList = if (type == TxType.INCOME) incomeCategories else expenseCategories
-        val categoryName = findCategory(lower, categoryList)
-
-        return VoiceTxResult(amountMinor, type, cardLast4, isCash, categoryName, text.trim())
-    }
-
-    fun parseCard(text: String): VoiceCardResult? {
-        val lower = text.lowercase()
-        val m = Regex("""\b(\d{4})\b""").find(lower) ?: return null
-        val banks = listOf("kapitalbank", "uzum", "anorbank", "tbc", "humo", "uzcard",
-            "aloqa", "agrobank", "sberbank", "ipoteka", "trast", "asakabank")
-        val bank = banks.firstOrNull { lower.contains(it) }
-        return VoiceCardResult(bank, m.groupValues[1])
-    }
-
-    private fun parseAmount(text: String): Long? {
-        val clean = text
-            .replace(Regex("""(?:карт[а-я]*|karta[s]?)\s+\d{4}"""), "")
-            .replace(Regex("""\b\d{4}\b"""), "")
-
-        val withUnit = Regex("""(\d[\d\s]*)\s*(тысяч[а-я]*|тыс\b|минг|ming|миллион[а-я]*|млн|million|mln|сум|so['`]?m|som)""",
-            RegexOption.IGNORE_CASE).find(clean)
-        if (withUnit != null) {
-            val num = withUnit.groupValues[1].replace(" ", "").toLongOrNull()
-            if (num != null) {
-                val u = withUnit.groupValues[2].lowercase()
-                val mult = when {
-                    u.startsWith("тыс") || u.startsWith("минг") || u.contains("ming") -> 1000L
-                    u.startsWith("миллион") || u == "млн" || u.contains("million") || u.contains("mln") -> 1000000L
-                    else -> 1L
-                }
-                return num * mult * 100
-            }
-        }
-
-        val words = clean.split(Regex("[\\s,]+"))
-        var total = 0L; var current = 0L; var found = false
-        for (w in words) {
-            val c = w.replace(Regex("[^\\p{L}']"), "")
-            when {
-                ones.containsKey(c) -> { current += ones[c]!!; found = true }
-                tens.containsKey(c) -> { current += tens[c]!!; found = true }
-                hundreds.containsKey(c) -> { current += hundreds[c]!!; found = true }
-                multipliers.containsKey(c) -> {
-                    total += (if (current == 0L) 1L else current) * multipliers[c]!!
-                    current = 0L; found = true
-                }
-            }
-        }
-        total += current
-        if (found && total > 0) return total * 100
-
-        val plain = Regex("""\b(\d+)\b""").findAll(clean).mapNotNull { it.groupValues[1].toLongOrNull() }
-            .filter { it.toString().length != 4 }.firstOrNull()
-        return plain?.times(100)
-    }
-
-    private fun findCategory(text: String, categories: List<String>): String? {
-        val map = mapOf(
-            "🍔 Еда" to listOf("еда", "еду", "обед", "ужин", "завтрак", "кафе", "ресторан", "кофе", "перекус", "ovqat", "tushlik", "nonushta", "kafe", "restoran", "kofe"),
-            "🚕 Транспорт" to listOf("такси", "транспорт", "автобус", "метро", "бензин", "бензина", "проезд", "taksi", "transport", "avtobus", "metro", "benzin"),
-            "🏠 Жилье" to listOf("жилье", "жильё", "квартира", "аренда", "коммунал", "свет", "газ", "вода", "uy", "kvartira", "arenda", "kommunal"),
-            "🛒 Покупки" to listOf("покупк", "магазин", "продукт", "xarid", "do'kon", "dokon", "mahsulot"),
-            "💊 Здоровье" to listOf("здоровье", "аптека", "лекарств", "врач", "больниц", "salomatlik", "apteka", "dori", "shifokor"),
-            "🎉 Развлечения" to listOf("развлечен", "кино", "игр", "отдых", "ko'ngilochar", "kongilochar", "kino", "o'yin", "oyin"),
-            "💵 Зарплата" to listOf("зарплат", "аванс", "maosh", "oylik"),
-            "🎁 Подарок" to listOf("подарок", "подар", "sovg'a", "sovga"),
-            "💸 Перевод" to listOf("перевод", "перевел", "перевела", "o'tkazma", "otkazma", "perevod"),
-            "📈 Инвестиции" to listOf("инвестиц", "дивиденд", "investitsiya", "dividend")
-        )
-        for (cat in categories) {
-            val kws = map[cat] ?: continue
-            if (kws.any { text.contains(it) }) return cat
-        }
-        return null
-    }
-}
 
 @Composable
 fun DailyExpenseChart(txs: List<Tx>, yearMonth: YearMonth) {
