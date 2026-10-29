@@ -63,7 +63,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         PDFBoxResourceLoader.init(applicationContext)
         
-        // === МИГРАЦИЯ СТАРЫХ НАСТРОЕК В ЗАШИФРОВАННЫЕ ===
+        // МИГРАЦИЯ СТАРЫХ НАСТРОЕК В ЗАШИФРОВАННЫЕ (из пункта 1.13)
         val oldPrefs = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
         val newPrefs = SecurityHelper.getEncryptedPrefs(this)
         if (oldPrefs.contains("pin") && !newPrefs.contains("pin")) {
@@ -71,7 +71,7 @@ class MainActivity : FragmentActivity() {
                 .putString("pin", oldPrefs.getString("pin", "0000"))
                 .putBoolean("use_biometric", oldPrefs.getBoolean("use_biometric", true))
                 .apply()
-            oldPrefs.edit().clear().apply() // Стираем старый незащищенный файл
+            oldPrefs.edit().clear().apply()
         }
 
         val prefs = getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
@@ -104,7 +104,7 @@ class MainActivity : FragmentActivity() {
 fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> Unit) {
     var pin by remember { mutableStateOf("") }; var error by remember { mutableStateOf(false) }
     
-    // Используем ЗАШИФРОВАННЫЕ настройки
+    // ЗАШИФРОВАННЫЕ НАСТРОЙКИ
     val prefs = SecurityHelper.getEncryptedPrefs(activity)
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val useBiometric = prefs.getBoolean("use_biometric", true)
     
@@ -122,7 +122,7 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
             Spacer(Modifier.height(8.dp)); TextButton(onClick = {
                 val executor = ContextCompat.getMainExecutor(activity)
                 try {
-                    // Используем CryptoObject для защиты
+                    // БЕЗОПАСНАЯ БИОМЕТРИЯ (CryptoObject)
                     val cryptoObject = BiometricPrompt.CryptoObject(SecurityHelper.getCryptoObject())
                     val biometricPrompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
                         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { 
@@ -290,13 +290,16 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         }
     }
 
+    // ОБНОВЛЕННЫЙ РАСЧЕТ БАЛАНСА (с учетом toAmountMinor)
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
         cards.associate { card ->
             val cardTxs = allTxs.filter { it.cardId == card.id }
             val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
             val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
             val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
-            val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
+            
+            // Используем toAmountMinor, если он есть (для мультивалютных переводов)
+            val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.toAmountMinor ?: it.amountMinor }
 
             val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
             val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
