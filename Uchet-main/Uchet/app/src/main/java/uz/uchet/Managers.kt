@@ -29,7 +29,7 @@ fun GoalManagerDialog(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, l
     var name by remember { mutableStateOf("") }; var targetAmount by remember { mutableStateOf("") }
     var depositGoal by remember { mutableStateOf<SavingsGoalEntity?>(null) }; var depositAmount by remember { mutableStateOf("") }
     var depositCardId by remember { mutableStateOf(cards.firstOrNull()?.id ?: "CASH") }
-    var goalToDelete by remember { mutableStateOf<SavingsGoalEntity?>(null) } // ПОДТВЕРЖДЕНИЕ
+    var goalToDelete by remember { mutableStateOf<SavingsGoalEntity?>(null) }
     val t = { key: String -> Translations.t(key, lang) }
     val currentDepositGoal = depositGoal
 
@@ -67,7 +67,7 @@ fun GoalManagerDialog(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, l
 fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, allTxs: List<Tx>, onSave: (CardEntity) -> Unit, onDelete: (String) -> Unit, onAdjustBalance: (String, Long) -> Unit, currentLang: AppLanguage, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit) {
     var last4 by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var initialBalance by remember { mutableStateOf("") }; var currency by remember { mutableStateOf("UZS") }
     var editingCard by remember { mutableStateOf<CardEntity?>(null) }; var actualBalanceInput by remember { mutableStateOf("") }
-    var cardToDelete by remember { mutableStateOf<String?>(null) } // ПОДТВЕРЖДЕНИЕ
+    var cardToDelete by remember { mutableStateOf<String?>(null) }
     val t = { key: String -> Translations.t(key, currentLang) }
 
     val voiceCardLauncher = rememberLauncherForActivityResult(
@@ -80,6 +80,10 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                     last4 = parsed.last4
                     name = parsed.bankName?.let { bn -> "${getShortBankName(bn)} ${parsed.last4}" }
                         ?: "Bank ${parsed.last4}"
+                    // НОВОЕ: подставляем распарсенный остаток, если он был назван
+                    parsed.balanceMinor?.let { bal ->
+                        initialBalance = BigDecimal(bal).movePointLeft(2).stripTrailingZeros().toPlainString()
+                    }
                 }
             }
         }
@@ -153,8 +157,6 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                 cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) };
                         IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) };
-                        
-                        // ЗАЩИТА ОТ УДАЛЕНИЯ НАЛИЧНЫХ
                         if (c.id != "CASH" && c.last4 != "CASH") {
                             IconButton({ cardToDelete = c.id }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
                         }
@@ -168,7 +170,7 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
 fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<String>, onSave: (BudgetEntity) -> Unit, onDelete: (String) -> Unit, currentLang: AppLanguage, onDismiss: () -> Unit) {
     var selectedCategory by remember { mutableStateOf(expenseCategories.firstOrNull() ?: "📦 Другое") }; var limitInput by remember { mutableStateOf("") }
     var showCategoryMenu by remember { mutableStateOf(false) }
-    var budgetToDelete by remember { mutableStateOf<String?>(null) } // ПОДТВЕРЖДЕНИЕ
+    var budgetToDelete by remember { mutableStateOf<String?>(null) }
     val t = { key: String -> Translations.t(key, currentLang) }
 
     if (budgetToDelete != null) {
@@ -212,7 +214,7 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
 fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEntity>, expenseCategories: List<String>, incomeCategories: List<String>, currentLang: AppLanguage, onSave: (RecurringEntity) -> Unit, onDelete: (RecurringEntity) -> Unit, onDismiss: () -> Unit) {
     var type by remember { mutableStateOf(TxType.EXPENSE) }; var category by remember { mutableStateOf(expenseCategories.lastOrNull() ?: "📦 Другое") }
     var amount by remember { mutableStateOf("") }; var selectedCardId by remember { mutableStateOf("CASH") }; var desc by remember { mutableStateOf("") }; var dayOfMonth by remember { mutableStateOf("1") }
-    var recToDelete by remember { mutableStateOf<RecurringEntity?>(null) } // ПОДТВЕРЖДЕНИЕ
+    var recToDelete by remember { mutableStateOf<RecurringEntity?>(null) }
     val t = { key: String -> Translations.t(key, currentLang) }
 
     var showTypeMenu by remember { mutableStateOf(false) }
@@ -280,7 +282,7 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
 @Composable
 fun CategoryManagerDialog(categories: List<CategoryEntity>, lang: AppLanguage, onSave: (CategoryEntity) -> Unit, onDelete: (String) -> Unit, onDismiss: () -> Unit) {
     var isIncome by remember { mutableStateOf(false) }; var name by remember { mutableStateOf("") }; val t = { key: String -> Translations.t(key, lang) }
-    var catToDelete by remember { mutableStateOf<String?>(null) } // ПОДТВЕРЖДЕНИЕ
+    var catToDelete by remember { mutableStateOf<String?>(null) }
 
     if (catToDelete != null) {
         AlertDialog(
