@@ -28,6 +28,7 @@ data class Tx(
     val type: TxType,
     val cardId: String? = null,
     val toCardId: String? = null,
+    val toAmountMinor: Long? = null, // <-- НОВОЕ ПОЛЕ (сколько зачислено при переводе в другой валюте)
     val description: String = "",
     val category: String = "",
     val timestamp: Long,
@@ -108,6 +109,10 @@ interface AppDao {
 
     @Query("DELETE FROM cards WHERE id = :id")
     suspend fun deleteCard(id: String)
+    
+    // Обнуляем привязку к удаленной карте, чтобы транзакции не пропали
+    @Query("UPDATE txs SET cardId = NULL WHERE cardId = :cardId")
+    suspend fun unlinkCardTransactions(cardId: String)
 
     @Query("SELECT * FROM budgets")
     fun observeBudgets(): Flow<List<BudgetEntity>>
@@ -141,6 +146,10 @@ interface AppDao {
 
     @Query("DELETE FROM categories WHERE name = :name")
     suspend fun deleteCategory(name: String)
+    
+    // Переносим транзакции в "Другое" при удалении категории
+    @Query("UPDATE txs SET category = :newCategory WHERE category = :oldCategory")
+    suspend fun replaceCategory(oldCategory: String, newCategory: String)
 
     @Query("SELECT * FROM goals")
     fun observeGoals(): Flow<List<SavingsGoalEntity>>
@@ -181,7 +190,7 @@ interface AppDao {
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
         CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class
     ],
-    version = 3,
+    version = 4, // <-- ПОДНЯЛИ ВЕРСИЮ
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -199,6 +208,13 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_category`  ON `txs` (`category`)")
             }
         }
+        
+        // МИГРАЦИЯ ДЛЯ НОВОГО ПОЛЯ
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE txs ADD COLUMN toAmountMinor INTEGER DEFAULT NULL")
+            }
+        }
 
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
@@ -207,7 +223,7 @@ abstract class AppDb : RoomDatabase() {
                     AppDb::class.java,
                     "uchet_database"
                 )
-                .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 INSTANCE = instance
                 instance
