@@ -4,42 +4,46 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import org.json.JSONObject
 
 class BankNotificationService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        super.onNotificationPosted(sbn)
-        if (sbn == null) return
-        val packageName = sbn.packageName ?: return
+        val sbn = sbn ?: return
+        val packageName = sbn.packageName
 
-        val bankPackages = listOf(
+        val bankPackages = setOf(
             "uz.kapitalbank.mobile", "uz.uzumbank", "uz.tez", "uz.anorbank",
-            "uz.tengebank", "uz.agrobank", "uz.tbc", "uz.avo"
+            "uz.tengebank", "uz.agrobank", "uz.tbc", "uz.avo", "uz.asakabank"
         )
-        if (!bankPackages.any { packageName.contains(it, true) } &&
-            !packageName.contains("bank", true)) return
+        if (packageName !in bankPackages) return
+
+        // Пункт 1.10: Отсекаем групповые и постоянные уведомления
+        val flags = sbn.notification?.flags ?: 0
+        if (flags and Notification.FLAG_GROUP_SUMMARY != 0 || sbn.isOngoing) return
 
         val extras = sbn.notification?.extras ?: return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
         val text  = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-        val big   = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: text
-        val fullText = "$title. $big"
+        val big   = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+        
+        // Пункт 2.9: Читаем MessagingStyle (актуально для Uzum, Kapital)
+        val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.joinToString(" ") { it?.toString() ?: "" } ?: ""
+            
+        val fullText = listOf(title, big, text, lines).filter { it.isNotBlank() }.joinToString(". ")
 
-        Log.d("BankPush", "[$packageName] $fullText")
-
-        val (category, tx) = SmsParser.classify(packageName, fullText, System.currentTimeMillis())
+        // Пункт 2.10: Используем время публикации уведомления
+        val txTimestamp = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis()
+        val (category, tx) = SmsParser.classify(packageName, fullText, txTimestamp)
+        
         if (category != SmsCategory.TRANSACTION || tx == null) return
 
-        val pendingJson = JSONObject().apply {
-            put("amountMinor", tx.amountMinor)
-            put("type", tx.type.name)
-            put("card", tx.cardLast4?.let { "${it}_UZS" } ?: JSONObject.NULL)
-            put("description", tx.merchant)
-            put("category", tx.category)
-            put("timestamp", tx.timestamp)
-            put("currency", tx.currency)
-        }
-        getSharedPreferences("pending_sms", MODE_PRIVATE)
-            .edit().putString("pending", pendingJson.toString()).apply()
+        // Пункт 1.10: Дедупликация (чтобы одно уведомление не создало 2-3 транзакции при обновлении)
+        val prefs = getSharedPreferences("notif_dedup", MODE_PRIVATE)
+        val key = "${tx.amountMinor}_${tx.cardLast4}_${tx.type}"
+        val lastTs = prefs.getLong(key, 0L)
+        if (txTimestamp - lastTs < 60_000L) return // Пропускаем дубликат в пределах минуты
+        prefs.edit().putLong(key, txTimestamp).apply()
+
+        PendingQueue.push(this, tx)
     }
 }
