@@ -62,6 +62,18 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PDFBoxResourceLoader.init(applicationContext)
+        
+        // === МИГРАЦИЯ СТАРЫХ НАСТРОЕК В ЗАШИФРОВАННЫЕ ===
+        val oldPrefs = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+        val newPrefs = SecurityHelper.getEncryptedPrefs(this)
+        if (oldPrefs.contains("pin") && !newPrefs.contains("pin")) {
+            newPrefs.edit()
+                .putString("pin", oldPrefs.getString("pin", "0000"))
+                .putBoolean("use_biometric", oldPrefs.getBoolean("use_biometric", true))
+                .apply()
+            oldPrefs.edit().clear().apply() // Стираем старый незащищенный файл
+        }
+
         val prefs = getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
         currentTheme.value = try { AppTheme.valueOf(prefs.getString("app_theme", "SYSTEM") ?: "SYSTEM") } catch (e: Exception) { AppTheme.SYSTEM }
         currentLang.value = try { AppLanguage.valueOf(prefs.getString("app_lang", "RU") ?: "RU") } catch (e: Exception) { AppLanguage.RU }
@@ -91,8 +103,11 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> Unit) {
     var pin by remember { mutableStateOf("") }; var error by remember { mutableStateOf(false) }
-    val prefs = activity.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+    
+    // Используем ЗАШИФРОВАННЫЕ настройки
+    val prefs = SecurityHelper.getEncryptedPrefs(activity)
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val useBiometric = prefs.getBoolean("use_biometric", true)
+    
     val biometricManager = BiometricManager.from(activity)
     val canUseBiometric = useBiometric && biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
     val t = { key: String -> Translations.t(key, lang) }
@@ -102,14 +117,28 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
         Spacer(Modifier.height(16.dp)); Text(t("locked"), style = MaterialTheme.typography.titleLarge); Spacer(Modifier.height(24.dp))
         OutlinedTextField(value = pin, onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4); error = false }, label = { Text(t("pin")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), singleLine = true, isError = error, supportingText = { if (error) Text(t("wrong_pin"), color = RED) })
         Spacer(Modifier.height(16.dp)); Button(onClick = { if (pin == savedPin) onUnlocked() else { pin = ""; error = true } }, modifier = Modifier.fillMaxWidth()) { Text(t("login")) }
+        
         if (canUseBiometric) {
             Spacer(Modifier.height(8.dp)); TextButton(onClick = {
                 val executor = ContextCompat.getMainExecutor(activity)
-                val biometricPrompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
-                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { super.onAuthenticationSucceeded(result); onUnlocked() }
-                })
-                val promptInfo = BiometricPrompt.PromptInfo.Builder().setTitle(t("login")).setSubtitle(t("fingerprint")).setNegativeButtonText(t("pin")).build()
-                biometricPrompt.authenticate(promptInfo)
+                try {
+                    // Используем CryptoObject для защиты
+                    val cryptoObject = BiometricPrompt.CryptoObject(SecurityHelper.getCryptoObject())
+                    val biometricPrompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { 
+                            super.onAuthenticationSucceeded(result); onUnlocked() 
+                        }
+                    })
+                    val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                        .setTitle(t("login"))
+                        .setSubtitle(t("fingerprint"))
+                        .setNegativeButtonText(t("pin"))
+                        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                        .build()
+                    biometricPrompt.authenticate(promptInfo, cryptoObject)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }) { Icon(Icons.Default.Fingerprint, null); Spacer(Modifier.width(8.dp)); Text(t("fingerprint")) }
         }
     }
