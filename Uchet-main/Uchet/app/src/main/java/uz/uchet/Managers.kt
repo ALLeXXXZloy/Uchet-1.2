@@ -251,10 +251,14 @@ fun CategoryManagerDialog(categories: List<CategoryEntity>, lang: AppLanguage, o
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsDialog(context: android.content.Context, onDismiss: () -> Unit, snackbarHostState: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope, currentTheme: MutableState<AppTheme>, currentLang: MutableState<AppLanguage>, vm: VM) {
-    val prefs = context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE); val settingsPrefs = context.getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE)
+    // ЗАШИФРОВАННЫЕ НАСТРОЙКИ ДЛЯ PIN
+    val prefs = SecurityHelper.getEncryptedPrefs(context)
+    val settingsPrefs = context.getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE)
+    
     var oldPin by remember { mutableStateOf("") }; var newPin by remember { mutableStateOf("") }; var confirmPin by remember { mutableStateOf("") }; var useBiometric by remember { mutableStateOf(prefs.getBoolean("use_biometric", true)) }
     var smsDebug by remember { mutableStateOf(settingsPrefs.getBoolean("sms_debug_mode", false)) }
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val t = { key: String -> Translations.t(key, currentLang.value) }
+    
     AlertDialog(onDismissRequest = onDismiss, title = { Text(t("settings")) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(t("language"), style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
@@ -282,11 +286,28 @@ fun SettingsDialog(context: android.content.Context, onDismiss: () -> Unit, snac
             OutlinedTextField(value = oldPin, onValueChange = { oldPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = newPin, onValueChange = { newPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin") + " (new)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = confirmPin, onValueChange = { confirmPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin") + " (repeat)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(8.dp))
-            Button(onClick = { when { oldPin != savedPin -> scope.launch { snackbarHostState.showSnackbar(t("wrong_pin")) }; newPin.length != 4 -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }; newPin != confirmPin -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }; else -> { prefs.edit().putString("pin", newPin).apply(); oldPin = ""; newPin = ""; confirmPin = ""; scope.launch { snackbarHostState.showSnackbar(t("pin_ok")) } } } }, modifier = Modifier.fillMaxWidth()) { Text(t("change_pin")) }
+            
+            Button(onClick = { when { 
+                oldPin != savedPin -> scope.launch { snackbarHostState.showSnackbar(t("wrong_pin")) }
+                newPin.length != 4 -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }
+                newPin != confirmPin -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }
+                else -> { 
+                    prefs.edit().putString("pin", newPin).apply() // ШИФРУЕМ
+                    oldPin = ""; newPin = ""; confirmPin = ""
+                    scope.launch { snackbarHostState.showSnackbar(t("pin_ok")) } 
+                } 
+            } }, modifier = Modifier.fillMaxWidth()) { Text(t("change_pin")) }
+            
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(t("biometric"), style = MaterialTheme.typography.titleSmall) }; Switch(checked = useBiometric, onCheckedChange = { useBiometric = it; prefs.edit().putBoolean("use_biometric", it).apply() }) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+                Column(Modifier.weight(1f)) { Text(t("biometric"), style = MaterialTheme.typography.titleSmall) }
+                Switch(checked = useBiometric, onCheckedChange = { useBiometric = it; prefs.edit().putBoolean("use_biometric", it).apply() }) 
+            }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(t("sms_debug"), style = MaterialTheme.typography.titleSmall) }; Switch(checked = smsDebug, onCheckedChange = { smsDebug = it; settingsPrefs.edit().putBoolean("sms_debug_mode", it).apply() }) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+                Column(Modifier.weight(1f)) { Text(t("sms_debug"), style = MaterialTheme.typography.titleSmall) }
+                Switch(checked = smsDebug, onCheckedChange = { smsDebug = it; settingsPrefs.edit().putBoolean("sms_debug_mode", it).apply() }) 
+            }
         } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
 }
