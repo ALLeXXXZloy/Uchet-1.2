@@ -4,7 +4,6 @@ import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,10 +15,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -45,8 +46,8 @@ fun GoalManagerDialog(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, l
                 Button(onClick = { val targetMinor = runCatching { BigDecimal(targetAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); if (name.isNotBlank() && targetMinor != null && targetMinor > 0) { onSaveGoal(SavingsGoalEntity(name = name.trim(), targetAmountMinor = targetMinor)); name = ""; targetAmount = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add_goal")) }
                 Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
                 Text(t("goals") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-                if (goals.isEmpty()) Text(t("no_found"), color = androidx.compose.ui.graphics.Color.Gray)
-                goals.forEach { goal -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(goal.name, fontWeight = FontWeight.Bold); Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray) }; IconButton(onClick = { depositGoal = goal }) { Icon(Icons.Default.Add, t("deposit"), tint = GREEN) }; IconButton(onClick = { onDeleteGoal(goal) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+                if (goals.isEmpty()) Text(t("no_found"), color = Color.Gray)
+                goals.forEach { goal -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(goal.name, fontWeight = FontWeight.Bold); Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton(onClick = { depositGoal = goal }) { Icon(Icons.Default.Add, t("deposit"), tint = GREEN) }; IconButton(onClick = { onDeleteGoal(goal) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
             } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
     }
 }
@@ -126,9 +127,9 @@ fun CardManagerDialog(cards: List<CardEntity>, cardBalances: Map<String, Long>, 
                 Button(onClick = { val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L; if (name.isNotBlank() && last4.isNotBlank()) { onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor)); name = ""; last4 = ""; initialBalance = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
                 Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
                 Text(t("my_accounts") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-                if (cards.isEmpty()) Text(t("no_found"), color = androidx.compose.ui.graphics.Color.Gray)
+                if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
                 cards.forEach { c -> val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray) };
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold); Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) };
                         IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) };
                         if (c.id != "CASH") {
                             IconButton({ onDelete(c.id) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
@@ -166,8 +167,8 @@ fun BudgetManagerDialog(budgets: List<BudgetEntity>, expenseCategories: List<Str
             Button(onClick = { val limitMinor = runCatching { BigDecimal(limitInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); if (limitMinor != null && limitMinor > 0) { onSave(BudgetEntity(category = selectedCategory, limitMinor = limitMinor)); limitInput = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("set_limit")) }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("budgets") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-            if (budgets.isEmpty()) Text(t("no_found"), color = androidx.compose.ui.graphics.Color.Gray)
-            budgets.forEach { b -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(Translations.translateCategory(b.category, currentLang), fontWeight = FontWeight.Bold); Text("${t("limit")}: ${b.limitMinor.money()} UZS", style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray) }; IconButton({ onDelete(b.category) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+            if (budgets.isEmpty()) Text(t("no_found"), color = Color.Gray)
+            budgets.forEach { b -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(Translations.translateCategory(b.category, currentLang), fontWeight = FontWeight.Bold); Text("${t("limit")}: ${b.limitMinor.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton({ onDelete(b.category) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
         } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
 }
 
@@ -224,8 +225,8 @@ fun RecurringManagerDialog(recurring: List<RecurringEntity>, cards: List<CardEnt
             Spacer(Modifier.height(8.dp)); Button(onClick = { val minor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull(); val day = dayOfMonth.toIntOrNull(); if (minor != null && minor > 0 && day != null && day in 1..31) { onSave(RecurringEntity(amountMinor = minor, type = type, cardId = if(selectedCardId == "CASH") null else selectedCardId, description = desc.trim(), category = category, dayOfMonth = day)); amount = ""; desc = "" } }, modifier = Modifier.fillMaxWidth()) { Text(t("add_temp")) }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("recurring") + ":", style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
-            if (recurring.isEmpty()) Text(t("no_found"), color = androidx.compose.ui.graphics.Color.Gray)
-            recurring.forEach { r -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(r.description.ifBlank { Translations.translateCategory(r.category, currentLang) }, fontWeight = FontWeight.Bold); Text("${r.amountMinor.money()} UZS · ${r.dayOfMonth}", style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray) }; IconButton({ onDelete(r) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
+            if (recurring.isEmpty()) Text(t("no_found"), color = Color.Gray)
+            recurring.forEach { r -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(r.description.ifBlank { Translations.translateCategory(r.category, currentLang) }, fontWeight = FontWeight.Bold); Text("${r.amountMinor.money()} UZS · ${r.dayOfMonth}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }; IconButton({ onDelete(r) }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } } }
         } }, confirmButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } })
 }
 
