@@ -656,7 +656,8 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
                 val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
-                val parsedTxs = SmsParser.parseImportedFile(text)
+                // Fix 1.6: Передаем allTxs для защиты от дубликатов
+                val parsedTxs = SmsParser.parseImportedFile(text, allTxs)
                 if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true }
                 else { snackbarHostState.showSnackbar(t("no_tx_found")) }
             } catch (e: Exception) { snackbarHostState.showSnackbar(t("file_read_error")) }
