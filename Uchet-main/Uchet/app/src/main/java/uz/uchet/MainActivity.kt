@@ -13,7 +13,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -30,6 +33,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
@@ -129,7 +133,7 @@ fun LockScreen(activity: FragmentActivity, lang: AppLanguage, onUnlocked: () -> 
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, currentTheme: MutableState<AppTheme>, currentLang: MutableState<AppLanguage>) {
     val context = LocalContext.current
@@ -143,6 +147,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
 
     var editing by remember { mutableStateOf<Tx?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var isVoiceTxAdding by remember { mutableStateOf(false) } // НОВОЕ: Флаг для голосового ввода
     var isPendingSms by remember { mutableStateOf(false) }
     var showCardManager by remember { mutableStateOf(false) }; var showBudgetManager by remember { mutableStateOf(false) }
     var showRecurringManager by remember { mutableStateOf(false) }; var showCategoryManager by remember { mutableStateOf(false) }
@@ -260,11 +265,19 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
     val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
 
+    // ПОИСК ПО СУММЕ И ТЕКСТУ
     val filteredTxs by remember(txs, searchQuery, filterType, currentLang.value) {
         derivedStateOf {
+            val queryNumbers = searchQuery.filter { it.isDigit() }
+            val hasNumbers = queryNumbers.isNotEmpty()
+            
             txs.filter { tx ->
-                (searchQuery.isEmpty() || tx.description.contains(searchQuery, true) || Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true)) &&
-                (filterType == null || tx.type == filterType)
+                val matchesSearch = searchQuery.isEmpty() || 
+                    tx.description.contains(searchQuery, true) || 
+                    Translations.translateCategory(tx.category, currentLang.value).contains(searchQuery, true) ||
+                    (hasNumbers && tx.amountMinor.toString().contains(queryNumbers))
+                
+                matchesSearch && (filterType == null || tx.type == filterType)
             }
         }
     }
@@ -439,7 +452,14 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     }
                 )
             },
-            floatingActionButton = { FloatingActionButton({ adding = true }) { Icon(Icons.Default.Add, t("add_tx")) } }
+            floatingActionButton = { 
+                FloatingActionButton(
+                    onClick = { adding = true },
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { isVoiceTxAdding = true; adding = true })
+                    }
+                ) { Icon(Icons.Default.Add, t("add_tx")) } 
+            }
         ) { pad ->
             LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
                 item {
@@ -534,7 +554,26 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         }
                     }
                 }
-                if (filteredTxs.isEmpty()) item { Text(t("no_found"), Modifier.padding(top = 32.dp), color = Color.Gray) }
+                
+                // КРАСИВОЕ ПУСТОЕ СОСТОЯНИЕ
+                if (filteredTxs.isEmpty()) {
+                    item {
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = 64.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.Inbox, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Gray.copy(alpha = 0.5f))
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                if (searchQuery.isEmpty()) t("empty_tx") else t("no_found"), 
+                                style = MaterialTheme.typography.bodyLarge, 
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+                
                 byDay.forEach { (day, list) ->
                     item { Text(day.format(DATE_FMT), Modifier.padding(top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = Color.Gray) }
                     items(list, key = { it.id }) { tx -> TxRow(tx, currentLang.value) { editing = tx } }
@@ -550,16 +589,17 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 incomeCategories = incomeCategories,
                 currentLang = currentLang.value,
                 isPendingSms = isPendingSms,
+                autoStartVoice = isVoiceTxAdding,
                 rates = rates,
                 vm = vm,
                 onDismiss = {
                     if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                    adding = false; editing = null
+                    adding = false; editing = null; isVoiceTxAdding = false
                 },
                 onSave = {
                     vm.save(it)
                     if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                    adding = false; editing = null
+                    adding = false; editing = null; isVoiceTxAdding = false
                 },
                 onDelete = if (isPendingSms) null else editing?.let { e ->
                     { vm.delete(e); editing = null; scope.launch {
