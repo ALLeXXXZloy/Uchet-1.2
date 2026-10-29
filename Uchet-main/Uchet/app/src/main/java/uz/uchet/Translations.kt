@@ -39,7 +39,19 @@ object Translations {
             "category_in_use" to "В этой категории есть операции. Они будут перенесены в 'Другое'.",
             "empty_tx" to "Здесь пока нет операций.\nНажмите +, чтобы добавить.",
             "hold_to_voice" to "Удерживайте для голосового ввода",
-            "yes" to "Да", "no" to "Нет"
+            "yes" to "Да", "no" to "Нет",
+            "inc_by_cat" to "Доходы по категориям",
+            "daily_chart_inc" to "Динамика доходов (по дням)",
+            "monthly_chart_inc" to "Динамика доходов (по месяцам)",
+            "forecast" to "Прогноз (12 месяцев)",
+            "plan_add" to "Добавить план",
+            "plan_new" to "Новый план",
+            "plan_edit" to "Изменить план",
+            "plan_name" to "Название (напр. Аренда)",
+            "plan_amount" to "Сумма (в месяц)",
+            "plan_start" to "Начало (ГГГГ-ММ)",
+            "plan_end" to "Конец (ГГГГ-ММ)",
+            "plan_empty" to "Здесь пусто.\nДобавьте доходы и расходы, чтобы увидеть прогноз."
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -78,7 +90,19 @@ object Translations {
             "category_in_use" to "Bu kategoriyada operatsiyalar mavjud. Ular 'Boshqa'ga o'tkaziladi.",
             "empty_tx" to "Hozircha operatsiyalar yo'q.\nQo'shish uchun + tugmasini bosing.",
             "hold_to_voice" to "Ovozli kiritish uchun ushlab turing",
-            "yes" to "Ha", "no" to "Yo'q"
+            "yes" to "Ha", "no" to "Yo'q",
+            "inc_by_cat" to "Kategoriyalar bo'yicha daromadlar",
+            "daily_chart_inc" to "Daromadlar dinamikasi (kunlik)",
+            "monthly_chart_inc" to "Daromadlar (oylik)",
+            "forecast" to "Prognoz (12 oy)",
+            "plan_add" to "Reja qo'shish",
+            "plan_new" to "Yangi reja",
+            "plan_edit" to "Rejani o'zgartirish",
+            "plan_name" to "Nomi (masalan: Ijara)",
+            "plan_amount" to "Summa (oyiga)",
+            "plan_start" to "Boshlanishi (YYYY-MM)",
+            "plan_end" to "Tugashi (YYYY-MM)",
+            "plan_empty" to "Bu yerda bo'sh.\nPrognozni ko'rish uchun kirim va xarajatlarni qo'shing."
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -117,7 +141,19 @@ object Translations {
             "category_in_use" to "There are transactions in this category. They will be moved to 'Other'.",
             "empty_tx" to "No transactions yet.\nTap + to add one.",
             "hold_to_voice" to "Hold for voice input",
-            "yes" to "Yes", "no" to "No"
+            "yes" to "Yes", "no" to "No",
+            "inc_by_cat" to "Income by Category",
+            "daily_chart_inc" to "Daily Income Dynamics",
+            "monthly_chart_inc" to "Monthly Income",
+            "forecast" to "Forecast (12 months)",
+            "plan_add" to "Add plan",
+            "plan_new" to "New plan",
+            "plan_edit" to "Edit plan",
+            "plan_name" to "Name (e.g. Rent)",
+            "plan_amount" to "Amount (per month)",
+            "plan_start" to "Start (YYYY-MM)",
+            "plan_end" to "End (YYYY-MM)",
+            "plan_empty" to "Empty here.\nAdd incomes and expenses to see the forecast."
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -156,7 +192,19 @@ object Translations {
             "category_in_use" to "Дар ин категория амалиётҳо мавҷуданд. Онҳо ба 'Дигар' гузаронида мешаванд.",
             "empty_tx" to "Ҳанӯз амалиётҳо нест.\nБарои илова кардан +-ро пахш кунед.",
             "hold_to_voice" to "Барои воридоти овозӣ нигоҳ доред",
-            "yes" to "Ҳа", "no" to "Не"
+            "yes" to "Ҳа", "no" to "Не",
+            "inc_by_cat" to "Даромадҳо аз рӯи категорияҳо",
+            "daily_chart_inc" to "Динамикаи даромадҳо (рӯзона)",
+            "monthly_chart_inc" to "Даромадҳо (моҳона)",
+            "forecast" to "Пешгӯӣ (12 моҳ)",
+            "plan_add" to "Илова кардани нақша",
+            "plan_new" to "Нақшаи нав",
+            "plan_edit" to "Тағири нақша",
+            "plan_name" to "Ном (масалан Иҷора)",
+            "plan_amount" to "Маблағ (дар моҳ)",
+            "plan_start" to "Оғоз (YYYY-MM)",
+            "plan_end" to "Анҷом (YYYY-MM)",
+            "plan_empty" to "Ин ҷо холӣ аст.\nБарои дидани пешгӯӣ даромад ва хароҷотро илова кунед."
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -195,7 +243,19 @@ object Translations {
             "category_in_use" to "Bul kategoriyada operatsiyalar bar. Olar 'Basqa'ǵa ótkeriledi.",
             "empty_tx" to "Házirshe operatsiyalar joq.\nQosıw ushın + túymesin basıń.",
             "hold_to_voice" to "Dawıs arqalı kiritiw ushın uslap turıń",
-            "yes" to "Awa", "no" to "Yaq"
+            "yes" to "Awa", "no" to "Yaq",
+            "inc_by_cat" to "Kategoriyalar boyınsha kirimler",
+            "daily_chart_inc" to "Kirimler dinamikası (kúnlik)",
+            "monthly_chart_inc" to "Kirimler (aylıq)",
+            "forecast" to "Prognoz (12 ay)",
+            "plan_add" to "Reja qosıw",
+            "plan_new" to "Jańa reja",
+            "plan_edit" to "Rejanı ózgertiw",
+            "plan_name" to "Atı (mısalı: Ijara)",
+            "plan_amount" to "Summa (ayına)",
+            "plan_start" to "Baslanıwı (YYYY-MM)",
+            "plan_end" to "Aqırı (YYYY-MM)",
+            "plan_empty" to "Bul jerde bos.\nPrognozdı kóriw ushın kirim hám shıǵındı qosıń."
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -234,7 +294,19 @@ object Translations {
             "category_in_use" to "Бұл санатта транзакциялар бар. Олар 'Басқа' санатына ауыстырылады.",
             "empty_tx" to "Әзірге транзакциялар жоқ.\nҚосу үшін + түймесін басыңыз.",
             "hold_to_voice" to "Дауыспен енгізу үшін ұстап тұрыңыз",
-            "yes" to "Иә", "no" to "Жоқ"
+            "yes" to "Иә", "no" to "Жоқ",
+            "inc_by_cat" to "Санаттар бойынша кірістер",
+            "daily_chart_inc" to "Кірістер динамикасы (күнделікті)",
+            "monthly_chart_inc" to "Кірістер (айлық)",
+            "forecast" to "Болжам (12 ай)",
+            "plan_add" to "Жоспар қосу",
+            "plan_new" to "Жаңа жоспар",
+            "plan_edit" to "Жоспарды өзгерту",
+            "plan_name" to "Атауы (мыс. Жалдау)",
+            "plan_amount" to "Сома (айына)",
+            "plan_start" to "Басталуы (YYYY-MM)",
+            "plan_end" to "Аяқталуы (YYYY-MM)",
+            "plan_empty" to "Бұл жер бос.\nБолжамды көру үшін кірістер мен шығыстарды қосыңыз."
         )
     )
 
