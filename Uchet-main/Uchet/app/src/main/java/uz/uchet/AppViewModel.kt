@@ -33,7 +33,12 @@ class VM(app: Application) : AndroidViewModel(app) {
     val categories = dao.observeCategories().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CategoryEntity>())
     val goals = dao.observeGoals().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<SavingsGoalEntity>())
     val rates = dao.observeRates().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ExchangeRateEntity>())
+
+    // Старый прогноз (для совместимости до этапа B)
     val planItems = dao.observePlanItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<PlanItemEntity>())
+
+    // НОВАЯ СИСТЕМА
+    val forecasts = dao.observeForecasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ForecastPlanEntity>())
 
     init {
         viewModelScope.launch {
@@ -123,9 +128,59 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun saveGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.upsertGoal(goal) } }
     fun deleteGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.deleteGoal(goal) } }
 
+    // ---------- СТАРЫЙ ПРОГНОЗ (для совместимости, до этапа B) ----------
     fun savePlanItem(item: PlanItemEntity) { viewModelScope.launch { dao.upsertPlanItem(item) } }
     fun deletePlanItem(id: Long) { viewModelScope.launch { dao.deletePlanItem(id) } }
 
+    // ---------- НОВАЯ СИСТЕМА: Прогнозы ----------
+    fun saveForecast(f: ForecastPlanEntity, onSaved: (Long) -> Unit = {}) {
+        viewModelScope.launch {
+            val id = dao.upsertForecast(f)
+            // Room возвращает id только для INSERT, для UPDATE возвращает -1.
+            // Если id = 0 (новый) — вернём реальный id. Если f.id > 0 — UPDATE.
+            val finalId = if (f.id == 0L) id else f.id
+            withContext(Dispatchers.Main) { onSaved(finalId) }
+        }
+    }
+
+    fun deleteForecast(id: Long) { viewModelScope.launch { dao.deleteForecast(id) } }
+
+    fun observeForecastItems(forecastId: Long): Flow<List<ForecastItemEntity>> =
+        dao.observeForecastItems(forecastId)
+
+    fun observeForecastDeposits(forecastId: Long): Flow<List<ForecastDepositEntity>> =
+        dao.observeForecastDeposits(forecastId)
+
+    fun observeDepositOps(depositId: Long): Flow<List<ForecastDepositOpEntity>> =
+        dao.observeDepositOps(depositId)
+
+    fun saveForecastItem(item: ForecastItemEntity) { viewModelScope.launch { dao.upsertForecastItem(item) } }
+    fun deleteForecastItem(id: Long) { viewModelScope.launch { dao.deleteForecastItem(id) } }
+
+    fun saveForecastDeposit(d: ForecastDepositEntity) { viewModelScope.launch { dao.upsertForecastDeposit(d) } }
+    fun deleteForecastDeposit(id: Long) { viewModelScope.launch { dao.deleteForecastDeposit(id) } }
+
+    fun saveDepositOp(op: ForecastDepositOpEntity) { viewModelScope.launch { dao.upsertDepositOp(op) } }
+    fun deleteDepositOp(id: Long) { viewModelScope.launch { dao.deleteDepositOp(id) } }
+
+    // Вспомогательный метод: полный расчёт прогноза
+    fun calculateForecast(forecast: ForecastPlanEntity): List<ForecastCalculator.MonthForecast> {
+        return runBlockingSafe {
+            val items = dao.observeForecastItems(forecast.id).first()
+            val deposits = dao.observeForecastDeposits(forecast.id).first()
+            // Для операций собираем через observeDepositOps для каждого вклада
+            val allOps = mutableListOf<ForecastDepositOpEntity>()
+            deposits.forEach { d -> allOps.addAll(dao.observeDepositOps(d.id).first()) }
+            ForecastCalculator.calculate(forecast, items, deposits, allOps)
+        }
+    }
+
+    // Небольшой хелпер, чтобы можно было вызвать из non-suspend контекста (в Compose)
+    private fun <T> runBlockingSafe(block: suspend () -> T): T {
+        return kotlinx.coroutines.runBlocking { block() }
+    }
+
+    // ---------- Служебное ----------
     fun adjustBalance(cardId: String, diffMinor: Long) {
         if (diffMinor == 0L) return
         val tx = Tx(
@@ -152,7 +207,7 @@ class VM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // Собираем JSON (без шифрования)
+    // ---------- Бэкап / восстановление ----------
     private suspend fun buildBackupJson(): String {
         val allTx = allTxs.first()
         val allCards = cards.first()
@@ -161,6 +216,10 @@ class VM(app: Application) : AndroidViewModel(app) {
         val allCats = dao.getCategoriesList()
         val allGoals = goals.first()
         val allPlans = dao.getPlanItemsList()
+        val allForecasts = dao.getForecastsList()
+        val allForecastItems = dao.getAllForecastItems()
+        val allForecastDeposits = dao.getAllForecastDeposits()
+        val allDepositOps = dao.getAllDepositOps()
 
         val root = JSONObject()
 
@@ -217,10 +276,41 @@ class VM(app: Application) : AndroidViewModel(app) {
         }) }
         root.put("plan_items", plansArray)
 
+        val forecastArray = JSONArray()
+        allForecasts.forEach { f -> forecastArray.put(JSONObject().apply {
+            put("id", f.id); put("name", f.name); put("months", f.months)
+            put("startMonth", f.startMonth); put("createdAt", f.createdAt)
+        }) }
+        root.put("forecasts", forecastArray)
+
+        val fiArray = JSONArray()
+        allForecastItems.forEach { i -> fiArray.put(JSONObject().apply {
+            put("id", i.id); put("forecastId", i.forecastId); put("name", i.name)
+            put("type", i.type.name); put("amountMinor", i.amountMinor)
+            put("startMonth", i.startMonth); put("endMonth", i.endMonth); put("isFixed", i.isFixed)
+        }) }
+        root.put("forecast_items", fiArray)
+
+        val fdArray = JSONArray()
+        allForecastDeposits.forEach { d -> fdArray.put(JSONObject().apply {
+            put("id", d.id); put("forecastId", d.forecastId); put("name", d.name)
+            put("initialAmountMinor", d.initialAmountMinor); put("annualRatePercent", d.annualRatePercent)
+            put("startMonth", d.startMonth); put("endMonth", d.endMonth)
+            put("monthlyContributionMinor", d.monthlyContributionMinor)
+            put("monthlyWithdrawalMinor", d.monthlyWithdrawalMinor)
+        }) }
+        root.put("forecast_deposits", fdArray)
+
+        val opsArray = JSONArray()
+        allDepositOps.forEach { o -> opsArray.put(JSONObject().apply {
+            put("id", o.id); put("depositId", o.depositId); put("month", o.month)
+            put("amountMinor", o.amountMinor); put("description", o.description)
+        }) }
+        root.put("forecast_deposit_ops", opsArray)
+
         return root.toString(2)
     }
 
-    // НОВОЕ: зашифрованный бэкап
     fun createBackup(password: String, onResult: (ByteArray?) -> Unit) {
         viewModelScope.launch {
             try {
@@ -236,7 +326,6 @@ class VM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // Разбираем JSON и записываем в БД
     private suspend fun applyBackupJson(root: JSONObject) {
         val txsList = mutableListOf<Tx>()
         val txsArray = root.optJSONArray("txs")
@@ -332,9 +421,67 @@ class VM(app: Application) : AndroidViewModel(app) {
             }
         }
 
+        val forecastList = mutableListOf<ForecastPlanEntity>()
+        val forecastArray = root.optJSONArray("forecasts")
+        if (forecastArray != null) {
+            for (i in 0 until forecastArray.length()) {
+                val o = forecastArray.getJSONObject(i)
+                forecastList.add(ForecastPlanEntity(
+                    id = o.optLong("id"), name = o.getString("name"),
+                    months = o.getInt("months"), startMonth = o.getString("startMonth"),
+                    createdAt = o.optLong("createdAt", System.currentTimeMillis())
+                ))
+            }
+        }
+
+        val fiList = mutableListOf<ForecastItemEntity>()
+        val fiArray = root.optJSONArray("forecast_items")
+        if (fiArray != null) {
+            for (i in 0 until fiArray.length()) {
+                val o = fiArray.getJSONObject(i)
+                fiList.add(ForecastItemEntity(
+                    id = o.optLong("id"), forecastId = o.getLong("forecastId"),
+                    name = o.getString("name"), type = TxType.valueOf(o.getString("type")),
+                    amountMinor = o.getLong("amountMinor"),
+                    startMonth = o.getString("startMonth"), endMonth = o.getString("endMonth"),
+                    isFixed = o.optBoolean("isFixed", true)
+                ))
+            }
+        }
+
+        val fdList = mutableListOf<ForecastDepositEntity>()
+        val fdArray = root.optJSONArray("forecast_deposits")
+        if (fdArray != null) {
+            for (i in 0 until fdArray.length()) {
+                val o = fdArray.getJSONObject(i)
+                fdList.add(ForecastDepositEntity(
+                    id = o.optLong("id"), forecastId = o.getLong("forecastId"),
+                    name = o.getString("name"),
+                    initialAmountMinor = o.getLong("initialAmountMinor"),
+                    annualRatePercent = o.getDouble("annualRatePercent"),
+                    startMonth = o.getString("startMonth"), endMonth = o.getString("endMonth"),
+                    monthlyContributionMinor = o.optLong("monthlyContributionMinor", 0L),
+                    monthlyWithdrawalMinor = o.optLong("monthlyWithdrawalMinor", 0L)
+                ))
+            }
+        }
+
+        val opsList = mutableListOf<ForecastDepositOpEntity>()
+        val opsArray = root.optJSONArray("forecast_deposit_ops")
+        if (opsArray != null) {
+            for (i in 0 until opsArray.length()) {
+                val o = opsArray.getJSONObject(i)
+                opsList.add(ForecastDepositOpEntity(
+                    id = o.optLong("id"), depositId = o.getLong("depositId"),
+                    month = o.getString("month"), amountMinor = o.getLong("amountMinor"),
+                    description = o.optString("description")
+                ))
+            }
+        }
+
         db.withTransaction {
             dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
-            dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems()
+            dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems(); dao.clearForecasts()
 
             dao.insertAll(txsList)
             cardsList.forEach { dao.upsertCard(it) }
@@ -343,10 +490,13 @@ class VM(app: Application) : AndroidViewModel(app) {
             catsList.forEach { dao.upsertCategory(it) }
             goalsList.forEach { dao.upsertGoal(it) }
             plansList.forEach { dao.upsertPlanItem(it) }
+            forecastList.forEach { dao.upsertForecast(it) }
+            fiList.forEach { dao.upsertForecastItem(it) }
+            fdList.forEach { dao.upsertForecastDeposit(it) }
+            opsList.forEach { dao.upsertDepositOp(it) }
         }
     }
 
-    // НОВОЕ: восстановление с паролем
     fun restoreBackup(data: ByteArray, password: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             try {
@@ -364,7 +514,6 @@ class VM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // Для совместимости со старыми незашифрованными .json
     fun restoreBackupLegacy(jsonString: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             try {
