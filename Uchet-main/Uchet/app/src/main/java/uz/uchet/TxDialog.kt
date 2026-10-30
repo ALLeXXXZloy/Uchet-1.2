@@ -139,29 +139,44 @@ fun TxDialog(
         
         recognizer.process(image).addOnSuccessListener { visionText ->
             val rawText = visionText.text
+            var foundAmountMinor: Long? = null
             
-            // 1. Пытаемся распознать как бумажный чек (Jami, To'lov uchun jami)
+            // 1) Специализированный парсер бумажных чеков
             val receipt = ReceiptParser.parse(rawText)
-            
             if (receipt.amountMinor != null) {
-                // Успешно распознали чек
-                amount = BigDecimal(receipt.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
-                if (receipt.sellerName != null) desc = receipt.sellerName
-                if (receipt.dateMillis != null) {
-                    val localDate = Instant.ofEpochMilli(receipt.dateMillis).atZone(zone).toLocalDate()
+                foundAmountMinor = receipt.amountMinor
+                receipt.sellerName?.let { desc = it }
+                receipt.dateMillis?.let {
+                    val localDate = Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
                     date = localDate.format(DATE_FMT)
                 }
-                // Устанавливаем категорию "Покупки", если она есть в списке
                 category = expenseCategories.find { it.contains("Покупки", true) } ?: category
-            } else {
-                // 2. Если это не чек (например, скрин перевода), пробуем старый парсер
+            }
+            
+            // 2) Fallback: банковский скрин / SMS-подобный текст
+            if (foundAmountMinor == null) {
                 val parsed = SmsParser.parseForOcr(rawText)
                 if (parsed != null) {
-                    amount = parsed.amountStr
-                    desc = parsed.description
-                } else {
-                    scope.launch { snackbarHostState.showSnackbar("Не удалось распознать сумму на фото") }
+                    val amt = runCatching {
+                        BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.'))
+                            .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
+                    }.getOrNull()
+                    if (amt != null && amt > 0) {
+                        foundAmountMinor = amt
+                        if (parsed.description.isNotBlank()) desc = parsed.description
+                    }
                 }
+            }
+            
+            // 3) Финальный fallback: самое крупное число в нижней части текста
+            if (foundAmountMinor == null) {
+                foundAmountMinor = ReceiptParser.extractBiggestAmount(rawText)
+            }
+
+            if (foundAmountMinor != null) {
+                amount = BigDecimal(foundAmountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
+            } else {
+                scope.launch { snackbarHostState.showSnackbar("Не удалось распознать сумму на фото") }
             }
 
             // Сохраняем фото
@@ -198,7 +213,6 @@ fun TxDialog(
                     if (barcodes.isNotEmpty()) {
                         val rawValue = barcodes[0].rawValue ?: ""
                         desc = "QR: ${rawValue.take(30)}"
-                        // Пытаемся найти сумму в QR коде (иногда там есть total=...)
                         val amountMatch = Regex("""total=(\d+)""").find(rawValue)
                         if (amountMatch != null) amount = amountMatch.groupValues[1]
                     }
