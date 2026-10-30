@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0" // <-- ДОБАВЛЕН ПЛАГИН ДЛЯ KOTLIN 2.0
+    id("org.jetbrains.kotlin.plugin.compose") // <-- УБРАЛИ version "2.0.0"
     id("com.google.devtools.ksp") // Для Room
 }
 
@@ -41,7 +41,6 @@ android {
     buildFeatures {
         compose = true
     }
-    // БЛОК composeOptions БОЛЬШЕ НЕ НУЖЕН В KOTLIN 2.0
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
