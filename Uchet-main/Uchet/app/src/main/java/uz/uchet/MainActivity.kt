@@ -220,6 +220,9 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val incomeCategories = categories.filter { it.type == TxType.INCOME }.map { it.name }
     val t = { key: String -> Translations.t(key, currentLang.value) }
 
+    var currentTab by remember { mutableIntStateOf(0) }
+    var showSettings by remember { mutableStateOf(false) }
+
     LaunchedEffect(cards) {
         if (cards.none { it.id == "CASH" }) {
             vm.saveCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
@@ -232,16 +235,13 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var isPendingSms by remember { mutableStateOf(false) }
     var showCardManager by remember { mutableStateOf(false) }; var showBudgetManager by remember { mutableStateOf(false) }
     var showRecurringManager by remember { mutableStateOf(false) }; var showCategoryManager by remember { mutableStateOf(false) }
-    var showGoalManager by remember { mutableStateOf(false) }; var showSettings by remember { mutableStateOf(false) }
+    var showGoalManager by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }; var showRestoreConfirm by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
     var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }; var showImportConfirm by remember { mutableStateOf(false) }
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
 
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
-    var showAnalytics by remember { mutableStateOf(false) }
-    var showForecastList by remember { mutableStateOf(false) }
-    var showStandardForecast by remember { mutableStateOf(false) }
     var openedForecastId by remember { mutableStateOf<Long?>(null) }
     var showBalanceDetails by remember { mutableStateOf(false) }
 
@@ -408,221 +408,129 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         BalanceWidget.updateAll(context)
     }
 
-    when {
-        showStandardForecast -> {
-            BackHandler { showStandardForecast = false }
-            StandardForecastScreen(
-                vm = vm,
-                currentLang = currentLang.value,
-                onManageRecurring = {
-                    showStandardForecast = false
-                    showRecurringManager = true
-                },
-                onBack = { showStandardForecast = false }
-            )
+    // Обработка кнопки "Назад" для внутренних экранов
+    if (openedForecastId != null) {
+        val forecast = forecasts.find { it.id == openedForecastId }
+        if (forecast != null) {
+            BackHandler { openedForecastId = null }
+            ForecastScreen(forecast = forecast, currentLang = currentLang.value, vm = vm, onBack = { openedForecastId = null })
+            return
         }
-        showAnalytics -> {
-            BackHandler { showAnalytics = false }
-            AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { showAnalytics = false })
-        }
-        openedForecastId != null -> {
-            val forecast = forecasts.find { it.id == openedForecastId }
-            if (forecast != null) {
-                BackHandler { openedForecastId = null }
-                ForecastScreen(
-                    forecast = forecast,
-                    currentLang = currentLang.value,
-                    vm = vm,
-                    onBack = { openedForecastId = null }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = currentTab == 0,
+                    onClick = { currentTab = 0 },
+                    icon = { Icon(Icons.Default.Home, null) },
+                    label = { Text(t("operations")) }
                 )
-            }
-        }
-        showForecastList -> {
-            BackHandler { showForecastList = false }
-            ForecastListScreen(
-                forecasts = forecasts,
-                currentLang = currentLang.value,
-                onSave = { vm.saveForecast(it) },
-                onDelete = { vm.deleteForecast(it) },
-                onOpen = { openedForecastId = it.id },
-                onBack = { showForecastList = false }
-            )
-        }
-        else -> {
-            if (showRestoreConfirm) {
-                AlertDialog(onDismissRequest = { showRestoreConfirm = false }, title = { Text(t("restore")) }, text = { Text(t("restore") + "?") },
-                    confirmButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } },
-                    dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
-            }
-
-            if (showImportConfirm && importedTxs != null) {
-                val txsToImport = importedTxs!!
-                AlertDialog(
-                    onDismissRequest = { showImportConfirm = false; importedTxs = null },
-                    title = { Text(t("import_data")) },
-                    text = { Text("${t("import_confirm")} ${txsToImport.size}") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            val existing = cards.map { it.id }.toSet()
-                            txsToImport.mapNotNull { it.cardId }.distinct().forEach { cardId ->
-                                if (!existing.contains(cardId)) {
-                                    val last4 = cardId.split("_").firstOrNull() ?: "0000"
-                                    val currency = cardId.split("_").getOrNull(1) ?: "UZS"
-                                    vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "${t("import_prefix")} *$last4", currency = currency, initialBalanceMinor = 0))
-                                }
-                            }
-                            vm.bulkSave(txsToImport)
-                            scope.launch { snackbarHostState.showSnackbar("${t("import_confirm")} ${txsToImport.size}") }
-                            showImportConfirm = false; importedTxs = null
-                        }) { Text(t("confirm"), color = GREEN) }
-                    },
-                    dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } }
+                NavigationBarItem(
+                    selected = currentTab == 1,
+                    onClick = { currentTab = 1 },
+                    icon = { Icon(Icons.Default.BarChart, null) },
+                    label = { Text(t("analytics")) }
                 )
-            }
-
-            if (showCardImportConfirm && importedCards != null) {
-                val cardsToImport = importedCards!!
-                AlertDialog(onDismissRequest = { showCardImportConfirm = false; importedCards = null }, title = { Text(t("import_cards")) },
-                    text = { Text("${t("found_cards")} ${cardsToImport.size}") },
-                    confirmButton = { TextButton(onClick = { cardsToImport.forEach { c -> vm.saveCard(c) }; scope.launch { snackbarHostState.showSnackbar(t("cards_added")) }; showCardImportConfirm = false; importedCards = null }) { Text(t("confirm"), color = GREEN) } },
-                    dismissButton = { TextButton(onClick = { showCardImportConfirm = false; importedCards = null }) { Text(t("cancel")) } })
-            }
-
-            if (ocrDebugInfo != null) {
-                AlertDialog(onDismissRequest = { ocrDebugInfo = null }, title = { Text(t("ocr_debug")) },
-                    text = { Column(Modifier.verticalScroll(rememberScrollState())) { SelectionContainer { Text(ocrDebugInfo!!, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) } } },
-                    confirmButton = { TextButton(onClick = { ocrDebugInfo = null }) { Text(t("close")) } })
-            }
-
-            if (showSettings) SettingsDialog(context, onDismiss = { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
-            if (showCategoryManager) CategoryManagerDialog(categories, currentLang.value, { vm.saveCategory(it) }, { vm.deleteCategory(it) }, { showCategoryManager = false })
-            if (showGoalManager) GoalManagerDialog(goals, cards, currentLang.value, { vm.saveGoal(it) }, { vm.deleteGoal(it) }, { g, c, a -> vm.depositToGoal(g, c, a) }, { showGoalManager = false })
-
-            if (showBalanceDetails) {
-                AlertDialog(onDismissRequest = { showBalanceDetails = false }, title = { Text(t("total_balance")) },
-                    text = { Column { cards.forEach { c -> val bal = cardBalancesInUzs[c.id] ?: 0L; Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Medium); Text("${bal.money()} UZS", fontWeight = FontWeight.Bold, color = if (bal >= 0) GREEN else RED) } } } },
-                    confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("close")) } })
-            }
-
-            if (showPasswordDialogBackup) {
-                PasswordDialog(t("backup_new_password"), true, currentLang.value,
-                    onDismiss = { showPasswordDialogBackup = false },
-                    onConfirm = { pwd ->
-                        pendingBackupPassword = pwd; showPasswordDialogBackup = false
-                        jsonExportLauncher.launch("uchet_backup_${System.currentTimeMillis()}.uchet")
-                    })
-            }
-
-            if (showPasswordDialogRestore && pendingRestoreBytes != null) {
-                PasswordDialog(t("backup_enter_password"), false, currentLang.value,
-                    onDismiss = { showPasswordDialogRestore = false; pendingRestoreBytes = null },
-                    onConfirm = { pwd ->
-                        val bytes = pendingRestoreBytes!!
-                        showPasswordDialogRestore = false
-                        scope.launch { snackbarHostState.showSnackbar(t("backup_decrypting")) }
-                        vm.restoreBackup(bytes, pwd) { ok ->
-                            if (ok) scope.launch { snackbarHostState.showSnackbar(t("export_ok")) }
-                            else scope.launch { snackbarHostState.showSnackbar(t("backup_wrong_password")) }
-                            pendingRestoreBytes = null
+                NavigationBarItem(
+                    selected = currentTab == 2,
+                    onClick = { currentTab = 2 },
+                    icon = {
+                        BadgedBox(badge = {
+                            if (pendingRecurring.isNotEmpty()) Badge { Text("${pendingRecurring.size}") }
+                        }) {
+                            Icon(Icons.Default.Assignment, null)
                         }
-                    })
+                    },
+                    label = { Text(t("standard_forecast")) }
+                )
+                NavigationBarItem(
+                    selected = currentTab == 3,
+                    onClick = { currentTab = 3 },
+                    icon = { Icon(Icons.Default.TrendingUp, null) },
+                    label = { Text(t("forecast_list")) }
+                )
+                NavigationBarItem(
+                    selected = currentTab == 4,
+                    onClick = { currentTab = 4; showSettings = true },
+                    icon = { Icon(Icons.Default.Settings, null) },
+                    label = { Text(t("settings")) }
+                )
             }
-
-            Scaffold(
-                snackbarHost = { SnackbarHost(snackbarHostState) },
-                topBar = {
-                    TopAppBar(
-                        title = {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, t("prev")) }
-                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                    val title = "${getMonthName(month.monthValue, currentLang.value)} ${month.year}"
-                                    Text(title, modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                                    DropdownMenu(expanded = showMonthPicker, onDismissRequest = { showMonthPicker = false }) {
-                                        (1..12).forEach { m ->
-                                            DropdownMenuItem(text = { Text("${getMonthName(m, currentLang.value)} ${month.year}") }, onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false })
-                                        }
+        },
+        topBar = {
+            if (currentTab == 0) {
+                TopAppBar(
+                    title = {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { vm.shift(-1) }) { Icon(Icons.Default.ChevronLeft, t("prev")) }
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                val title = "${getMonthName(month.monthValue, currentLang.value)} ${month.year}"
+                                Text(title, modifier = Modifier.clickable { showMonthPicker = true }.padding(8.dp), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                DropdownMenu(expanded = showMonthPicker, onDismissRequest = { showMonthPicker = false }) {
+                                    (1..12).forEach { m ->
+                                        DropdownMenuItem(text = { Text("${getMonthName(m, currentLang.value)} ${month.year}") }, onClick = { vm.month.value = YearMonth.of(month.year, m); showMonthPicker = false })
                                     }
                                 }
-                                IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, t("next")) }
                             }
-                        },
-                        actions = {
-                            Box {
-                                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
-                                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(t("standard_forecast"))
-                                                if (pendingRecurring.isNotEmpty()) {
-                                                    Spacer(Modifier.width(8.dp))
-                                                    Badge { Text("${pendingRecurring.size}") }
-                                                }
-                                            }
-                                        },
-                                        leadingIcon = { Icon(Icons.Default.Assignment, null) },
-                                        onClick = { showMenu = false; showStandardForecast = true }
-                                    )
-                                    DropdownMenuItem(text = { Text(t("scan_sms")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
-                                        showMenu = false
-                                        scanInboxSms(context, allTxs) { found ->
-                                            if (found.isNotEmpty()) { importedTxs = found; showImportConfirm = true }
-                                            else scope.launch { snackbarHostState.showSnackbar(t("new_sms_not_found")) }
-                                        }
-                                    })
-                                    DropdownMenuItem(text = { Text(t("forecast_list")) }, leadingIcon = { Icon(Icons.Default.TrendingUp, null) }, onClick = { showMenu = false; showForecastList = true })
-                                    DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
-                                    DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
-                                    DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
-                                    DropdownMenuItem(text = { Text(t("manage_cards")) }, leadingIcon = { Icon(Icons.Default.CreditCard, null) }, onClick = { showMenu = false; showCardManager = true })
-                                    HorizontalDivider()
-                                    DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
-                                    DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; showPasswordDialogBackup = true })
-                                    DropdownMenuItem(text = { Text(t("restore")) }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { showMenu = false; jsonImportLauncher.launch(arrayOf("*/*")) })
-                                    HorizontalDivider()
-                                    DropdownMenuItem(text = { Text(t("settings")) }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showMenu = false; showSettings = true })
-                                }
+                            IconButton(onClick = { vm.shift(1) }) { Icon(Icons.Default.ChevronRight, t("next")) }
+                        }
+                    },
+                    actions = {
+                        Box {
+                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(text = { Text(t("scan_sms")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
+                                    showMenu = false
+                                    scanInboxSms(context, allTxs) { found ->
+                                        if (found.isNotEmpty()) { importedTxs = found; showImportConfirm = true }
+                                        else scope.launch { snackbarHostState.showSnackbar(t("new_sms_not_found")) }
+                                    }
+                                })
+                                DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
+                                DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
+                                DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
+                                DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; showPasswordDialogBackup = true })
+                                DropdownMenuItem(text = { Text(t("restore")) }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { showMenu = false; jsonImportLauncher.launch(arrayOf("*/*")) })
                             }
                         }
-                    )
-                },
-                floatingActionButton = {
-                    Box(
-                        modifier = Modifier.size(56.dp).shadow(6.dp, CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                            .combinedClickable(
-                                onClick = { adding = true },
-                                onLongClick = { isVoiceTxAdding = true; adding = true }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Add, t("add_tx"), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
+                )
+            }
+        },
+        floatingActionButton = {
+            if (currentTab == 0) {
+                Box(
+                    modifier = Modifier.size(56.dp).shadow(6.dp, CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                        .combinedClickable(
+                            onClick = { adding = true },
+                            onLongClick = { isVoiceTxAdding = true; adding = true }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Add, t("add_tx"), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
-            ) { pad ->
+            }
+        }
+    ) { pad ->
+        when (currentTab) {
+            0 -> {
+                // --- Экран ОПЕРАЦИИ ---
                 LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
-                    // --- Баннер «ожидают подтверждения» ---
                     if (pendingRecurring.isNotEmpty()) {
                         item {
-                            Card(
-                                Modifier.fillMaxWidth().clickable { showStandardForecast = true },
-                                colors = CardDefaults.cardColors(containerColor = YELLOW.copy(alpha = 0.15f))
-                            ) {
+                            Card(Modifier.fillMaxWidth().clickable { currentTab = 2 }, colors = CardDefaults.cardColors(containerColor = YELLOW.copy(alpha = 0.15f))) {
                                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.NotificationsActive, null, tint = YELLOW)
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(
-                                            "${pendingRecurring.size} ${t("pending_forecast")}",
-                                            fontWeight = FontWeight.Medium,
-                                            color = YELLOW
-                                        )
-                                        Text(
-                                            t("standard_forecast"),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color.Gray
-                                        )
+                                        Text("${pendingRecurring.size} ${t("pending_forecast")}", fontWeight = FontWeight.Medium, color = YELLOW)
+                                        Text(t("standard_forecast"), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                                     }
                                     Icon(Icons.Default.ChevronRight, null, tint = YELLOW)
                                 }
@@ -632,18 +540,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     }
 
                     item {
-                        OutlinedTextField(
-                            value = searchQuery, onValueChange = { searchQuery = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(t("search")) },
-                            leadingIcon = { Icon(Icons.Default.Search, null) },
-                            singleLine = true,
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, t("clear")) }
-                                }
-                            }
-                        )
+                        OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth(), placeholder = { Text(t("search")) }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, t("clear")) } })
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text(t("all")) })
@@ -652,11 +549,11 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                         }
                         Spacer(Modifier.height(12.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAnalytics = true }.padding(8.dp)) { Icon(Icons.Default.BarChart, t("analytics"), tint = MaterialTheme.colorScheme.primary); Text(t("analytics"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showGoalManager = true }.padding(8.dp)) { Icon(Icons.Default.Savings, t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showCategoryManager = true }.padding(8.dp)) { Icon(Icons.Default.Category, t("categories"), tint = MaterialTheme.colorScheme.primary); Text(t("categories"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showRecurringManager = true }.padding(8.dp)) { Icon(Icons.Default.Autorenew, t("recurring"), tint = MaterialTheme.colorScheme.primary); Text(t("recurring"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showBudgetManager = true }.padding(8.dp)) { Icon(Icons.Default.AccountBalanceWallet, t("budgets"), tint = MaterialTheme.colorScheme.primary); Text(t("budgets"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showCardManager = true }.padding(8.dp)) { Icon(Icons.Default.CreditCard, t("my_accounts"), tint = MaterialTheme.colorScheme.primary); Text(t("my_accounts"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                         }
                         Spacer(Modifier.height(16.dp))
                         Card(Modifier.fillMaxWidth().clickable { showBalanceDetails = true }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -731,36 +628,114 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     }
                 }
             }
-
-            if (adding || editing != null) {
-                TxDialog(
-                    initial = editing, cards = cards,
-                    expenseCategories = expenseCategories, incomeCategories = incomeCategories,
-                    currentLang = currentLang.value, isPendingSms = isPendingSms,
-                    autoStartVoice = isVoiceTxAdding, rates = rates, vm = vm,
-                    onDismiss = {
-                        if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                        adding = false; editing = null; isVoiceTxAdding = false
-                    },
-                    onSave = {
-                        vm.save(it)
-                        if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                        adding = false; editing = null; isVoiceTxAdding = false
-                    },
-                    onDelete = if (isPendingSms) null else editing?.let { e ->
-                        { vm.delete(e); editing = null; scope.launch {
-                            val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }
-                            val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite)
-                            timerJob.cancel()
-                            if (result == SnackbarResult.ActionPerformed) vm.save(e)
-                        } }
-                    }
-                )
+            1 -> {
+                // --- Экран АНАЛИТИКА ---
+                AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { currentTab = 0 })
             }
-
-            if (showCardManager) CardManagerDialog(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
-            if (showBudgetManager) BudgetManagerDialog(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
-            if (showRecurringManager) RecurringManagerDialog(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
+            2 -> {
+                // --- Экран СТАНДАРТНЫЙ ПРОГНОЗ ---
+                StandardForecastScreen(vm = vm, currentLang = currentLang.value, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
+            }
+            3 -> {
+                // --- Экран СПИСОК ПРОГНОЗОВ ---
+                ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
+            }
+            4 -> {
+                // --- Экран НАСТРОЙКИ (открывает шторку) ---
+                LaunchedEffect(Unit) {
+                    if (!showSettings) currentTab = 0
+                }
+                Box(Modifier.fillMaxSize())
+            }
         }
+    }
+
+    // --- НИЖНИЕ ШТОРКИ (MANAGERS) ---
+    if (showSettings) SettingsSheet(context, { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
+    if (showCategoryManager) CategoryManagerSheet(categories, currentLang.value, { vm.saveCategory(it) }, { vm.deleteCategory(it) }, { showCategoryManager = false })
+    if (showGoalManager) GoalManagerSheet(goals, cards, currentLang.value, { vm.saveGoal(it) }, { vm.deleteGoal(it) }, { g, c, a -> vm.depositToGoal(g, c, a) }, { showGoalManager = false })
+    if (showCardManager) CardManagerSheet(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
+    if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
+    if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
+
+    // --- ДИАЛОГИ ДОБАВЛЕНИЯ/РЕДАКТИРОВАНИЯ ТРАТ ---
+    if (adding || editing != null) {
+        TxDialog(
+            initial = editing, cards = cards,
+            expenseCategories = expenseCategories, incomeCategories = incomeCategories,
+            currentLang = currentLang.value, isPendingSms = isPendingSms,
+            autoStartVoice = isVoiceTxAdding, rates = rates, vm = vm,
+            onDismiss = {
+                if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
+                adding = false; editing = null; isVoiceTxAdding = false
+            },
+            onSave = {
+                vm.save(it)
+                if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
+                adding = false; editing = null; isVoiceTxAdding = false
+            },
+            onDelete = if (isPendingSms) null else editing?.let { e ->
+                { vm.delete(e); editing = null; scope.launch {
+                    val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }
+                    val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite)
+                    timerJob.cancel()
+                    if (result == SnackbarResult.ActionPerformed) vm.save(e)
+                } }
+            }
+        )
+    }
+    
+    // --- ОСТАЛЬНЫЕ СИСТЕМНЫЕ ДИАЛОГИ ---
+    if (showRestoreConfirm) {
+        AlertDialog(onDismissRequest = { showRestoreConfirm = false }, title = { Text(t("restore")) }, text = { Text(t("restore") + "?") }, confirmButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } }, dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
+    }
+    if (showImportConfirm && importedTxs != null) {
+        val txsToImport = importedTxs!!
+        AlertDialog(
+            onDismissRequest = { showImportConfirm = false; importedTxs = null },
+            title = { Text(t("import_data")) },
+            text = { Text("${t("import_confirm")} ${txsToImport.size}") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val existing = cards.map { it.id }.toSet()
+                    txsToImport.mapNotNull { it.cardId }.distinct().forEach { cardId ->
+                        if (!existing.contains(cardId)) {
+                            val last4 = cardId.split("_").firstOrNull() ?: "0000"
+                            val currency = cardId.split("_").getOrNull(1) ?: "UZS"
+                            vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "${t("import_prefix")} *$last4", currency = currency, initialBalanceMinor = 0))
+                        }
+                    }
+                    vm.bulkSave(txsToImport)
+                    scope.launch { snackbarHostState.showSnackbar("${t("import_confirm")} ${txsToImport.size}") }
+                    showImportConfirm = false; importedTxs = null
+                }) { Text(t("confirm"), color = GREEN) }
+            },
+            dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } }
+        )
+    }
+    if (showBalanceDetails) {
+        AlertDialog(onDismissRequest = { showBalanceDetails = false }, title = { Text(t("total_balance")) },
+            text = { Column { cards.forEach { c -> val bal = cardBalancesInUzs[c.id] ?: 0L; Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("${c.name} (${c.currency})", fontWeight = FontWeight.Medium); Text("${bal.money()} UZS", fontWeight = FontWeight.Bold, color = if (bal >= 0) GREEN else RED) } } } },
+            confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("close")) } })
+    }
+    if (showPasswordDialogBackup) {
+        PasswordDialog(t("backup_new_password"), true, currentLang.value, onDismiss = { showPasswordDialogBackup = false }, onConfirm = { pwd -> pendingBackupPassword = pwd; showPasswordDialogBackup = false; jsonExportLauncher.launch("uchet_backup_${System.currentTimeMillis()}.uchet") })
+    }
+    if (showPasswordDialogRestore && pendingRestoreBytes != null) {
+        PasswordDialog(t("backup_enter_password"), false, currentLang.value, onDismiss = { showPasswordDialogRestore = false; pendingRestoreBytes = null }, onConfirm = { pwd ->
+            val bytes = pendingRestoreBytes!!
+            showPasswordDialogRestore = false
+            scope.launch { snackbarHostState.showSnackbar(t("backup_decrypting")) }
+            vm.restoreBackup(bytes, pwd) { ok ->
+                if (ok) scope.launch { snackbarHostState.showSnackbar(t("export_ok")) }
+                else scope.launch { snackbarHostState.showSnackbar(t("backup_wrong_password")) }
+                pendingRestoreBytes = null
+            }
+        })
+    }
+    if (ocrDebugInfo != null) {
+        AlertDialog(onDismissRequest = { ocrDebugInfo = null }, title = { Text(t("ocr_debug")) },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { SelectionContainer { Text(ocrDebugInfo!!, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) } } },
+            confirmButton = { TextButton(onClick = { ocrDebugInfo = null }) { Text(t("close")) } })
     }
 }
