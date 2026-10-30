@@ -215,6 +215,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     val goals by vm.goals.collectAsState(); val rates by vm.rates.collectAsState()
     val categories by vm.categories.collectAsState()
     val forecasts by vm.forecasts.collectAsState()
+    val pendingRecurring by vm.pendingRecurring.collectAsState()
     val expenseCategories = categories.filter { it.type == TxType.EXPENSE }.map { it.name }
     val incomeCategories = categories.filter { it.type == TxType.INCOME }.map { it.name }
     val t = { key: String -> Translations.t(key, currentLang.value) }
@@ -240,6 +241,7 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
     var showAnalytics by remember { mutableStateOf(false) }
     var showForecastList by remember { mutableStateOf(false) }
+    var showStandardForecast by remember { mutableStateOf(false) }
     var openedForecastId by remember { mutableStateOf<Long?>(null) }
     var showBalanceDetails by remember { mutableStateOf(false) }
 
@@ -407,6 +409,18 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     }
 
     when {
+        showStandardForecast -> {
+            BackHandler { showStandardForecast = false }
+            StandardForecastScreen(
+                vm = vm,
+                currentLang = currentLang.value,
+                onManageRecurring = {
+                    showStandardForecast = false
+                    showRecurringManager = true
+                },
+                onBack = { showStandardForecast = false }
+            )
+        }
         showAnalytics -> {
             BackHandler { showAnalytics = false }
             AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { showAnalytics = false })
@@ -537,6 +551,19 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                             Box {
                                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(t("standard_forecast"))
+                                                if (pendingRecurring.isNotEmpty()) {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Badge { Text("${pendingRecurring.size}") }
+                                                }
+                                            }
+                                        },
+                                        leadingIcon = { Icon(Icons.Default.Assignment, null) },
+                                        onClick = { showMenu = false; showStandardForecast = true }
+                                    )
                                     DropdownMenuItem(text = { Text(t("scan_sms")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
                                         showMenu = false
                                         scanInboxSms(context, allTxs) { found ->
@@ -575,6 +602,35 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                 }
             ) { pad ->
                 LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)) {
+                    // --- Баннер «ожидают подтверждения» ---
+                    if (pendingRecurring.isNotEmpty()) {
+                        item {
+                            Card(
+                                Modifier.fillMaxWidth().clickable { showStandardForecast = true },
+                                colors = CardDefaults.cardColors(containerColor = YELLOW.copy(alpha = 0.15f))
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.NotificationsActive, null, tint = YELLOW)
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "${pendingRecurring.size} ${t("pending_forecast")}",
+                                            fontWeight = FontWeight.Medium,
+                                            color = YELLOW
+                                        )
+                                        Text(
+                                            t("standard_forecast"),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                    Icon(Icons.Default.ChevronRight, null, tint = YELLOW)
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                    }
+
                     item {
                         OutlinedTextField(
                             value = searchQuery, onValueChange = { searchQuery = it },
