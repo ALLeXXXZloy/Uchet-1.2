@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose") // <-- УБРАЛИ version "2.0.0"
+    id("org.jetbrains.kotlin.plugin.compose") // Версия не указывается, берется из корневого build.gradle
     id("com.google.devtools.ksp") // Для Room
 }
 
@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "uz.uchet"
-        minSdk = 26
+        minSdk = 26 // Для java.time и NotificationListenerService
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -56,7 +56,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.fragment:fragment-ktx:1.6.2")
     
-    // Для виджета
+    // --- Виджет ---
     implementation("androidx.glance:glance-appwidget:1.0.0")
 
     // --- Jetpack Compose (UI) ---
@@ -88,8 +88,9 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
 
     // --- Koin (Dependency Injection) ---
-    implementation("io.insert-koin:koin-android:3.5.6")
-    implementation("io.insert-koin:koin-androidx-compose:3.5.6")
+    // ОБНОВЛЕНО ДО 4.0.0 ДЛЯ KOTLIN 2.0
+    implementation("io.insert-koin:koin-android:4.0.0")
+    implementation("io.insert-koin:koin-androidx-compose:4.0.0")
 
     // --- Тестирование (Unit Tests) ---
     testImplementation("junit:junit:4.13.2")
