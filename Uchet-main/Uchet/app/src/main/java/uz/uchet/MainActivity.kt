@@ -246,7 +246,6 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var showGoalManager by remember { mutableStateOf(false) }; var showSettings by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }; var showRestoreConfirm by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
-    var pendingRestoreJson by remember { mutableStateOf("") }
     var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }; var showImportConfirm by remember { mutableStateOf(false) }
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }; var showCardImportConfirm by remember { mutableStateOf(false) }
 
@@ -254,6 +253,12 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
     var showAnalytics by remember { mutableStateOf(false) }
     var showForecast by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
+
+    // Диалоги пароля для бэкапа
+    var showPasswordDialogBackup by remember { mutableStateOf(false) }
+    var showPasswordDialogRestore by remember { mutableStateOf(false) }
+    var pendingBackupPassword by remember { mutableStateOf<String?>(null) }
+    var pendingRestoreBytes by remember { mutableStateOf<ByteArray?>(null) }
 
     var searchQuery by remember { mutableStateOf("") }; var filterType by remember { mutableStateOf<TxType?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }; val scope = rememberCoroutineScope()
@@ -299,9 +304,62 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? -> uri?.let { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }; scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } } } }
-    val jsonExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? -> uri?.let { vm.createBackup { j -> if (j.isNotEmpty()) { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(j.toByteArray()) }; scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } } } } } }
-    val jsonImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? -> uri?.let { try { context.contentResolver.openInputStream(it)?.use { s -> pendingRestoreJson = s.bufferedReader().readText(); showRestoreConfirm = true } } catch (e: Exception) { } } }
+    // CSV — без изменений
+    val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }
+                scope.launch { snackbarHostState.showSnackbar(t("export_ok")) }
+            } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } }
+        }
+    }
+
+    // Новый экспорт — шифрованный blob
+    val jsonExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
+        uri?.let {
+            val pwd = pendingBackupPassword
+            if (pwd != null) {
+                vm.createBackup(pwd) { blob ->
+                    if (blob != null) {
+                        try {
+                            context.contentResolver.openOutputStream(it)?.use { s -> s.write(blob) }
+                            scope.launch { snackbarHostState.showSnackbar(t("backup_saved_ok")) }
+                        } catch (e: Exception) {
+                            scope.launch { snackbarHostState.showSnackbar(t("error")) }
+                        }
+                    } else {
+                        scope.launch { snackbarHostState.showSnackbar(t("error")) }
+                    }
+                    pendingBackupPassword = null
+                }
+            }
+        }
+    }
+
+    // Новый импорт — определение формата
+    val jsonImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let {
+            try {
+                val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() }
+                if (bytes == null) return@let
+
+                if (BackupEncryption.isEncrypted(bytes)) {
+                    pendingRestoreBytes = bytes
+                    showPasswordDialogRestore = true
+                } else {
+                    // Старый plain JSON — восстанавливаем без пароля
+                    scope.launch { snackbarHostState.showSnackbar(t("restore_legacy_warning")) }
+                    val plain = String(bytes, Charsets.UTF_8)
+                    vm.restoreBackupLegacy(plain) { success ->
+                        if (success) scope.launch { snackbarHostState.showSnackbar(t("export_ok")) }
+                        else scope.launch { snackbarHostState.showSnackbar(t("error")) }
+                    }
+                }
+            } catch (e: Exception) {
+                scope.launch { snackbarHostState.showSnackbar(t("error")) }
+            }
+        }
+    }
 
     val fileImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { scope.launch {
@@ -404,8 +462,9 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
         }
         else -> {
             if (showRestoreConfirm) {
+                // Этот диалог больше не используется, но оставим на всякий случай
                 AlertDialog(onDismissRequest = { showRestoreConfirm = false }, title = { Text(t("restore")) }, text = { Text(t("restore") + "?") },
-                    confirmButton = { TextButton(onClick = { vm.restoreBackup(pendingRestoreJson) { success -> if (success) scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } else scope.launch { snackbarHostState.showSnackbar(t("error")) } }; showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } },
+                    confirmButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("confirm"), color = RED) } },
                     dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text(t("cancel")) } })
             }
 
@@ -462,6 +521,40 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                     confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("close")) } })
             }
 
+            // НОВЫЕ ДИАЛОГИ ПАРОЛЯ
+            if (showPasswordDialogBackup) {
+                PasswordDialog(
+                    title = t("backup_new_password"),
+                    needsConfirm = true,
+                    currentLang = currentLang.value,
+                    onDismiss = { showPasswordDialogBackup = false },
+                    onConfirm = { pwd ->
+                        pendingBackupPassword = pwd
+                        showPasswordDialogBackup = false
+                        jsonExportLauncher.launch("uchet_backup_${System.currentTimeMillis()}.uchet")
+                    }
+                )
+            }
+
+            if (showPasswordDialogRestore && pendingRestoreBytes != null) {
+                PasswordDialog(
+                    title = t("backup_enter_password"),
+                    needsConfirm = false,
+                    currentLang = currentLang.value,
+                    onDismiss = { showPasswordDialogRestore = false; pendingRestoreBytes = null },
+                    onConfirm = { pwd ->
+                        val bytes = pendingRestoreBytes!!
+                        showPasswordDialogRestore = false
+                        scope.launch { snackbarHostState.showSnackbar(t("backup_decrypting")) }
+                        vm.restoreBackup(bytes, pwd) { success ->
+                            if (success) scope.launch { snackbarHostState.showSnackbar(t("export_ok")) }
+                            else scope.launch { snackbarHostState.showSnackbar(t("backup_wrong_password")) }
+                            pendingRestoreBytes = null
+                        }
+                    }
+                )
+            }
+
             Scaffold(
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
@@ -499,8 +592,10 @@ fun App(vm: VM = viewModel(), pendingCheckTrigger: MutableState<Int>? = null, cu
                                     DropdownMenuItem(text = { Text(t("manage_cards")) }, leadingIcon = { Icon(Icons.Default.CreditCard, null) }, onClick = { showMenu = false; showCardManager = true })
                                     HorizontalDivider()
                                     DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
-                                    DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; jsonExportLauncher.launch("uchet_backup.json") })
-                                    DropdownMenuItem(text = { Text(t("restore")) }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { showMenu = false; jsonImportLauncher.launch(arrayOf("application/json")) })
+                                    // БЭКАП — теперь через диалог пароля
+                                    DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; showPasswordDialogBackup = true })
+                                    // RESTORE — открываем файл, дальше определится формат
+                                    DropdownMenuItem(text = { Text(t("restore")) }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { showMenu = false; jsonImportLauncher.launch(arrayOf("*/*")) })
                                     HorizontalDivider()
                                     DropdownMenuItem(text = { Text(t("settings")) }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showMenu = false; showSettings = true })
                                 }
