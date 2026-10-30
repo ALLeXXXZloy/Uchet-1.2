@@ -4,8 +4,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -31,7 +33,8 @@ fun OperationsScreen(
     onShowRecurringManager: () -> Unit,
     onShowCategoryManager: () -> Unit,
     onShowGoalManager: () -> Unit,
-    onShowBalanceDetails: () -> Unit
+    onShowBalanceDetails: () -> Unit,
+    onQuickTemplateClick: (QuickTemplate) -> Unit // НОВЫЙ КОЛЛБЭК
 ) {
     val txs by vm.txs.collectAsState()
     val cards by vm.cards.collectAsState()
@@ -48,6 +51,19 @@ fun OperationsScreen(
 
     val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
     val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
+
+    // --- УМНЫЙ РАСЧЕТ ШАБЛОНОВ ---
+    val quickTemplates = remember(txs) {
+        val grouped = txs.filter { it.type == TxType.EXPENSE }
+            .groupBy { it.category }
+            .mapValues { (_, list) -> list.size to list.sumOf { it.amountMinor } / list.size }
+        
+        grouped.entries
+            .sortedByDescending { it.value.first } // Сортируем по частоте
+            .take(5) // Берем топ 5
+            .map { QuickTemplate(it.key, it.value.second, TxType.EXPENSE) }
+    }
+    // ------------------------------
 
     val filteredTxs by remember(txs, searchQuery, filterType, currentLang) {
         derivedStateOf {
@@ -85,11 +101,10 @@ fun OperationsScreen(
         Modifier.padding(paddingValues).fillMaxSize(),
         contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 88.dp)
     ) {
-        // Баннер «ожидают подтверждения»
         if (pendingRecurring.isNotEmpty()) {
             item {
                 Card(
-                    Modifier.fillMaxWidth().clickable { onSwitchTab(2) }, // Переход на вкладку Стандартного прогноза
+                    Modifier.fillMaxWidth().clickable { onSwitchTab(2) },
                     colors = CardDefaults.cardColors(containerColor = YELLOW.copy(alpha = 0.15f))
                 ) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -106,7 +121,6 @@ fun OperationsScreen(
             }
         }
 
-        // Поиск и фильтры
         item {
             OutlinedTextField(
                 value = searchQuery, onValueChange = { searchQuery = it },
@@ -129,7 +143,52 @@ fun OperationsScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        // Кнопки быстрого доступа
+        // --- БЛОК БЫСТРЫХ ШАБЛОНОВ ---
+        if (quickTemplates.isNotEmpty()) {
+            item {
+                Text(
+                    "Быстрый ввод", 
+                    style = MaterialTheme.typography.titleSmall, 
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    items(quickTemplates) { template ->
+                        Card(
+                            modifier = Modifier
+                                .width(100.dp)
+                                .clickable { onQuickTemplateClick(template) },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = Translations.translateCategory(template.category, currentLang).take(10),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = template.averageAmountMinor.money(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = RED
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // -----------------------------
+
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowGoalManager() }.padding(8.dp)) { Icon(Icons.Default.Savings, t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
@@ -141,7 +200,6 @@ fun OperationsScreen(
             Spacer(Modifier.height(16.dp))
         }
 
-        // Общий баланс
         item {
             Card(Modifier.fillMaxWidth().clickable { onShowBalanceDetails() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -153,7 +211,6 @@ fun OperationsScreen(
             Spacer(Modifier.height(16.dp))
         }
 
-        // Цели (Копилка)
         if (goals.isNotEmpty()) {
             item {
                 Card(Modifier.fillMaxWidth().clickable { onShowGoalManager() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
@@ -175,7 +232,6 @@ fun OperationsScreen(
             }
         }
 
-        // Бюджеты
         if (budgets.isNotEmpty()) {
             item {
                 Card(Modifier.fillMaxWidth().clickable { onShowBudgetManager() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -197,7 +253,6 @@ fun OperationsScreen(
             }
         }
 
-        // Сводка за месяц
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
@@ -208,7 +263,6 @@ fun OperationsScreen(
             }
         }
 
-        // Список транзакций
         if (filteredTxs.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
