@@ -32,18 +32,18 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.koin.androidx.compose.koinViewModel // <-- ВАЖНЫЙ ИМПОРТ
 import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun App(
-    vm: VM = viewModel(), 
+    vm: VM = koinViewModel(), // <-- ИСПОЛЬЗУЕМ KOIN
     pendingCheckTrigger: MutableState<Int>? = null, 
     currentTheme: MutableState<AppTheme>, 
     currentLang: MutableState<AppLanguage>
@@ -59,7 +59,6 @@ fun App(
     val categories by vm.categories.collectAsState()
     val forecasts by vm.forecasts.collectAsState()
     
-    // Для виджета
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
         cards.associate { card ->
             val cardTxs = allTxs.filter { it.cardId == card.id }
@@ -79,12 +78,10 @@ fun App(
         BalanceWidget.updateAll(context)
     }
 
-    // --- СОСТОЯНИЯ НАВИГАЦИИ ---
     var currentTab by remember { mutableIntStateOf(0) }
     var openedForecastId by remember { mutableStateOf<Long?>(null) }
     var showSettings by remember { mutableStateOf(false) }
 
-    // --- СОСТОЯНИЯ ШТОРОК (MANAGERS) ---
     var showCardManager by remember { mutableStateOf(false) }
     var showBudgetManager by remember { mutableStateOf(false) }
     var showRecurringManager by remember { mutableStateOf(false) }
@@ -92,7 +89,6 @@ fun App(
     var showGoalManager by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
 
-    // --- СОСТОЯНИЯ ДИАЛОГОВ ---
     var editing by remember { mutableStateOf<Tx?>(null) }
     var adding by remember { mutableStateOf(false) }
     var isVoiceTxAdding by remember { mutableStateOf(false) }
@@ -114,7 +110,6 @@ fun App(
     val scope = rememberCoroutineScope()
     val t = { key: String -> Translations.t(key, currentLang.value) }
 
-    // --- ИНИЦИАЛИЗАЦИЯ И РАЗРЕШЕНИЯ ---
     LaunchedEffect(cards) {
         if (cards.none { it.id == "CASH" }) {
             vm.saveCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
@@ -131,7 +126,6 @@ fun App(
         if (permissions.isNotEmpty()) permissionLauncher.launch(permissions.toTypedArray())
     }
 
-    // --- SMS PENDING CHECK ---
     fun checkPendingSms() {
         if (editing != null || adding) return
         val pendingObj = PendingQueue.peek(context) ?: return
@@ -158,7 +152,6 @@ fun App(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // --- ЛАУНЧЕРЫ ИМПОРТА / ЭКСПОРТА ---
     val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
         uri?.let {
             try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }; scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } }
@@ -231,7 +224,6 @@ fun App(
     val expenseCategories = categories.filter { it.type == TxType.EXPENSE }.map { it.name }
     val incomeCategories = categories.filter { it.type == TxType.INCOME }.map { it.name }
 
-    // --- НАВИГАЦИЯ НА ЭКРАН ПРОГНОЗА ---
     if (openedForecastId != null) {
         val forecast = forecasts.find { it.id == openedForecastId }
         if (forecast != null) {
@@ -327,7 +319,6 @@ fun App(
         }
     }
 
-    // --- НИЖНИЕ ШТОРКИ (MANAGERS) ---
     if (showSettings) SettingsSheet(context, { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
     if (showCategoryManager) CategoryManagerSheet(categories, currentLang.value, { vm.saveCategory(it) }, { vm.deleteCategory(it) }, { showCategoryManager = false })
     if (showGoalManager) GoalManagerSheet(goals, cards, currentLang.value, { vm.saveGoal(it) }, { vm.deleteGoal(it) }, { g, c, a -> vm.depositToGoal(g, c, a) }, { showGoalManager = false })
@@ -335,7 +326,6 @@ fun App(
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
 
-    // --- ДИАЛОГИ ---
     if (adding || editing != null) {
         TxDialog(
             initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories,
