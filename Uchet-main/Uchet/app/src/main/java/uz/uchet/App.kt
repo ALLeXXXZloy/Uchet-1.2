@@ -37,15 +37,15 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.koin.androidx.compose.koinViewModel // <-- ВАЖНЫЙ ИМПОРТ
+import org.koin.androidx.compose.koinViewModel
 import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun App(
-    vm: VM = koinViewModel(), // <-- ИСПОЛЬЗУЕМ KOIN
-    pendingCheckTrigger: MutableState<Int>? = null, 
-    currentTheme: MutableState<AppTheme>, 
+    vm: VM = koinViewModel(),
+    pendingCheckTrigger: MutableState<Int>? = null,
+    currentTheme: MutableState<AppTheme>,
     currentLang: MutableState<AppLanguage>
 ) {
     val context = LocalContext.current
@@ -91,6 +91,7 @@ fun App(
 
     var editing by remember { mutableStateOf<Tx?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var selectedQuickTemplate by remember { mutableStateOf<QuickTemplate?>(null) }
     var isVoiceTxAdding by remember { mutableStateOf(false) }
     var isPendingSms by remember { mutableStateOf(false) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
@@ -294,7 +295,7 @@ fun App(
             if (currentTab == 0) {
                 Box(
                     modifier = Modifier.size(56.dp).shadow(6.dp, CircleShape).background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                        .combinedClickable(onClick = { adding = true }, onLongClick = { isVoiceTxAdding = true; adding = true }),
+                        .combinedClickable(onClick = { adding = true; selectedQuickTemplate = null }, onLongClick = { isVoiceTxAdding = true; adding = true }),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Default.Add, t("add_tx"), tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -311,7 +312,8 @@ fun App(
                 onShowRecurringManager = { showRecurringManager = true },
                 onShowCategoryManager = { showCategoryManager = true },
                 onShowGoalManager = { showGoalManager = true },
-                onShowBalanceDetails = { showBalanceDetails = true }
+                onShowBalanceDetails = { showBalanceDetails = true },
+                onQuickTemplateClick = { template -> selectedQuickTemplate = template; adding = true }
             )
             1 -> AnalyticsScreen(txs = vm.txs.collectAsState().value, allTxs = allTxs, currentLang = currentLang.value, onBack = { currentTab = 0 })
             2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
@@ -328,16 +330,18 @@ fun App(
 
     if (adding || editing != null) {
         TxDialog(
-            initial = editing, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories,
+            initial = editing, 
+            quickTemplate = selectedQuickTemplate,
+            cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories,
             currentLang = currentLang.value, isPendingSms = isPendingSms, autoStartVoice = isVoiceTxAdding, rates = rates, vm = vm,
             onDismiss = {
                 if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                adding = false; editing = null; isVoiceTxAdding = false
+                adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null
             },
             onSave = {
                 vm.save(it)
                 if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
-                adding = false; editing = null; isVoiceTxAdding = false
+                adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null
             },
             onDelete = if (isPendingSms) null else editing?.let { e ->
                 { vm.delete(e); editing = null; scope.launch {
