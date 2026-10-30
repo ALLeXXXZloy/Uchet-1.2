@@ -7,8 +7,12 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
 import androidx.fragment.app.FragmentActivity
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.context.startKoin
 
 class MainActivity : FragmentActivity() {
     private val pendingCheckTrigger = mutableStateOf(0)
@@ -18,8 +22,14 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Инициализация PDFBox и проверка старых настроек (оставили как было)
+        // --- ИНИЦИАЛИЗАЦИЯ KOIN ---
+        startKoin {
+            androidContext(this@MainActivity)
+            modules(appModule)
+        }
+
         com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
+        
         val oldPrefs = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
         val newPrefs = SecurityHelper.getEncryptedPrefs(this)
         if (oldPrefs.contains("pin") && !newPrefs.contains("pin")) {
@@ -35,9 +45,9 @@ class MainActivity : FragmentActivity() {
             val theme by currentTheme
             val lang by currentLang
             val colorScheme = when (theme) {
-                AppTheme.LIGHT -> androidx.compose.material3.lightColorScheme()
-                AppTheme.DARK -> androidx.compose.material3.darkColorScheme()
-                AppTheme.SYSTEM -> if (isSystemInDarkTheme()) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+                AppTheme.LIGHT -> lightColorScheme()
+                AppTheme.DARK -> darkColorScheme()
+                AppTheme.SYSTEM -> if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
             }
             MaterialTheme(colorScheme = colorScheme) {
                 Surface {
