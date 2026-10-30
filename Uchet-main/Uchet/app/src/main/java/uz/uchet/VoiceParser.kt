@@ -10,7 +10,6 @@ object VoiceParser {
         val description: String
     )
 
-    // НОВОЕ ПОЛЕ balanceMinor
     data class VoiceCardResult(
         val bankName: String?,
         val last4: String,
@@ -43,6 +42,12 @@ object VoiceParser {
         "million" to 1000000L, "mln" to 1000000L
     )
 
+    // Удаляем только номер карты в явном контексте, чтобы не затронуть сумму
+    private val CARD_CONTEXT_REGEX = Regex(
+        """(?:карт[а-яё]*|karta[s]?|счет|счёт|hisob)\s*№?\s*\d{4,19}""",
+        RegexOption.IGNORE_CASE
+    )
+
     fun parseTransaction(text: String, expenseCategories: List<String>, incomeCategories: List<String>): VoiceTxResult {
         val lower = text.lowercase().replace("ё", "е")
 
@@ -57,7 +62,7 @@ object VoiceParser {
         }
 
         val isCash = listOf("наличные", "наличкой", "наличными", "кэш", "naqd", "нал ").any { lower.contains(it) }
-        val cardLast4 = Regex("""(?:карт[а-я]*|karta[s]?)\s+(\d{4})""").find(lower)?.groupValues?.get(1)
+        val cardLast4 = Regex("""(?:карт[а-яё]*|karta[s]?)\s+(\d{4})""").find(lower)?.groupValues?.get(1)
 
         val amountMinor = parseAmount(lower)
         val categoryList = if (type == TxType.INCOME) incomeCategories else expenseCategories
@@ -68,27 +73,34 @@ object VoiceParser {
 
     fun parseCard(text: String): VoiceCardResult? {
         val lower = text.lowercase()
-        val m = Regex("""\b(\d{4})\b""").find(lower) ?: return null
+
+        // 1) Явный контекст «карта 5678» / «счет 1234» — приоритет
+        val explicit = CARD_CONTEXT_REGEX.find(lower)?.value
+            ?.let { Regex("""(\d{4,19})""").find(it)?.groupValues?.get(1) }
+
+        val m = when {
+            explicit != null -> explicit
+            else -> Regex("""\b(\d{4})\b""").find(lower)?.groupValues?.get(1) ?: return null
+        }
+        val last4 = m.takeLast(4)
+
         val banks = listOf(
             "kapitalbank", "uzum", "anorbank", "tbc", "humo", "uzcard",
             "aloqa", "agrobank", "sberbank", "ipoteka", "trast", "asakabank"
         )
         val bank = banks.firstOrNull { lower.contains(it) }
-        
-        // ПЫТАЕМСЯ ИЗВЛЕЧЬ ОСТАТОК
         val balanceMinor = parseAmount(lower)
-        
-        return VoiceCardResult(bank, m.groupValues[1], balanceMinor)
+
+        return VoiceCardResult(bank, last4, balanceMinor)
     }
 
     private fun parseAmount(text: String): Long? {
-        val clean = text
-            .replace(Regex("""(?:карт[а-я]*|karta[s]?)\s+\d{4}"""), "")
-            .replace(Regex("""\b\d{4}\b"""), "")
+        // Удаляем только явный номер карты, а не любое 4-значное число
+        val clean = CARD_CONTEXT_REGEX.replace(text, " ")
 
-        // 1. Число + единица (500 тысяч, 1 миллион, 500 000 сум)
+        // 1. Число + единица: "500 тысяч", "1.5 млн", "74000 сум"
         val withUnit = Regex(
-            """(\d[\d\s\u00A0]*)\s*(тысяч[а-я]*|тыс\b|минг|ming|миллион[а-я]*|млн|million|mln|сум|сўм|so['`]?m|som)""",
+            """(\d[\d\s\u00A0]*)\s*(тысяч[а-яё]*|тыс\b|минг|ming|миллион[а-яё]*|млн|million|mln|сум|сўм|so['`]?m|som)""",
             RegexOption.IGNORE_CASE
         ).find(clean)
         if (withUnit != null) {
@@ -104,7 +116,7 @@ object VoiceParser {
             }
         }
 
-        // 2. Числа словами (пятьсот тысяч)
+        // 2. Числа словами: "пятьсот тысяч", "ellik ming"
         val words = clean.split(Regex("[\\s,]+"))
         var total = 0L; var current = 0L; var found = false
         for (w in words) {
@@ -122,14 +134,12 @@ object VoiceParser {
         total += current
         if (found && total > 0) return total * 100
 
-        // 3. Просто число (с поддержкой пробела, точки, запятой как разделителя тысяч)
+        // 3. Просто число (с поддержкой пробела, точки и запятой как разделителя тысяч)
         val plainMatch = Regex("""(\d+(?:[.,\s\u00A0]\d{3})*)""").find(clean)
         if (plainMatch != null) {
             val cleaned = plainMatch.groupValues[1].replace(Regex("[.,\\s\u00A0]"), "")
             val parsed = cleaned.toLongOrNull()
-            if (parsed != null && parsed.toString().length != 4) {
-                return parsed * 100
-            }
+            if (parsed != null && parsed > 0) return parsed * 100
         }
         return null
     }
