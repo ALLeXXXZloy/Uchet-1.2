@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0" // <-- ДОБАВЛЕН ПЛАГИН ДЛЯ KOTLIN 2.0
     id("com.google.devtools.ksp") // Для Room
 }
 
@@ -10,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "uz.uchet"
-        minSdk = 26 // Так как используется java.time и NotificationListenerService
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -40,10 +41,7 @@ android {
     buildFeatures {
         compose = true
     }
-    composeOptions {
-        // Убедитесь, что эта версия совместима с вашей версией Kotlin (1.9.22)
-        kotlinCompilerExtensionVersion = "1.5.8"
-    }
+    // БЛОК composeOptions БОЛЬШЕ НЕ НУЖЕН В KOTLIN 2.0
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -68,13 +66,13 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended") // Для обилия иконок
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
     // --- Room (База данных) ---
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1") // Используем KSP вместо KAPT
+    ksp("androidx.room:room-compiler:2.6.1")
 
     // --- ML Kit (OCR и QR) ---
     implementation("com.google.mlkit:text-recognition:16.0.0")
@@ -96,7 +94,7 @@ dependencies {
 
     // --- Тестирование (Unit Tests) ---
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3") // Для тестов корутин
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     
     // --- Инструментальные тесты (Android Tests) ---
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
