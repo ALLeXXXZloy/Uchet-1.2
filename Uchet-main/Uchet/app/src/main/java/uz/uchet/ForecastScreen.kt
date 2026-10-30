@@ -21,6 +21,16 @@ import java.math.RoundingMode
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
+// Модель для предвычисленных данных одного месяца
+private data class MonthForecast(
+    val month: YearMonth,
+    val items: List<PlanItemEntity>,
+    val income: Long,
+    val expense: Long,
+    val monthBalance: Long,
+    val runningBalance: Long   // накопительный итог на КОНЕЦ этого месяца
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForecastScreen(
@@ -42,15 +52,32 @@ fun ForecastScreen(
         list
     }
 
-    val monthlyPlans = remember(planItems) {
-        months.associateWith { month ->
-            planItems.filter { item ->
+    // ГЛАВНОЕ ИСПРАВЛЕНИЕ: предвычисляем ВСЁ один раз через remember,
+    // включая кумулятивный runningBalance на конец каждого месяца.
+    // Compose больше не сможет "испортить" runningBalance при скролле,
+    // потому что внутри LazyColumn останутся только чистые чтения.
+    val forecast = remember(planItems, months) {
+        var running = 0L
+        months.map { month ->
+            val itemsForMonth = planItems.filter { item ->
                 try {
                     val start = YearMonth.parse(item.startMonth)
                     val end = YearMonth.parse(item.endMonth)
                     month >= start && month <= end
                 } catch (e: Exception) { false }
             }
+            val income = itemsForMonth.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
+            val expense = itemsForMonth.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
+            val monthBalance = income - expense
+            running += monthBalance
+            MonthForecast(
+                month = month,
+                items = itemsForMonth,
+                income = income,
+                expense = expense,
+                monthBalance = monthBalance,
+                runningBalance = running
+            )
         }
     }
 
@@ -88,49 +115,49 @@ fun ForecastScreen(
                 Text(t("plan_empty"), color = Color.Gray, style = MaterialTheme.typography.bodyLarge)
             }
         } else {
-            LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
-                var runningBalance = 0L
-                items(months) { month ->
-                    val itemsForMonth = monthlyPlans[month] ?: emptyList()
-                    val income = itemsForMonth.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-                    val expense = itemsForMonth.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-                    val monthBalance = income - expense
-                    runningBalance += monthBalance
-
+            LazyColumn(
+                Modifier.padding(pad).fillMaxSize(),
+                contentPadding = PaddingValues(16.dp)
+            ) {
+                // key = month гарантирует, что при пересборке списка Compose
+                // правильно переиспользует элементы и не путает данные
+                items(forecast, key = { it.month }) { data ->
+                    // Всё ниже — ТОЛЬКО ЧТЕНИЕ предвычисленных значений.
+                    // Никаких += внутри LazyColumn.
                     Card(
                         Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (runningBalance < 0) RED.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant
+                            containerColor = if (data.runningBalance < 0) RED.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant
                         )
                     ) {
                         Column(Modifier.padding(12.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(
-                                    getMonthName(month.monthValue, currentLang) + " " + month.year,
+                                    getMonthName(data.month.monthValue, currentLang) + " " + data.month.year,
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium
                                 )
                                 Text(
-                                    "${runningBalance.money()} UZS",
+                                    "${data.runningBalance.money()} UZS",
                                     fontWeight = FontWeight.Bold,
-                                    color = if (runningBalance >= 0) GREEN else RED
+                                    color = if (data.runningBalance >= 0) GREEN else RED
                                 )
                             }
                             Spacer(Modifier.height(8.dp))
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("+${income.money()}", color = GREEN, style = MaterialTheme.typography.bodySmall)
-                                Text("-${expense.money()}", color = RED, style = MaterialTheme.typography.bodySmall)
+                                Text("+${data.income.money()}", color = GREEN, style = MaterialTheme.typography.bodySmall)
+                                Text("-${data.expense.money()}", color = RED, style = MaterialTheme.typography.bodySmall)
                                 Text(
-                                    "= ${monthBalance.money()}",
+                                    "= ${data.monthBalance.money()}",
                                     fontWeight = FontWeight.Medium,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (monthBalance >= 0) GREEN else RED
+                                    color = if (data.monthBalance >= 0) GREEN else RED
                                 )
                             }
-                            if (itemsForMonth.isNotEmpty()) {
+                            if (data.items.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
                                 HorizontalDivider()
-                                itemsForMonth.forEach { item ->
+                                data.items.forEach { item ->
                                     Row(
                                         Modifier.fillMaxWidth().padding(vertical = 4.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
