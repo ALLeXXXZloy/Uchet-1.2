@@ -1,11 +1,9 @@
 package uz.uchet
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,262 +11,356 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.math.BigDecimal
-import java.math.RoundingMode
+import kotlinx.coroutines.flow.flowOf
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
-
-// Модель для предвычисленных данных одного месяца
-private data class MonthForecast(
-    val month: YearMonth,
-    val items: List<PlanItemEntity>,
-    val income: Long,
-    val expense: Long,
-    val monthBalance: Long,
-    val runningBalance: Long   // накопительный итог на КОНЕЦ этого месяца
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForecastScreen(
-    planItems: List<PlanItemEntity>,
+    forecast: ForecastPlanEntity,
     currentLang: AppLanguage,
-    onSave: (PlanItemEntity) -> Unit,
-    onDelete: (Long) -> Unit,
+    vm: VM,
     onBack: () -> Unit
 ) {
     val t = { key: String -> Translations.t(key, currentLang) }
-    var showAddDialog by remember { mutableStateOf(false) }
-    var editingItem by remember { mutableStateOf<PlanItemEntity?>(null) }
-    var itemToDelete by remember { mutableStateOf<PlanItemEntity?>(null) }
 
-    val months = remember {
-        val list = mutableListOf<YearMonth>()
-        var current = YearMonth.now()
-        for (i in 0..11) { list.add(current); current = current.plusMonths(1) }
-        list
+    val itemsFlow = remember(forecast.id) { vm.observeForecastItems(forecast.id) }
+    val depositsFlow = remember(forecast.id) { vm.observeForecastDeposits(forecast.id) }
+    val opsFlow = remember(forecast.id) { vm.observeAllOpsForForecast(forecast.id) }
+
+    val items by itemsFlow.collectAsState(initial = emptyList())
+    val deposits by depositsFlow.collectAsState(initial = emptyList())
+    val allOps by opsFlow.collectAsState(initial = emptyList())
+
+    var tab by remember { mutableStateOf(0) }
+    var showAddItem by remember { mutableStateOf(false) }
+    var editingItem by remember { mutableStateOf<ForecastItemEntity?>(null) }
+    var showAddDeposit by remember { mutableStateOf(false) }
+    var editingDeposit by remember { mutableStateOf<ForecastDepositEntity?>(null) }
+    var openedDeposit by remember { mutableStateOf<ForecastDepositEntity?>(null) }
+    var itemToDelete by remember { mutableStateOf<ForecastItemEntity?>(null) }
+    var depositToDelete by remember { mutableStateOf<ForecastDepositEntity?>(null) }
+
+    val openedDepositOpsFlow = remember(openedDeposit?.id) {
+        if (openedDeposit != null) vm.observeDepositOps(openedDeposit!!.id)
+        else flowOf(emptyList())
+    }
+    val openedDepositOps by openedDepositOpsFlow.collectAsState(initial = emptyList())
+
+    // Предвычисляем весь прогноз один раз — внутри LazyColumn только чтения
+    val calc = remember(forecast, items, deposits, allOps) {
+        ForecastCalculator.calculate(forecast, items, deposits, allOps)
     }
 
-    // ГЛАВНОЕ ИСПРАВЛЕНИЕ: предвычисляем ВСЁ один раз через remember,
-    // включая кумулятивный runningBalance на конец каждого месяца.
-    // Compose больше не сможет "испортить" runningBalance при скролле,
-    // потому что внутри LazyColumn останутся только чистые чтения.
-    val forecast = remember(planItems, months) {
-        var running = 0L
-        months.map { month ->
-            val itemsForMonth = planItems.filter { item ->
-                try {
-                    val start = YearMonth.parse(item.startMonth)
-                    val end = YearMonth.parse(item.endMonth)
-                    month >= start && month <= end
-                } catch (e: Exception) { false }
-            }
-            val income = itemsForMonth.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-            val expense = itemsForMonth.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-            val monthBalance = income - expense
-            running += monthBalance
-            MonthForecast(
-                month = month,
-                items = itemsForMonth,
-                income = income,
-                expense = expense,
-                monthBalance = monthBalance,
-                runningBalance = running
-            )
-        }
+    val forecastEnd = remember(forecast) {
+        YearMonth.parse(forecast.startMonth)
+            .plusMonths(forecast.months.toLong() - 1)
+            .toString()
     }
 
+    // Диалоги удаления
     if (itemToDelete != null) {
         AlertDialog(
             onDismissRequest = { itemToDelete = null },
             title = { Text(t("delete_confirm_title")) },
             text = { Text(t("delete_confirm_text")) },
-            confirmButton = { TextButton(onClick = { onDelete(itemToDelete!!.id); itemToDelete = null }) { Text(t("yes"), color = RED) } },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.deleteForecastItem(itemToDelete!!.id)
+                    itemToDelete = null
+                }) { Text(t("yes"), color = RED) }
+            },
             dismissButton = { TextButton(onClick = { itemToDelete = null }) { Text(t("no")) } }
+        )
+    }
+    if (depositToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { depositToDelete = null },
+            title = { Text(t("delete_confirm_title")) },
+            text = { Text(t("delete_confirm_text")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.deleteForecastDeposit(depositToDelete!!.id)
+                    depositToDelete = null
+                }) { Text(t("yes"), color = RED) }
+            },
+            dismissButton = { TextButton(onClick = { depositToDelete = null }) { Text(t("no")) } }
         )
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(t("forecast")) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) } }
+                title = { Text(forecast.name) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) }
+                }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, t("plan_add"))
+            when (tab) {
+                0 -> FloatingActionButton(onClick = { showAddItem = true }) {
+                    Icon(Icons.Default.Add, t("forecast_item_new"))
+                }
+                1 -> FloatingActionButton(onClick = { showAddDeposit = true }) {
+                    Icon(Icons.Default.Add, t("deposit_new"))
+                }
             }
         }
     ) { pad ->
-        if (planItems.isEmpty()) {
-            Column(
-                Modifier.padding(pad).fillMaxSize().padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Default.TrendingUp, null, modifier = Modifier.size(64.dp), tint = Color.Gray.copy(alpha = 0.5f))
-                Spacer(Modifier.height(16.dp))
-                Text(t("plan_empty"), color = Color.Gray, style = MaterialTheme.typography.bodyLarge)
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            TabRow(selectedTabIndex = tab) {
+                Tab(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    text = { Text(t("forecast_tab_plan")) }
+                )
+                Tab(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    text = { Text(t("forecast_tab_deposits")) }
+                )
+                Tab(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    text = { Text(t("forecast_tab_calc")) }
+                )
             }
-        } else {
-            LazyColumn(
-                Modifier.padding(pad).fillMaxSize(),
-                contentPadding = PaddingValues(16.dp)
-            ) {
-                // key = month гарантирует, что при пересборке списка Compose
-                // правильно переиспользует элементы и не путает данные
-                items(forecast, key = { it.month }) { data ->
-                    // Всё ниже — ТОЛЬКО ЧТЕНИЕ предвычисленных значений.
-                    // Никаких += внутри LazyColumn.
-                    Card(
-                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (data.runningBalance < 0) RED.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant
+
+            when (tab) {
+                0 -> PlanTab(
+                    items = items,
+                    currentLang = currentLang,
+                    onEdit = { editingItem = it },
+                    onDelete = { itemToDelete = it }
+                )
+                1 -> DepositsTab(
+                    deposits = deposits,
+                    currentLang = currentLang,
+                    onOpen = { openedDeposit = it },
+                    onEdit = { editingDeposit = it },
+                    onDelete = { depositToDelete = it }
+                )
+                2 -> CalcTab(
+                    calc = calc,
+                    currentLang = currentLang
+                )
+            }
+        }
+    }
+
+    if (showAddItem || editingItem != null) {
+        ForecastItemDialog(
+            initial = editingItem,
+            forecastId = forecast.id,
+            forecastStart = forecast.startMonth,
+            forecastEnd = forecastEnd,
+            currentLang = currentLang,
+            onDismiss = { showAddItem = false; editingItem = null },
+            onSave = {
+                vm.saveForecastItem(it)
+                showAddItem = false
+                editingItem = null
+            }
+        )
+    }
+
+    if (showAddDeposit || editingDeposit != null) {
+        DepositDialog(
+            initial = editingDeposit,
+            forecastId = forecast.id,
+            forecastStart = forecast.startMonth,
+            forecastEnd = forecastEnd,
+            currentLang = currentLang,
+            onDismiss = { showAddDeposit = false; editingDeposit = null },
+            onSave = {
+                vm.saveForecastDeposit(it)
+                showAddDeposit = false
+                editingDeposit = null
+            }
+        )
+    }
+
+    if (openedDeposit != null) {
+        DepositTimelineDialog(
+            deposit = openedDeposit!!,
+            ops = openedDepositOps,
+            currentLang = currentLang,
+            onSaveOp = { vm.saveDepositOp(it) },
+            onDeleteOp = { vm.deleteDepositOp(it) },
+            onDismiss = { openedDeposit = null }
+        )
+    }
+}
+
+// ---------- Вкладка «План» ----------
+@Composable
+private fun PlanTab(
+    items: List<ForecastItemEntity>,
+    currentLang: AppLanguage,
+    onEdit: (ForecastItemEntity) -> Unit,
+    onDelete: (ForecastItemEntity) -> Unit
+) {
+    val t = { key: String -> Translations.t(key, currentLang) }
+    if (items.isEmpty()) {
+        EmptyState(Icons.Default.List, t("forecast_items_empty"))
+        return
+    }
+    LazyColumn(contentPadding = PaddingValues(16.dp)) {
+        items(items, key = { it.id }) { item ->
+            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Row(
+                    Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(item.name, fontWeight = FontWeight.Medium)
+                        Text(
+                            "${item.startMonth} — ${item.endMonth}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
                         )
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(
-                                    getMonthName(data.month.monthValue, currentLang) + " " + data.month.year,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    "${data.runningBalance.money()} UZS",
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (data.runningBalance >= 0) GREEN else RED
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("+${data.income.money()}", color = GREEN, style = MaterialTheme.typography.bodySmall)
-                                Text("-${data.expense.money()}", color = RED, style = MaterialTheme.typography.bodySmall)
-                                Text(
-                                    "= ${data.monthBalance.money()}",
-                                    fontWeight = FontWeight.Medium,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (data.monthBalance >= 0) GREEN else RED
-                                )
-                            }
-                            if (data.items.isNotEmpty()) {
-                                Spacer(Modifier.height(8.dp))
-                                HorizontalDivider()
-                                data.items.forEach { item ->
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text(item.name, style = MaterialTheme.typography.bodyMedium)
-                                            Text(
-                                                if (item.type == TxType.INCOME) t("income") else t("expense"),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color.Gray
-                                            )
-                                        }
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                "${if (item.type == TxType.INCOME) "+" else "-"}${item.amountMinor.money()}",
-                                                color = if (item.type == TxType.INCOME) GREEN else RED,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                            IconButton(onClick = { editingItem = item }, modifier = Modifier.size(32.dp)) {
-                                                Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                            }
-                                            IconButton(onClick = { itemToDelete = item }, modifier = Modifier.size(32.dp)) {
-                                                Icon(Icons.Default.Delete, null, tint = RED, modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    }
+                    Text(
+                        "${if (item.type == TxType.INCOME) "+" else "-"}${item.amountMinor.money()}",
+                        color = if (item.type == TxType.INCOME) GREEN else RED,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(onClick = { onEdit(item) }) {
+                        Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = { onDelete(item) }) {
+                        Icon(Icons.Default.Delete, null, tint = RED)
                     }
                 }
             }
         }
     }
+}
 
-    if (showAddDialog || editingItem != null) {
-        PlanItemDialog(
-            item = editingItem,
-            currentLang = currentLang,
-            onDismiss = { showAddDialog = false; editingItem = null },
-            onSave = { onSave(it); showAddDialog = false; editingItem = null }
-        )
+// ---------- Вкладка «Вклады» ----------
+@Composable
+private fun DepositsTab(
+    deposits: List<ForecastDepositEntity>,
+    currentLang: AppLanguage,
+    onOpen: (ForecastDepositEntity) -> Unit,
+    onEdit: (ForecastDepositEntity) -> Unit,
+    onDelete: (ForecastDepositEntity) -> Unit
+) {
+    val t = { key: String -> Translations.t(key, currentLang) }
+    if (deposits.isEmpty()) {
+        EmptyState(Icons.Default.Savings, t("forecast_deposits_empty"))
+        return
+    }
+    LazyColumn(contentPadding = PaddingValues(16.dp)) {
+        items(deposits, key = { it.id }) { d ->
+            val capLabel = when (d.capitalization) {
+                CapitalizationType.MONTHLY -> Translations.t("deposit_cap_monthly", currentLang)
+                CapitalizationType.DAILY -> Translations.t("deposit_cap_daily", currentLang)
+                CapitalizationType.END_OF_TERM -> Translations.t("deposit_cap_end", currentLang)
+            }
+            Card(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { onOpen(d) }
+            ) {
+                Row(
+                    Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(d.name, fontWeight = FontWeight.Medium)
+                        Text(
+                            "${d.initialAmountMinor.money()} • ${d.annualRatePercent}% • $capLabel",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                        Text(
+                            "${d.startMonth} — ${d.endMonth}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                    IconButton(onClick = { onEdit(d) }) {
+                        Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = { onDelete(d) }) {
+                        Icon(Icons.Default.Delete, null, tint = RED)
+                    }
+                }
+            }
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ---------- Вкладка «Прогноз» (расчёт) ----------
 @Composable
-private fun PlanItemDialog(item: PlanItemEntity?, currentLang: AppLanguage, onDismiss: () -> Unit, onSave: (PlanItemEntity) -> Unit) {
+private fun CalcTab(
+    calc: List<ForecastCalculator.MonthForecast>,
+    currentLang: AppLanguage
+) {
     val t = { key: String -> Translations.t(key, currentLang) }
-    var name by remember { mutableStateOf(item?.name ?: "") }
-    var amount by remember { mutableStateOf(item?.amountMinor?.let { BigDecimal(it).movePointLeft(2).toPlainString() } ?: "") }
-    var type by remember { mutableStateOf(item?.type ?: TxType.EXPENSE) }
-
-    val formatter = DateTimeFormatter.ofPattern("yyyy-MM")
-    var startMonth by remember { mutableStateOf(item?.startMonth ?: YearMonth.now().format(formatter)) }
-    var endMonth by remember { mutableStateOf(item?.endMonth ?: YearMonth.now().plusMonths(11).format(formatter)) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (item == null) t("plan_new") else t("plan_edit")) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it },
-                    label = { Text(t("plan_name")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+    LazyColumn(contentPadding = PaddingValues(16.dp)) {
+        items(calc) { data ->
+            Card(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (data.runningBalance < 0)
+                        RED.copy(alpha = 0.1f)
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
                 )
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense")) }
-                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income")) }
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            getMonthName(data.month.monthValue, currentLang) + " " + data.month.year,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "${data.runningBalance.money()} UZS",
+                            fontWeight = FontWeight.Bold,
+                            color = if (data.runningBalance >= 0) GREEN else RED
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("+${data.income.money()}", color = GREEN, style = MaterialTheme.typography.bodySmall)
+                        Text("-${data.expense.money()}", color = RED, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (data.depositPortfolioChange != 0L) {
+                        Text(
+                            "💰 ${if (data.depositPortfolioChange > 0) "+" else ""}${data.depositPortfolioChange.money()} (${t("forecast_tab_deposits")})",
+                            color = if (data.depositPortfolioChange >= 0) GREEN else RED,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
-                OutlinedTextField(
-                    value = amount, onValueChange = { amount = it },
-                    label = { Text(t("plan_amount")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = startMonth, onValueChange = { startMonth = it },
-                    label = { Text(t("plan_start")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = endMonth, onValueChange = { endMonth = it },
-                    label = { Text(t("plan_end")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val amt = runCatching {
-                    BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                }.getOrNull()
-                if (name.isNotBlank() && amt != null && amt > 0
-                    && startMonth.matches(Regex("\\d{4}-\\d{2}"))
-                    && endMonth.matches(Regex("\\d{4}-\\d{2}"))
-                ) {
-                    onSave(PlanItemEntity(
-                        id = item?.id ?: 0,
-                        name = name.trim(),
-                        type = type,
-                        amountMinor = amt,
-                        startMonth = startMonth,
-                        endMonth = endMonth,
-                        isFixed = true
-                    ))
-                }
-            }) { Text(t("save")) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } }
-    )
+        }
+    }
+}
+
+// ---------- Пустое состояние ----------
+@Composable
+private fun EmptyState(icon: ImageVector, text: String) {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(icon, null, modifier = Modifier.size(64.dp), tint = Color.Gray.copy(alpha = 0.5f))
+        Spacer(Modifier.height(16.dp))
+        Text(text, color = Color.Gray, textAlign = TextAlign.Center)
+    }
 }
