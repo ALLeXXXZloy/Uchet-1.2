@@ -70,6 +70,16 @@ data class RecurringEntity(
     val lastExecutedMonth: String? = null
 )
 
+// НОВАЯ ТАБЛИЦА: Статусы подтверждения регулярных платежей
+@Entity(tableName = "recurring_confirmations", primaryKeys = ["recurringId", "month"])
+data class RecurringConfirmationEntity(
+    val recurringId: Long,
+    val month: String, // "YYYY-MM"
+    val status: String, // "CONFIRMED", "POSTPONED"
+    val actualAmountMinor: Long? = null,
+    val lastPostponedDate: String? = null // "YYYY-MM-DD"
+)
+
 @Entity(tableName = "categories")
 data class CategoryEntity(
     @PrimaryKey val name: String,
@@ -127,9 +137,9 @@ data class ForecastItemEntity(
     val forecastId: Long,
     val name: String,
     val type: TxType,
-    val amountMinor: Long, // Всегда в UZS для расчетов
-    val currency: String = "UZS", // Исходная валюта
-    val originalAmountMinor: Long? = null, // Оригинальная сумма
+    val amountMinor: Long,
+    val currency: String = "UZS",
+    val originalAmountMinor: Long? = null,
     val startMonth: String,
     val endMonth: String,
     val isFixed: Boolean = true
@@ -151,7 +161,7 @@ data class ForecastDepositEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val forecastId: Long,
     val name: String,
-    val initialAmountMinor: Long, // В UZS
+    val initialAmountMinor: Long,
     val currency: String = "UZS",
     val originalInitialAmountMinor: Long? = null,
     val annualRatePercent: Double,
@@ -232,6 +242,17 @@ interface AppDao {
     @Delete
     suspend fun deleteRecurring(r: RecurringEntity)
 
+    // --- Recurring Confirmations ---
+    @Query("SELECT * FROM recurring_confirmations WHERE recurringId = :id AND month = :month")
+    suspend fun getConfirmation(id: Long, month: String): RecurringConfirmationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertConfirmation(conf: RecurringConfirmationEntity)
+
+    @Query("DELETE FROM recurring_confirmations")
+    suspend fun clearConfirmations()
+
+    // --- Categories ---
     @Query("SELECT * FROM categories")
     fun observeCategories(): Flow<List<CategoryEntity>>
 
@@ -356,12 +377,13 @@ interface AppDao {
 @Database(
     entities = [
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
+        RecurringConfirmationEntity::class,
         CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class,
         PlanItemEntity::class,
         ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -492,7 +514,6 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
-        // НОВАЯ МИГРАЦИЯ ДЛЯ ПОДДЕРЖКИ ВАЛЮТ
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE forecast_items ADD COLUMN currency TEXT NOT NULL DEFAULT 'UZS'")
@@ -503,6 +524,22 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        // НОВАЯ МИГРАЦИЯ: Добавляем таблицу для подтверждений
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `recurring_confirmations` (
+                        `recurringId` INTEGER NOT NULL,
+                        `month` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `actualAmountMinor` INTEGER DEFAULT NULL,
+                        `lastPostponedDate` TEXT DEFAULT NULL,
+                        PRIMARY KEY(`recurringId`, `month`)
+                    )
+                """)
+            }
+        }
+
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -510,7 +547,7 @@ abstract class AppDb : RoomDatabase() {
                     AppDb::class.java,
                     "uchet_database"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
                 INSTANCE = instance
                 instance
