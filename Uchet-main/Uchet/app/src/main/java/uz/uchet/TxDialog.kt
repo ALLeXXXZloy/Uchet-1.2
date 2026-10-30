@@ -129,6 +129,15 @@ fun TxDialog(
         if (autoStartVoice && !isPendingSms) startVoiceInput()
     }
 
+    // Вспомогательная функция для сохранения фото
+    fun saveImageAndFinish(bitmap: Bitmap) {
+        val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
+        file.parentFile?.mkdirs()
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        photoPath = file.absolutePath
+        isLoading = false
+    }
+
     // ----- ОБРАБОТКА QR ИЗ ГАЛЕРЕИ/КАМЕРЫ -----
     fun processQrImage(bitmap: Bitmap?) {
         if (bitmap == null) return
@@ -137,12 +146,10 @@ fun TxDialog(
         val scanner = BarcodeScanning.getClient()
         
         scanner.process(image).addOnSuccessListener { barcodes ->
-            isLoading = false
             if (barcodes.isNotEmpty()) {
                 val rawValue = barcodes[0].rawValue ?: ""
                 val qrData = QrReceiptParser.parse(rawValue)
                 if (qrData != null && qrData.amountMinor != null) {
-                    // Успешно распознали фискальный QR!
                     amount = BigDecimal(qrData.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
                     qrData.dateMillis?.let {
                         date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT)
@@ -153,13 +160,13 @@ fun TxDialog(
                     
                     scope.launch { snackbarHostState.showSnackbar("✅ Сумма и дата извлечены из QR-кода") }
                 } else {
-                    // QR есть, но не фискальный (например, просто ссылка на сайт)
                     desc = "QR: ${rawValue.take(30)}"
                     scope.launch { snackbarHostState.showSnackbar("QR-код не является фискальным чеком") }
                 }
             } else {
                 scope.launch { snackbarHostState.showSnackbar("QR-код не найден на фото") }
             }
+            isLoading = false
         }.addOnFailureListener { 
             isLoading = false 
             scope.launch { snackbarHostState.showSnackbar(t("error")) }
@@ -172,17 +179,17 @@ fun TxDialog(
         isLoading = true
         
         val image = InputImage.fromBitmap(bitmap, 0)
-        
-        // Сначала пытаемся найти QR-код на фото!
         val scanner = BarcodeScanning.getClient()
+        
         scanner.process(image).addOnSuccessListener { barcodes ->
-            var foundAmountMinor: Long? = null
+            var qrAmount: Long? = null
             
+            // 1) Пытаемся найти сумму в QR
             if (barcodes.isNotEmpty()) {
                 val rawValue = barcodes[0].rawValue ?: ""
                 val qrData = QrReceiptParser.parse(rawValue)
                 if (qrData != null && qrData.amountMinor != null) {
-                    foundAmountMinor = qrData.amountMinor
+                    qrAmount = qrData.amountMinor
                     qrData.dateMillis?.let {
                         val localDate = Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
                         date = localDate.format(DATE_FMT)
@@ -193,68 +200,61 @@ fun TxDialog(
                 }
             }
 
-            // Если QR не дал результата, включаем OCR
-            if (foundAmountMinor == null) {
-                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                recognizer.process(image).addOnSuccessListener { visionText ->
-                    val rawText = visionText.text
-                    
-                    // 1) Специализированный парсер бумажных чеков
-                    val receipt = ReceiptParser.parse(rawText)
-                    if (receipt.amountMinor != null) {
-                        foundAmountMinor = receipt.amountMinor
-                        receipt.sellerName?.let { desc = it }
-                        receipt.dateMillis?.let {
-                            val localDate = Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
-                            date = localDate.format(DATE_FMT)
-                        }
-                        category = expenseCategories.find { it.contains("Покупки", true) } ?: category
-                    }
-                    
-                    // 2) Fallback: банковский скрин / SMS-подобный текст
-                    if (foundAmountMinor == null) {
-                        val parsed = SmsParser.parseForOcr(rawText)
-                        if (parsed != null) {
-                            val amt = runCatching {
-                                BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.'))
-                                    .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                            }.getOrNull()
-                            if (amt != null && amt > 0) {
-                                foundAmountMinor = amt
-                                if (parsed.description.isNotBlank()) desc = parsed.description
-                            }
-                        }
-                    }
-                    
-                    // 3) Финальный fallback: самое крупное число в нижней части текста
-                    if (foundAmountMinor == null) {
-                        foundAmountMinor = ReceiptParser.extractBiggestAmount(rawText)
-                    }
+            // Если QR сработал — сразу применяем
+            val finalQrAmount = qrAmount
+            if (finalQrAmount != null) {
+                amount = BigDecimal(finalQrAmount).movePointLeft(2).stripTrailingZeros().toPlainString()
+                saveImageAndFinish(bitmap)
+                return@addOnSuccessListener
+            }
 
-                    if (foundAmountMinor != null) {
-                        amount = BigDecimal(foundAmountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
-                    } else {
-                        scope.launch { snackbarHostState.showSnackbar("Не удалось распознать сумму на фото") }
+            // 2) Если QR не дал результата, запускаем OCR
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            recognizer.process(image).addOnSuccessListener { visionText ->
+                val rawText = visionText.text
+                var ocrAmount: Long? = null
+                
+                val receipt = ReceiptParser.parse(rawText)
+                if (receipt.amountMinor != null) {
+                    ocrAmount = receipt.amountMinor
+                    receipt.sellerName?.let { desc = it }
+                    receipt.dateMillis?.let {
+                        val localDate = Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
+                        date = localDate.format(DATE_FMT)
                     }
-                    
-                    // Сохраняем фото
-                    val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
-                    file.parentFile?.mkdirs()
-                    file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                    photoPath = file.absolutePath
-                    isLoading = false
-                }.addOnFailureListener { 
-                    isLoading = false 
-                    scope.launch { snackbarHostState.showSnackbar(t("error")) }
+                    category = expenseCategories.find { it.contains("Покупки", true) } ?: category
                 }
-            } else {
-                // Сумма найдена через QR, OCR не нужен
-                amount = BigDecimal(foundAmountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
-                val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
-                file.parentFile?.mkdirs()
-                file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                photoPath = file.absolutePath
-                isLoading = false
+                
+                if (ocrAmount == null) {
+                    val parsed = SmsParser.parseForOcr(rawText)
+                    if (parsed != null) {
+                        val amt = runCatching {
+                            BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.'))
+                                .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
+                        }.getOrNull()
+                        if (amt != null && amt > 0) {
+                            ocrAmount = amt
+                            if (parsed.description.isNotBlank()) desc = parsed.description
+                        }
+                    }
+                }
+                
+                if (ocrAmount == null) {
+                    ocrAmount = ReceiptParser.extractBiggestAmount(rawText)
+                }
+
+                // Устраняем ошибку smart cast через создание локальной val переменной
+                val finalOcrAmount = ocrAmount
+                if (finalOcrAmount != null) {
+                    amount = BigDecimal(finalOcrAmount).movePointLeft(2).stripTrailingZeros().toPlainString()
+                } else {
+                    scope.launch { snackbarHostState.showSnackbar("Не удалось распознать сумму на фото") }
+                }
+                
+                saveImageAndFinish(bitmap)
+            }.addOnFailureListener { 
+                isLoading = false 
+                scope.launch { snackbarHostState.showSnackbar(t("error")) }
             }
         }.addOnFailureListener {
             isLoading = false
