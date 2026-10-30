@@ -19,17 +19,22 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
+
+      # Настройка Gradle для кэширования
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+        working-directory: ./Uchet-main/Uchet # <-- УКАЗЫВАЕМ ПАПКУ
 
       - name: Run Unit Tests
         run: ./gradlew testDebugUnitTest
+        working-directory: ./Uchet-main/Uchet # <-- УКАЗЫВАЕМ ПАПКУ
 
       - name: Upload Test Report (if failed)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: app/build/reports/tests/testDebugUnitTest/
+          path: ./Uchet-main/Uchet/app/build/reports/tests/testDebugUnitTest/ # <-- ПУТЬ ДО ОТЧЕТА
