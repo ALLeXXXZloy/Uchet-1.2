@@ -14,11 +14,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -39,6 +42,7 @@ import java.util.UUID
 @Composable
 fun TxDialog(
     initial: Tx?,
+    quickTemplate: QuickTemplate? = null,
     cards: List<CardEntity>,
     expenseCategories: List<String>,
     incomeCategories: List<String>,
@@ -55,16 +59,22 @@ fun TxDialog(
     val zone = ZoneId.systemDefault()
     val initDt = initial?.let { Instant.ofEpochMilli(it.timestamp).atZone(zone) } ?: ZonedDateTime.now(zone)
 
-    var type by remember { mutableStateOf(initial?.type ?: TxType.EXPENSE) }
-    var category by remember { mutableStateOf(initial?.category ?: expenseCategories.lastOrNull() ?: "📦 Другое") }
-    var amount by remember { mutableStateOf(initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
+    var type by remember { mutableStateOf(quickTemplate?.type ?: initial?.type ?: TxType.EXPENSE) }
+    var category by remember { mutableStateOf(quickTemplate?.category ?: initial?.category ?: expenseCategories.lastOrNull() ?: "📦 Другое") }
+    var amount by remember { 
+        mutableStateOf(
+            quickTemplate?.averageAmountMinor?.let { BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() }
+            ?: initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() } 
+            ?: ""
+        ) 
+    }
     var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
     var selectedCardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
     var toCardId by remember { mutableStateOf(initial?.toCardId) }
     var toAmount by remember { mutableStateOf(initial?.toAmountMinor?.let { BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
 
     var isCustomCard by remember { mutableStateOf(initial?.cardId?.let { !cards.map { c -> c.id }.contains(it) } ?: false) }
-    var desc by remember { mutableStateOf(initial?.description ?: "") }
+    var desc by remember { mutableStateOf(quickTemplate?.category ?: initial?.description ?: "") }
     var date by remember { mutableStateOf(initDt.format(DATE_FMT)) }
     var photoPath by remember { mutableStateOf(initial?.photoPath) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -129,7 +139,7 @@ fun TxDialog(
         if (autoStartVoice && !isPendingSms) startVoiceInput()
     }
 
-    // Вспомогательная функция для сохранения фото
+    // ----- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ СОХРАНЕНИЯ ФОТО -----
     fun saveImageAndFinish(bitmap: Bitmap) {
         val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
         file.parentFile?.mkdirs()
@@ -138,7 +148,7 @@ fun TxDialog(
         isLoading = false
     }
 
-    // ----- ОБРАБОТКА QR ИЗ ГАЛЕРЕИ/КАМЕРЫ -----
+    // ----- ОБРАБОТКА QR -----
     fun processQrImage(bitmap: Bitmap?) {
         if (bitmap == null) return
         isLoading = true
@@ -154,9 +164,11 @@ fun TxDialog(
                     qrData.dateMillis?.let {
                         date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT)
                     }
-                    if (!qrData.merchant.isNullOrBlank()) desc = qrData.merchant
+                    if (!qrData.merchant.isNullOrBlank()) {
+                        desc = qrData.merchant
+                        MerchantCategorizer.getCategory(desc, expenseCategories)?.let { category = it }
+                    }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
-                    category = expenseCategories.find { it.contains("Покупки", true) } ?: category
                     
                     scope.launch { snackbarHostState.showSnackbar("✅ Сумма и дата извлечены из QR-кода") }
                 } else {
@@ -173,7 +185,7 @@ fun TxDialog(
         }
     }
 
-    // ----- ОБРАБОТКА ФОТО (ЧЕКИ И СКРИНЫ) -----
+    // ----- ОБРАБОТКА ФОТО (ЧЕКИ) -----
     fun processReceiptImage(bitmap: Bitmap?) {
         if (bitmap == null) return
         isLoading = true
@@ -184,23 +196,22 @@ fun TxDialog(
         scanner.process(image).addOnSuccessListener { barcodes ->
             var qrAmount: Long? = null
             
-            // 1) Пытаемся найти сумму в QR
             if (barcodes.isNotEmpty()) {
                 val rawValue = barcodes[0].rawValue ?: ""
                 val qrData = QrReceiptParser.parse(rawValue)
                 if (qrData != null && qrData.amountMinor != null) {
                     qrAmount = qrData.amountMinor
                     qrData.dateMillis?.let {
-                        val localDate = Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
-                        date = localDate.format(DATE_FMT)
+                        date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT)
                     }
-                    if (!qrData.merchant.isNullOrBlank()) desc = qrData.merchant
+                    if (!qrData.merchant.isNullOrBlank()) {
+                        desc = qrData.merchant
+                        MerchantCategorizer.getCategory(desc, expenseCategories)?.let { category = it }
+                    }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
-                    category = expenseCategories.find { it.contains("Покупки", true) } ?: category
                 }
             }
 
-            // Если QR сработал — сразу применяем
             val finalQrAmount = qrAmount
             if (finalQrAmount != null) {
                 amount = BigDecimal(finalQrAmount).movePointLeft(2).stripTrailingZeros().toPlainString()
@@ -208,7 +219,6 @@ fun TxDialog(
                 return@addOnSuccessListener
             }
 
-            // 2) Если QR не дал результата, запускаем OCR
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
             recognizer.process(image).addOnSuccessListener { visionText ->
                 val rawText = visionText.text
@@ -217,12 +227,13 @@ fun TxDialog(
                 val receipt = ReceiptParser.parse(rawText)
                 if (receipt.amountMinor != null) {
                     ocrAmount = receipt.amountMinor
-                    receipt.sellerName?.let { desc = it }
-                    receipt.dateMillis?.let {
-                        val localDate = Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
-                        date = localDate.format(DATE_FMT)
+                    receipt.sellerName?.let { 
+                        desc = it
+                        MerchantCategorizer.getCategory(desc, expenseCategories)?.let { cat -> category = cat }
                     }
-                    category = expenseCategories.find { it.contains("Покупки", true) } ?: category
+                    receipt.dateMillis?.let {
+                        date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT)
+                    }
                 }
                 
                 if (ocrAmount == null) {
@@ -243,7 +254,6 @@ fun TxDialog(
                     ocrAmount = ReceiptParser.extractBiggestAmount(rawText)
                 }
 
-                // Устраняем ошибку smart cast через создание локальной val переменной
                 val finalOcrAmount = ocrAmount
                 if (finalOcrAmount != null) {
                     amount = BigDecimal(finalOcrAmount).movePointLeft(2).stripTrailingZeros().toPlainString()
@@ -272,7 +282,6 @@ fun TxDialog(
         uri?.let { processReceiptImage(uriToBitmap(context, it)) }
     }
 
-    // Отдельная кнопка QR (сканирует картинку только на наличие QR)
     val qrLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { processQrImage(uriToBitmap(context, it)) }
     }
@@ -404,11 +413,17 @@ fun TxDialog(
                     AsyncImage(model = File(photoPath!!), contentDescription = t("receipt"), modifier = Modifier.fillMaxWidth().height(120.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                 }
 
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(amount, { amount = it }, label = { Text(t("amount")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
-                    Box(Modifier.weight(0.5f)) {
+                // --- БЛОК ВВОДА СУММЫ (КАЛЬКУЛЯТОР) ---
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (amount.isEmpty()) "0" else amount,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (amount.isEmpty()) Color.Gray else MaterialTheme.colorScheme.onSurface
+                    )
+                    Box {
                         var expanded by remember { mutableStateOf(false) }
-                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currency) }
+                        OutlinedButton(onClick = { expanded = true }) { Text(currency) }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             listOf("UZS", "USD", "EUR", "RUB").forEach { ccy ->
                                 DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false })
@@ -416,6 +431,8 @@ fun TxDialog(
                         }
                     }
                 }
+                NumericKeypad(amountStr = amount, onAmountChange = { amount = it })
+                // --------------------------------------------------
 
                 Box(Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
