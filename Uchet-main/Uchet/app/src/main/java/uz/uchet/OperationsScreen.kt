@@ -19,8 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.Instant
-import java.time.LocalDate
-import java.time.YearMonth
 import java.time.ZoneId
 
 @Composable
@@ -45,7 +43,6 @@ fun OperationsScreen(
     val rates by vm.rates.collectAsState()
     val allTxs by vm.allTxs.collectAsState()
     val pendingRecurring by vm.pendingRecurring.collectAsState()
-    val recurring by vm.recurring.collectAsState()
 
     val t = { key: String -> Translations.t(key, currentLang) }
 
@@ -98,25 +95,6 @@ fun OperationsScreen(
         }
     }
     val totalLiquidBalanceUzs = cardBalancesInUzs.values.sum()
-
-    // --- РАСЧЕТ SAFE-TO-SPEND ---
-    val today = LocalDate.now()
-    val currentYearMonth = YearMonth.now()
-    val remainingDays = (currentYearMonth.lengthOfMonth() - today.dayOfMonth + 1).coerceAtLeast(1)
-    
-    // Сколько уже отложено в цели
-    val totalInGoals = goals.sumOf { it.currentAmountMinor }
-    
-    // Предстоящие регулярные расходы (которые еще не наступили в этом месяце)
-    val upcomingRecurringExpenses = recurring.filter { 
-        it.type == TxType.EXPENSE && it.dayOfMonth >= today.dayOfMonth 
-    }.sumOf { it.amountMinor }
-
-    // Свободные деньги, которые можно тратить
-    val freeMoney = totalLiquidBalanceUzs - totalInGoals - upcomingRecurringExpenses
-    // Делим на оставшиеся дни
-    val safeToSpend = freeMoney / remainingDays
-    // --------------------------------------------------
 
     LazyColumn(
         Modifier.padding(paddingValues).fillMaxSize(),
@@ -221,7 +199,6 @@ fun OperationsScreen(
             Spacer(Modifier.height(16.dp))
         }
 
-        // --- КАРТОЧКА ОБЩЕГО БАЛАНСА ---
         item {
             Card(Modifier.fillMaxWidth().clickable { onShowBalanceDetails() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -230,53 +207,8 @@ fun OperationsScreen(
                     Text("${totalLiquidBalanceUzs.money()} UZS", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
             }
-            Spacer(Modifier.height(12.dp))
-        }
-
-        // --- КАРТОЧКА SAFE-TO-SPEND ---
-        item {
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (safeToSpend >= 0) MaterialTheme.colorScheme.surfaceVariant else RED.copy(alpha = 0.1f)
-                )
-            ) {
-                Row(
-                    Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = if (safeToSpend >= 0) Icons.Default.Calculate else Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = if (safeToSpend >= 0) MaterialTheme.colorScheme.primary else RED,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(
-                            text = if (safeToSpend >= 0) "Безопасно тратить в день" else "Бюджет превышен!",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (safeToSpend >= 0) MaterialTheme.colorScheme.onSurfaceVariant else RED
-                        )
-                        Text(
-                            text = if (safeToSpend >= 0) "Осталось дней: $remainingDays" else "Вам не хватает ${kotlin.math.abs(freeMoney).money()} UZS",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        text = if (safeToSpend >= 0) "${safeToSpend.money()} UZS" else "0 UZS",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (safeToSpend >= 0) GREEN else RED
-                    )
-                }
-            }
             Spacer(Modifier.height(16.dp))
         }
-        // -------------------------------
 
         if (goals.isNotEmpty()) {
             item {
