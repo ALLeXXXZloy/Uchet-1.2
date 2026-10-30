@@ -38,17 +38,17 @@ import java.util.UUID
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TxDialog(
-    initial: Tx?, 
-    cards: List<CardEntity>, 
-    expenseCategories: List<String>, 
-    incomeCategories: List<String>, 
-    currentLang: AppLanguage, 
-    isPendingSms: Boolean = false, 
-    autoStartVoice: Boolean = false, // НОВЫЙ ПАРАМЕТР
-    rates: List<ExchangeRateEntity>, 
-    vm: VM, 
-    onDismiss: () -> Unit, 
-    onSave: (Tx) -> Unit, 
+    initial: Tx?,
+    cards: List<CardEntity>,
+    expenseCategories: List<String>,
+    incomeCategories: List<String>,
+    currentLang: AppLanguage,
+    isPendingSms: Boolean = false,
+    autoStartVoice: Boolean = false,
+    rates: List<ExchangeRateEntity>,
+    vm: VM,
+    onDismiss: () -> Unit,
+    onSave: (Tx) -> Unit,
     onDelete: (() -> Unit)?
 ) {
     val context = LocalContext.current
@@ -68,11 +68,10 @@ fun TxDialog(
     var date by remember { mutableStateOf(initDt.format(DATE_FMT)) }
     var photoPath by remember { mutableStateOf(initial?.photoPath) }
     var error by remember { mutableStateOf<String?>(null) }
-    
     var isLoading by remember { mutableStateOf(false) }
+    
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-
     val t = { key: String -> Translations.t(key, currentLang) }
 
     var showTypeMenu by remember { mutableStateOf(false) }
@@ -93,6 +92,7 @@ fun TxDialog(
     val toCardCurrency = cards.find { it.id == toCardId }?.currency ?: "UZS"
     val isCurrencyDiff = type == TxType.TRANSFER && fromCardCurrency != toCardCurrency
 
+    // ----- ГОЛОСОВОЙ ВВОД -----
     val voiceLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -125,34 +125,66 @@ fun TxDialog(
         }
     }
 
-    // Автоматический запуск микрофона (если открыто долгим нажатием на +)
     LaunchedEffect(Unit) {
-        if (autoStartVoice && !isPendingSms) {
-            startVoiceInput()
+        if (autoStartVoice && !isPendingSms) startVoiceInput()
+    }
+
+    // ----- ОБРАБОТКА ФОТО (ЧЕКИ И СКРИНЫ) -----
+    fun processReceiptImage(bitmap: Bitmap?) {
+        if (bitmap == null) return
+        isLoading = true
+        
+        val image = InputImage.fromBitmap(bitmap, 0)
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        
+        recognizer.process(image).addOnSuccessListener { visionText ->
+            val rawText = visionText.text
+            
+            // 1. Пытаемся распознать как бумажный чек (Jami, To'lov uchun jami)
+            val receipt = ReceiptParser.parse(rawText)
+            
+            if (receipt.amountMinor != null) {
+                // Успешно распознали чек
+                amount = BigDecimal(receipt.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
+                if (receipt.sellerName != null) desc = receipt.sellerName
+                if (receipt.dateMillis != null) {
+                    val localDate = Instant.ofEpochMilli(receipt.dateMillis).atZone(zone).toLocalDate()
+                    date = localDate.format(DATE_FMT)
+                }
+                // Устанавливаем категорию "Покупки", если она есть в списке
+                category = expenseCategories.find { it.contains("Покупки", true) } ?: category
+            } else {
+                // 2. Если это не чек (например, скрин перевода), пробуем старый парсер
+                val parsed = SmsParser.parseForOcr(rawText)
+                if (parsed != null) {
+                    amount = parsed.amountStr
+                    desc = parsed.description
+                } else {
+                    scope.launch { snackbarHostState.showSnackbar("Не удалось распознать сумму на фото") }
+                }
+            }
+
+            // Сохраняем фото
+            val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
+            file.parentFile?.mkdirs()
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            photoPath = file.absolutePath
+            isLoading = false
+            
+        }.addOnFailureListener { 
+            isLoading = false 
+            scope.launch { snackbarHostState.showSnackbar(t("error")) }
         }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.TakePicture()) { success ->
-        if (success) {
-            val currentUri = tempCameraUri
-            if (currentUri != null) {
-                isLoading = true
-                val bitmap = uriToBitmap(context, currentUri)
-                bitmap?.let { bmp ->
-                    val image = InputImage.fromBitmap(bmp, 0)
-                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                    recognizer.process(image).addOnSuccessListener { visionText ->
-                        val parsed = SmsParser.parseForOcr(visionText.text)
-                        if (parsed != null) { amount = parsed.amountStr; desc = parsed.description }
-                        val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
-                        file.parentFile?.mkdirs()
-                        file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                        photoPath = file.absolutePath
-                        isLoading = false
-                    }.addOnFailureListener { isLoading = false }
-                }
-            }
+        if (success && tempCameraUri != null) {
+            processReceiptImage(uriToBitmap(context, tempCameraUri!!))
         }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { processReceiptImage(uriToBitmap(context, it)) }
     }
 
     val qrLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -166,6 +198,7 @@ fun TxDialog(
                     if (barcodes.isNotEmpty()) {
                         val rawValue = barcodes[0].rawValue ?: ""
                         desc = "QR: ${rawValue.take(30)}"
+                        // Пытаемся найти сумму в QR коде (иногда там есть total=...)
                         val amountMatch = Regex("""total=(\d+)""").find(rawValue)
                         if (amountMatch != null) amount = amountMatch.groupValues[1]
                     }
@@ -175,26 +208,7 @@ fun TxDialog(
         }
     }
 
-    val galleryLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            isLoading = true
-            val bitmap = uriToBitmap(context, it)
-            bitmap?.let { bmp ->
-                val image = InputImage.fromBitmap(bmp, 0)
-                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                recognizer.process(image).addOnSuccessListener { visionText ->
-                    val parsed = SmsParser.parseForOcr(visionText.text)
-                    if (parsed != null) { amount = parsed.amountStr; desc = parsed.description }
-                    val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
-                    file.parentFile?.mkdirs()
-                    file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                    photoPath = file.absolutePath
-                    isLoading = false
-                }.addOnFailureListener { isLoading = false }
-            }
-        }
-    }
-
+    // ----- ДИАЛОГИ ДОБАВЛЕНИЯ -----
     LaunchedEffect(type) {
         val currentList = if (type == TxType.INCOME) incomeCategories else expenseCategories
         if (!currentList.contains(category) && !showAddCategoryDialog) category = currentList.lastOrNull() ?: "📦 Другое"
@@ -258,6 +272,7 @@ fun TxDialog(
         )
     }
 
+    // ----- ОСНОВНОЙ ДИАЛОГ -----
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(when { isPendingSms -> t("sms_title"); initial == null -> t("new_tx"); else -> t("edit") }) },
@@ -267,7 +282,14 @@ fun TxDialog(
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
 
-                if (isPendingSms) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(12.dp)) { Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold); Text(t("sms_title"), style = MaterialTheme.typography.bodySmall) } } }
+                if (isPendingSms) { 
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { 
+                        Column(Modifier.padding(12.dp)) { 
+                            Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text(t("sms_title"), style = MaterialTheme.typography.bodySmall) 
+                        } 
+                    } 
+                }
 
                 Box(Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
@@ -394,45 +416,50 @@ fun TxDialog(
             TextButton(
                 enabled = !isLoading,
                 onClick = {
-                var amountMinor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
+                    var amountMinor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
 
-                if (currency != "UZS" && amountMinor != null) {
-                    val rateEntity = rates.find { it.currency == currency }
-                    if (rateEntity != null) {
-                        amountMinor = (amountMinor.toDouble() * rateEntity.rateToUzs).toBigDecimal().setScale(0, RoundingMode.HALF_UP).toLong()
+                    if (currency != "UZS" && amountMinor != null) {
+                        val rateEntity = rates.find { it.currency == currency }
+                        if (rateEntity != null) {
+                            amountMinor = (amountMinor.toDouble() * rateEntity.rateToUzs).toBigDecimal().setScale(0, RoundingMode.HALF_UP).toLong()
+                        }
                     }
-                }
-                
-                val toAmountMinor = if (isCurrencyDiff) {
-                    runCatching { BigDecimal(toAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
-                } else null
+                    
+                    val toAmountMinor = if (isCurrencyDiff) {
+                        runCatching { BigDecimal(toAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
+                    } else null
 
-                val d = runCatching { LocalDate.parse(date.trim(), DATE_FMT) }.getOrNull()
-                when {
-                    amountMinor == null || amountMinor <= 0 -> error = t("error")
-                    isCurrencyDiff && (toAmountMinor == null || toAmountMinor <= 0) -> error = "Введите сумму зачисления"
-                    d == null -> error = t("error")
-                    type == TxType.TRANSFER && toCardId == null -> error = t("error")
-                    else -> {
-                        val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
-                        onSave(Tx(
-                            id = initial?.id ?: 0, 
-                            amountMinor = amountMinor, 
-                            type = type, 
-                            cardId = finalCardId, 
-                            toCardId = toCardId, 
-                            toAmountMinor = toAmountMinor,
-                            description = desc.trim(), 
-                            category = category, 
-                            timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), 
-                            source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", 
-                            currency = currency, 
-                            photoPath = photoPath
-                        ))
+                    val d = runCatching { LocalDate.parse(date.trim(), DATE_FMT) }.getOrNull()
+                    when {
+                        amountMinor == null || amountMinor <= 0 -> error = t("error")
+                        isCurrencyDiff && (toAmountMinor == null || toAmountMinor <= 0) -> error = "Введите сумму зачисления"
+                        d == null -> error = t("error")
+                        type == TxType.TRANSFER && toCardId == null -> error = t("error")
+                        else -> {
+                            val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
+                            onSave(Tx(
+                                id = initial?.id ?: 0, 
+                                amountMinor = amountMinor, 
+                                type = type, 
+                                cardId = finalCardId, 
+                                toCardId = toCardId, 
+                                toAmountMinor = toAmountMinor,
+                                description = desc.trim(), 
+                                category = category, 
+                                timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(), 
+                                source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", 
+                                currency = currency, 
+                                photoPath = photoPath
+                            ))
+                        }
                     }
-                }
-            }) { Text(if (isPendingSms) t("confirm") else t("save")) }
+                }) { Text(if (isPendingSms) t("confirm") else t("save")) }
         },
-        dismissButton = { Row { onDelete?.let { TextButton(it) { Text(t("delete"), color = RED) } }; TextButton(onDismiss) { Text(if (isPendingSms) t("reject") else t("cancel")) } } }
+        dismissButton = { 
+            Row { 
+                onDelete?.let { TextButton(it) { Text(t("delete"), color = RED) } }
+                TextButton(onDismiss) { Text(if (isPendingSms) t("reject") else t("cancel")) } 
+            } 
+        }
     )
 }
