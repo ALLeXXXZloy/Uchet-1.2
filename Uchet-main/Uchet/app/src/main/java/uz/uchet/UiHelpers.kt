@@ -34,9 +34,21 @@ fun TxRow(t: Tx, lang: AppLanguage, onClick: () -> Unit) {
         TxType.TRANSFER -> "→" to BLUE
         TxType.ADJUSTMENT -> "⚙️" to Color.Gray
     }
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Column(Modifier.weight(1f)) {
-            val icon = when (t.source) { "AUTO" -> "🔄 "; "SMS" -> "✉️ "; "SAVINGS" -> "🏦 "; "IMPORT" -> "📥 "; "ADJUSTMENT" -> "⚙️ "; else -> "" }
+            val icon = when (t.source) {
+                "RECURRING" -> "🔄 "
+                "AUTO" -> "🔄 "
+                "SMS" -> "✉️ "
+                "SAVINGS" -> "🏦 "
+                "IMPORT" -> "📥 "
+                "ADJUSTMENT" -> "⚙️ "
+                else -> ""
+            }
             Text("$icon${Translations.translateCategory(t.category, lang)}  ${t.description}".trim(), maxLines = 2)
 
             val time = Instant.ofEpochMilli(t.timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))
