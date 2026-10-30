@@ -106,7 +106,6 @@ object Translations {
             "deposit_op_add" to "Пополнение",
             "deposit_op_withdraw" to "Снятие",
             "deposit_interest" to "Проценты",
-            // === Стандартный прогноз ===
             "standard_forecast" to "Стандартный прогноз",
             "standard_forecast_empty" to "Нет регулярных операций.\nДобавьте их в разделе 'Регулярные'.",
             "manage_recurring" to "Управление регулярными",
@@ -124,7 +123,8 @@ object Translations {
             "planned" to "Планировалось",
             "not_arrived" to "Не поступило",
             "not_spent" to "Не потрачено",
-            "pending_forecast" to "регулярных операций ожидают подтверждения"
+            "pending_forecast" to "регулярных операций ожидают подтверждения",
+            "operations" to "Операции"
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -230,7 +230,6 @@ object Translations {
             "deposit_op_add" to "To'ldirish",
             "deposit_op_withdraw" to "Yechish",
             "deposit_interest" to "Foizlar",
-            // === Standart prognoz ===
             "standard_forecast" to "Standart prognoz",
             "standard_forecast_empty" to "Muntazam operatsiyalar yo'q.\nUlarni 'Muntazam' bo'limida qo'shing.",
             "manage_recurring" to "Muntazamlarni boshqarish",
@@ -248,7 +247,8 @@ object Translations {
             "planned" to "Rejalashtirilgan",
             "not_arrived" to "Tushmadi",
             "not_spent" to "Sarflanmadi",
-            "pending_forecast" to "muntazam operatsiya tasdiqlashni kutmoqda"
+            "pending_forecast" to "muntazam operatsiya tasdiqlashni kutmoqda",
+            "operations" to "Operatsiyalar"
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -354,7 +354,6 @@ object Translations {
             "deposit_op_add" to "Top-up",
             "deposit_op_withdraw" to "Withdraw",
             "deposit_interest" to "Interest",
-            // === Standard forecast ===
             "standard_forecast" to "Standard Forecast",
             "standard_forecast_empty" to "No recurring transactions.\nAdd them in 'Recurring' section.",
             "manage_recurring" to "Manage recurring",
@@ -372,7 +371,8 @@ object Translations {
             "planned" to "Planned",
             "not_arrived" to "Not received",
             "not_spent" to "Not spent",
-            "pending_forecast" to "recurring operations pending"
+            "pending_forecast" to "recurring operations pending",
+            "operations" to "Operations"
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -478,7 +478,6 @@ object Translations {
             "deposit_op_add" to "Пуркунӣ",
             "deposit_op_withdraw" to "Гирифтан",
             "deposit_interest" to "Фоизҳо",
-            // === Пешгӯии стандартӣ ===
             "standard_forecast" to "Пешгӯии стандартӣ",
             "standard_forecast_empty" to "Амалиётҳои мунтазам нест.\nОнҳоро дар бахши 'Мунтазам' илова кунед.",
             "manage_recurring" to "Идоракунии мунтазам",
@@ -496,7 +495,8 @@ object Translations {
             "planned" to "Банақшагирифта",
             "not_arrived" to "Ворид нашуд",
             "not_spent" to "Сарф нашуд",
-            "pending_forecast" to "амалиёти мунтазам интизори тасдиқ"
+            "pending_forecast" to "амалиёти мунтазам интизори тасдиқ",
+            "operations" to "Амалиётҳо"
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -602,7 +602,6 @@ object Translations {
             "deposit_op_add" to "Toltırıw",
             "deposit_op_withdraw" to "Alıw",
             "deposit_interest" to "Protsentler",
-            // === Standart prognoz ===
             "standard_forecast" to "Standart prognoz",
             "standard_forecast_empty" to "Muntazam operatsiyalar joq.\nOlarды 'Muntazam' bóliminde qosıń.",
             "manage_recurring" to "Muntazamlardı basqarıw",
@@ -620,7 +619,8 @@ object Translations {
             "planned" to "Rejelestirilgen",
             "not_arrived" to "Túsmedi",
             "not_spent" to "Sarplanbadı",
-            "pending_forecast" to "muntazam operatsiya tastıyıqlawdı kútpekte"
+            "pending_forecast" to "muntazam operatsiya tastıyıqlawdı kútpekte",
+            "operations" to "Operatsiyalar"
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -726,7 +726,6 @@ object Translations {
             "deposit_op_add" to "Толықтыру",
             "deposit_op_withdraw" to "Алу",
             "deposit_interest" to "Пайыздар",
-            // === Стандартты болжам ===
             "standard_forecast" to "Стандартты болжам",
             "standard_forecast_empty" to "Тұрақты операциялар жоқ.\nОларды 'Тұрақты' бөлімінде қосыңыз.",
             "manage_recurring" to "Тұрақтыларды басқару",
@@ -744,7 +743,8 @@ object Translations {
             "planned" to "Жоспарланған",
             "not_arrived" to "Түспеді",
             "not_spent" to "Жұмсалмады",
-            "pending_forecast" to "тұрақты операция растауды күтуде"
+            "pending_forecast" to "тұрақты операция растауды күтуде",
+            "operations" to "Операциялар"
         )
     )
 
