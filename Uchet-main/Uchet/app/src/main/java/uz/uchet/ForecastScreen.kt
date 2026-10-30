@@ -35,6 +35,9 @@ fun ForecastScreen(
     val items by itemsFlow.collectAsState(initial = emptyList())
     val deposits by depositsFlow.collectAsState(initial = emptyList())
     val allOps by opsFlow.collectAsState(initial = emptyList())
+    
+    // ДОБАВЛЕНО: Получаем курсы валют для конвертации
+    val rates by vm.rates.collectAsState()
 
     var tab by remember { mutableStateOf(0) }
     var showAddItem by remember { mutableStateOf(false) }
@@ -51,7 +54,7 @@ fun ForecastScreen(
     }
     val openedDepositOps by openedDepositOpsFlow.collectAsState(initial = emptyList())
 
-    // Предвычисляем весь прогноз один раз — внутри LazyColumn только чтения
+    // Предвычисляем весь прогноз один раз
     val calc = remember(forecast, items, deposits, allOps) {
         ForecastCalculator.calculate(forecast, items, deposits, allOps)
     }
@@ -153,28 +156,47 @@ fun ForecastScreen(
         }
     }
 
+    // ----- ДИАЛОГ ОПЕРАЦИИ ПЛАНА (с логикой разделения) -----
     if (showAddItem || editingItem != null) {
         ForecastItemDialog(
             initial = editingItem,
             forecastId = forecast.id,
             forecastStart = forecast.startMonth,
             forecastEnd = forecastEnd,
+            rates = rates, // Передаем курсы
             currentLang = currentLang,
             onDismiss = { showAddItem = false; editingItem = null },
-            onSave = {
-                vm.saveForecastItem(it)
+            onSave = { item, splitMonth ->
+                if (splitMonth != null && editingItem != null && splitMonth > editingItem!!.startMonth) {
+                    // ЛОГИКА РАЗДЕЛЕНИЯ:
+                    // 1. Обрезаем старую операцию до месяца перед разделением
+                    val monthBefore = YearMonth.parse(splitMonth).minusMonths(1).toString()
+                    if (monthBefore >= editingItem!!.startMonth) {
+                        vm.saveForecastItem(editingItem!!.copy(endMonth = monthBefore))
+                    } else {
+                        // Если разделение началось с самого начала, удаляем старую
+                        vm.deleteForecastItem(editingItem!!.id)
+                    }
+                    // 2. Создаем новую операцию с новыми параметрами
+                    vm.saveForecastItem(item.copy(id = 0, startMonth = splitMonth))
+                } else {
+                    // Обычное сохранение (без разделения)
+                    vm.saveForecastItem(item)
+                }
                 showAddItem = false
                 editingItem = null
             }
         )
     }
 
+    // ----- ДИАЛОГ ВКЛАДА -----
     if (showAddDeposit || editingDeposit != null) {
         DepositDialog(
             initial = editingDeposit,
             forecastId = forecast.id,
             forecastStart = forecast.startMonth,
             forecastEnd = forecastEnd,
+            rates = rates, // Передаем курсы
             currentLang = currentLang,
             onDismiss = { showAddDeposit = false; editingDeposit = null },
             onSave = {
@@ -185,6 +207,7 @@ fun ForecastScreen(
         )
     }
 
+    // ----- ДИАЛОГ ИСТОРИИ ВКЛАДА -----
     if (openedDeposit != null) {
         DepositTimelineDialog(
             deposit = openedDeposit!!,
@@ -226,8 +249,17 @@ private fun PlanTab(
                             color = Color.Gray
                         )
                     }
+                    
+                    // Показываем исходную сумму и валюту, если она не UZS
+                    val displayAmount = if (item.currency != "UZS" && item.originalAmountMinor != null) {
+                        val orig = java.math.BigDecimal(item.originalAmountMinor).movePointLeft(2).toPlainString()
+                        "$orig ${item.currency}"
+                    } else {
+                        "${item.amountMinor.money()} UZS"
+                    }
+                    
                     Text(
-                        "${if (item.type == TxType.INCOME) "+" else "-"}${item.amountMinor.money()}",
+                        "${if (item.type == TxType.INCOME) "+" else "-"}$displayAmount",
                         color = if (item.type == TxType.INCOME) GREEN else RED,
                         fontWeight = FontWeight.Bold
                     )
@@ -264,6 +296,13 @@ private fun DepositsTab(
                 CapitalizationType.DAILY -> Translations.t("deposit_cap_daily", currentLang)
                 CapitalizationType.END_OF_TERM -> Translations.t("deposit_cap_end", currentLang)
             }
+            val displayAmount = if (d.currency != "UZS" && d.originalInitialAmountMinor != null) {
+                val orig = java.math.BigDecimal(d.originalInitialAmountMinor).movePointLeft(2).toPlainString()
+                "$orig ${d.currency}"
+            } else {
+                "${d.initialAmountMinor.money()} UZS"
+            }
+            
             Card(
                 Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { onOpen(d) }
             ) {
@@ -275,7 +314,7 @@ private fun DepositsTab(
                     Column(Modifier.weight(1f)) {
                         Text(d.name, fontWeight = FontWeight.Medium)
                         Text(
-                            "${d.initialAmountMinor.money()} • ${d.annualRatePercent}% • $capLabel",
+                            "$displayAmount • ${d.annualRatePercent}% • $capLabel",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
