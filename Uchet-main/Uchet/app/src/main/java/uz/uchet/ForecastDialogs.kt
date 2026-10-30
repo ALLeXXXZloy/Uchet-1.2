@@ -89,7 +89,7 @@ fun ForecastDialog(
     )
 }
 
-// ---------- 2. Диалог операции плана (доход/расход) ----------
+// ---------- 2. Диалог операции плана (с валютой и разделением) ----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForecastItemDialog(
@@ -97,47 +97,70 @@ fun ForecastItemDialog(
     forecastId: Long,
     forecastStart: String,
     forecastEnd: String,
+    rates: List<ExchangeRateEntity>, // ДОБАВЛЕНО
     currentLang: AppLanguage,
     onDismiss: () -> Unit,
-    onSave: (ForecastItemEntity) -> Unit
+    onSave: (ForecastItemEntity, String?) -> Unit // ДОБАВЛЕНО: splitMonth
 ) {
     val t = { key: String -> Translations.t(key, currentLang) }
     var name by remember { mutableStateOf(initial?.name ?: "") }
-    var amount by remember {
-        mutableStateOf(initial?.amountMinor?.let { BigDecimal(it).movePointLeft(2).toPlainString() } ?: "")
+    
+    // Исходная сумма в выбранной валюте
+    var amountStr by remember {
+        mutableStateOf(initial?.originalAmountMinor?.let { BigDecimal(it).movePointLeft(2).toPlainString() } 
+            ?: initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).toPlainString() } ?: "")
     }
+    var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
     var type by remember { mutableStateOf(initial?.type ?: TxType.EXPENSE) }
     var startMonth by remember { mutableStateOf(initial?.startMonth ?: forecastStart) }
     var endMonth by remember { mutableStateOf(initial?.endMonth ?: forecastEnd) }
+    
+    // Поле для разделения прогноза
+    var splitMonth by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // Конвертация в UZS для подсказки
+    val amountMinorInput = runCatching { BigDecimal(amountStr.replace(" ", "").replace(',', '.')).movePointRight(2).toLong() }.getOrNull() ?: 0L
+    val rate = if (currency == "UZS") 1.0 else rates.find { it.currency == currency }?.rateToUzs ?: 1.0
+    val convertedUzs = (amountMinorInput.toDouble() * rate).toLong()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) t("forecast_item_new") else t("forecast_item_edit")) },
         text = {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = name, onValueChange = { name = it; error = null },
                     label = { Text(t("forecast_item_name")) }, singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE }, SegmentedButtonDefaults.itemShape(0, 2)) {
-                        Text(t("expense"), color = if (type == TxType.EXPENSE) RED else Color.Unspecified)
-                    }
-                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME }, SegmentedButtonDefaults.itemShape(1, 2)) {
-                        Text(t("income"), color = if (type == TxType.INCOME) GREEN else Color.Unspecified)
+                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense"), color = if (type == TxType.EXPENSE) RED else Color.Unspecified) }
+                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income"), color = if (type == TxType.INCOME) GREEN else Color.Unspecified) }
+                }
+                
+                // Сумма и валюта
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = amountStr, onValueChange = { amountStr = it; error = null },
+                        label = { Text(t("forecast_item_amount")) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true, modifier = Modifier.weight(1f)
+                    )
+                    Box(Modifier.weight(0.5f)) {
+                        var expanded by remember { mutableStateOf(false) }
+                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currency) }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy ->
+                                DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false })
+                            }
+                        }
                     }
                 }
-                OutlinedTextField(
-                    value = amount, onValueChange = { amount = it; error = null },
-                    label = { Text(t("forecast_item_amount")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
+                if (currency != "UZS") {
+                    Text("~ ${convertedUzs.money()} UZS (${t("converted_hint")})", style = MaterialTheme.typography.bodySmall, color = BLUE)
+                }
+
                 OutlinedTextField(
                     value = startMonth, onValueChange = { startMonth = it; error = null },
                     label = { Text(t("forecast_item_start")) }, singleLine = true,
@@ -148,37 +171,53 @@ fun ForecastItemDialog(
                     label = { Text(t("forecast_item_end")) }, singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                
+                // Блок разделения на будущие месяцы (только если редактируем)
+                if (initial != null) {
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    OutlinedTextField(
+                        value = splitMonth,
+                        onValueChange = { splitMonth = it },
+                        label = { Text(t("split_from_month")) },
+                        placeholder = { Text("Напр. 2026-11") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(t("empty_for_all"), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                }
+
                 error?.let { Text(it, color = RED, style = MaterialTheme.typography.bodySmall) }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                val amt = runCatching {
-                    BigDecimal(amount.replace(" ", "").replace(',', '.'))
-                        .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                }.getOrNull()
-                if (name.isBlank()) { error = t("error"); return@TextButton }
-                if (amt == null || amt <= 0) { error = t("error"); return@TextButton }
-                if (!startMonth.matches(Regex("\\d{4}-\\d{2}")) || !endMonth.matches(Regex("\\d{4}-\\d{2}"))) {
-                    error = t("error"); return@TextButton
-                }
+                val amt = runCatching { BigDecimal(amountStr.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
+                if (name.isBlank() || amt == null || amt <= 0) { error = t("error"); return@TextButton }
+                
+                val finalUzsAmount = (amt.toDouble() * rate).toLong()
+                
+                if (!startMonth.matches(Regex("\\d{4}-\\d{2}")) || !endMonth.matches(Regex("\\d{4}-\\d{2}"))) { error = t("error"); return@TextButton }
+                if (splitMonth.isNotBlank() && !splitMonth.matches(Regex("\\d{4}-\\d{2}"))) { error = t("error"); return@TextButton }
+
                 onSave(ForecastItemEntity(
                     id = initial?.id ?: 0,
                     forecastId = forecastId,
                     name = name.trim(),
                     type = type,
-                    amountMinor = amt,
+                    amountMinor = finalUzsAmount, // Сохраняем в UZS
+                    currency = currency,
+                    originalAmountMinor = amt,
                     startMonth = startMonth,
                     endMonth = endMonth,
                     isFixed = initial?.isFixed ?: true
-                ))
+                ), splitMonth.ifBlank { null })
             }) { Text(t("save")) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(t("cancel")) } }
     )
 }
 
-// ---------- 3. Диалог вклада ----------
+// ---------- 3. Диалог вклада (с валютой) ----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DepositDialog(
@@ -186,18 +225,25 @@ fun DepositDialog(
     forecastId: Long,
     forecastStart: String,
     forecastEnd: String,
+    rates: List<ExchangeRateEntity>, // ДОБАВЛЕНО
     currentLang: AppLanguage,
     onDismiss: () -> Unit,
     onSave: (ForecastDepositEntity) -> Unit
 ) {
     val t = { key: String -> Translations.t(key, currentLang) }
     var name by remember { mutableStateOf(initial?.name ?: "") }
+    
+    // Исходная сумма
     var initialAmount by remember {
-        mutableStateOf(initial?.initialAmountMinor?.let { BigDecimal(it).movePointLeft(2).toPlainString() } ?: "")
+        mutableStateOf(initial?.originalInitialAmountMinor?.let { BigDecimal(it).movePointLeft(2).toPlainString() } 
+            ?: initial?.let { BigDecimal(it.initialAmountMinor).movePointLeft(2).toPlainString() } ?: "")
     }
+    var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
+    
     var rate by remember { mutableStateOf(initial?.annualRatePercent?.toString() ?: "18.0") }
     var startMonth by remember { mutableStateOf(initial?.startMonth ?: forecastStart) }
     var endMonth by remember { mutableStateOf(initial?.endMonth ?: forecastEnd) }
+    
     var monthlyContrib by remember {
         mutableStateOf(initial?.monthlyContributionMinor?.takeIf { it > 0 }?.let { BigDecimal(it).movePointLeft(2).toPlainString() } ?: "")
     }
@@ -207,6 +253,11 @@ fun DepositDialog(
     var cap by remember { mutableStateOf(initial?.capitalization ?: CapitalizationType.MONTHLY) }
     var showCapMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // Конвертация для подсказки
+    val amountMinorInput = runCatching { BigDecimal(initialAmount.replace(" ", "").replace(',', '.')).movePointRight(2).toLong() }.getOrNull() ?: 0L
+    val exchangeRate = if (currency == "UZS") 1.0 else rates.find { it.currency == currency }?.rateToUzs ?: 1.0
+    val convertedUzs = (amountMinorInput.toDouble() * exchangeRate).toLong()
 
     fun capLabel(c: CapitalizationType): String = when (c) {
         CapitalizationType.MONTHLY -> t("deposit_cap_monthly")
@@ -218,49 +269,37 @@ fun DepositDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) t("deposit_new") else t("deposit_edit")) },
         text = {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it; error = null },
-                    label = { Text(t("deposit_name")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = initialAmount, onValueChange = { initialAmount = it; error = null },
-                    label = { Text(t("deposit_initial")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = rate, onValueChange = { rate = it; error = null },
-                    label = { Text(t("deposit_rate")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = startMonth, onValueChange = { startMonth = it; error = null },
-                    label = { Text(t("deposit_start")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = endMonth, onValueChange = { endMonth = it; error = null },
-                    label = { Text(t("deposit_end")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = monthlyContrib, onValueChange = { monthlyContrib = it; error = null },
-                    label = { Text(t("deposit_monthly_contrib")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = monthlyWd, onValueChange = { monthlyWd = it; error = null },
-                    label = { Text(t("deposit_monthly_wd")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it; error = null }, label = { Text(t("deposit_name")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                
+                // Сумма и валюта
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = initialAmount, onValueChange = { initialAmount = it; error = null },
+                        label = { Text(t("deposit_initial")) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true, modifier = Modifier.weight(1f)
+                    )
+                    Box(Modifier.weight(0.5f)) {
+                        var expanded by remember { mutableStateOf(false) }
+                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currency) }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            listOf("UZS", "USD", "EUR", "RUB").forEach { ccy ->
+                                DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false })
+                            }
+                        }
+                    }
+                }
+                if (currency != "UZS") {
+                    Text("~ ${convertedUzs.money()} UZS", style = MaterialTheme.typography.bodySmall, color = BLUE)
+                }
+
+                OutlinedTextField(value = rate, onValueChange = { rate = it; error = null }, label = { Text(t("deposit_rate")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = startMonth, onValueChange = { startMonth = it; error = null }, label = { Text(t("deposit_start")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = endMonth, onValueChange = { endMonth = it; error = null }, label = { Text(t("deposit_end")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = monthlyContrib, onValueChange = { monthlyContrib = it; error = null }, label = { Text(t("deposit_monthly_contrib")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = monthlyWd, onValueChange = { monthlyWd = it; error = null }, label = { Text(t("deposit_monthly_wd")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                
                 Box {
                     OutlinedButton(onClick = { showCapMenu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("${t("deposit_capitalization")}: ${capLabel(cap)}")
@@ -269,10 +308,7 @@ fun DepositDialog(
                     }
                     DropdownMenu(expanded = showCapMenu, onDismissRequest = { showCapMenu = false }) {
                         CapitalizationType.values().forEach { c ->
-                            DropdownMenuItem(
-                                text = { Text(capLabel(c)) },
-                                onClick = { cap = c; showCapMenu = false }
-                            )
+                            DropdownMenuItem(text = { Text(capLabel(c)) }, onClick = { cap = c; showCapMenu = false })
                         }
                     }
                 }
@@ -281,30 +317,24 @@ fun DepositDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val init = runCatching {
-                    BigDecimal(initialAmount.replace(" ", "").replace(',', '.'))
-                        .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                }.getOrNull()
+                val initAmt = runCatching { BigDecimal(initialAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                 val r = rate.toDoubleOrNull()
-                val contrib = runCatching {
-                    BigDecimal(monthlyContrib.replace(" ", "").replace(',', '.'))
-                        .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                }.getOrNull() ?: 0L
-                val wd = runCatching {
-                    BigDecimal(monthlyWd.replace(" ", "").replace(',', '.'))
-                        .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                }.getOrNull() ?: 0L
-                if (name.isBlank()) { error = t("error"); return@TextButton }
-                if (init == null || init <= 0) { error = t("error"); return@TextButton }
+                val contrib = runCatching { BigDecimal(monthlyContrib.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L
+                val wd = runCatching { BigDecimal(monthlyWd.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L
+                
+                if (name.isBlank() || initAmt == null || initAmt <= 0) { error = t("error"); return@TextButton }
                 if (r == null || r <= 0) { error = t("error"); return@TextButton }
-                if (!startMonth.matches(Regex("\\d{4}-\\d{2}")) || !endMonth.matches(Regex("\\d{4}-\\d{2}"))) {
-                    error = t("error"); return@TextButton
-                }
+                if (!startMonth.matches(Regex("\\d{4}-\\d{2}")) || !endMonth.matches(Regex("\\d{4}-\\d{2}"))) { error = t("error"); return@TextButton }
+                
+                val finalUzsInitAmount = (initAmt.toDouble() * exchangeRate).toLong()
+
                 onSave(ForecastDepositEntity(
                     id = initial?.id ?: 0,
                     forecastId = forecastId,
                     name = name.trim(),
-                    initialAmountMinor = init,
+                    initialAmountMinor = finalUzsInitAmount, // Сохраняем в UZS
+                    currency = currency,
+                    originalInitialAmountMinor = initAmt,
                     annualRatePercent = r,
                     startMonth = startMonth,
                     endMonth = endMonth,
@@ -338,49 +368,24 @@ fun DepositOpDialog(
         onDismissRequest = onDismiss,
         title = { Text(t("deposit_op_new")) },
         text = {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    SegmentedButton(!isWithdrawal, { isWithdrawal = false }, SegmentedButtonDefaults.itemShape(0, 2)) {
-                        Text(t("deposit_op_add"), color = if (!isWithdrawal) GREEN else Color.Unspecified)
-                    }
-                    SegmentedButton(isWithdrawal, { isWithdrawal = true }, SegmentedButtonDefaults.itemShape(1, 2)) {
-                        Text(t("deposit_op_withdraw"), color = if (isWithdrawal) RED else Color.Unspecified)
-                    }
+                    SegmentedButton(!isWithdrawal, { isWithdrawal = false }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("deposit_op_add"), color = if (!isWithdrawal) GREEN else Color.Unspecified) }
+                    SegmentedButton(isWithdrawal, { isWithdrawal = true }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("deposit_op_withdraw"), color = if (isWithdrawal) RED else Color.Unspecified) }
                 }
-                OutlinedTextField(
-                    value = month, onValueChange = { month = it; error = null },
-                    label = { Text(t("deposit_op_month")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = amount, onValueChange = { amount = it; error = null },
-                    label = { Text(t("deposit_op_amount")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = desc, onValueChange = { desc = it },
-                    label = { Text(t("deposit_op_desc")) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                OutlinedTextField(value = month, onValueChange = { month = it; error = null }, label = { Text(t("deposit_op_month")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = amount, onValueChange = { amount = it; error = null }, label = { Text(t("deposit_op_amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text(t("deposit_op_desc")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 error?.let { Text(it, color = RED, style = MaterialTheme.typography.bodySmall) }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                val amt = runCatching {
-                    BigDecimal(amount.replace(" ", "").replace(',', '.'))
-                        .movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                }.getOrNull()
+                val amt = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                 if (amt == null || amt <= 0) { error = t("error"); return@TextButton }
                 if (!month.matches(Regex("\\d{4}-\\d{2}"))) { error = t("error"); return@TextButton }
                 onSave(ForecastDepositOpEntity(
-                    id = 0,
-                    depositId = deposit.id,
-                    month = month,
+                    id = 0, depositId = deposit.id, month = month,
                     amountMinor = if (isWithdrawal) -amt else amt,
                     description = desc.trim()
                 ))
@@ -413,12 +418,7 @@ fun DepositTimelineDialog(
             onDismissRequest = { opToDelete = null },
             title = { Text(t("delete_confirm_title")) },
             text = { Text(t("delete_confirm_text")) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDeleteOp(opToDelete!!.id)
-                    opToDelete = null
-                }) { Text(t("yes"), color = RED) }
-            },
+            confirmButton = { TextButton(onClick = { onDeleteOp(opToDelete!!.id); opToDelete = null }) { Text(t("yes"), color = RED) } },
             dismissButton = { TextButton(onClick = { opToDelete = null }) { Text(t("no")) } }
         )
     }
@@ -428,15 +428,16 @@ fun DepositTimelineDialog(
         title = { Text("${t("deposit_timeline")}: ${deposit.name}") },
         text = {
             Column(Modifier.fillMaxWidth()) {
+                // Инфо с учетом исходной суммы
+                val origAmount = deposit.originalInitialAmountMinor?.let { BigDecimal(it).movePointLeft(2).toPlainString() } ?: BigDecimal(deposit.initialAmountMinor).movePointLeft(2).toPlainString()
                 Text(
-                    "${deposit.initialAmountMinor.money()} • ${deposit.annualRatePercent}% • " +
+                    "$origAmount ${deposit.currency} • ${deposit.annualRatePercent}% • " +
                         when (deposit.capitalization) {
                             CapitalizationType.MONTHLY -> t("deposit_cap_monthly")
                             CapitalizationType.DAILY -> t("deposit_cap_daily")
                             CapitalizationType.END_OF_TERM -> t("deposit_cap_end")
                         },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
+                    style = MaterialTheme.typography.bodySmall, color = Color.Gray
                 )
                 Spacer(Modifier.height(12.dp))
 
@@ -444,48 +445,16 @@ fun DepositTimelineDialog(
                     items(timeline) { s ->
                         Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
                             Column(Modifier.padding(8.dp)) {
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        getMonthName(s.month.monthValue, currentLang) + " " + s.month.year,
-                                        fontWeight = FontWeight.Medium,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                    Text(
-                                        "${s.endBalance.money()}",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = GREEN
-                                    )
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(getMonthName(s.month.monthValue, currentLang) + " " + s.month.year, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodySmall)
+                                    Text("${s.endBalance.money()}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = GREEN)
                                 }
-                                Text(
-                                    "${t("deposit_interest")}: +${s.interest.money()}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = GREEN
-                                )
-                                if (s.contribution > 0) Text(
-                                    "+${s.contribution.money()}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = GREEN
-                                )
-                                if (s.withdrawal > 0) Text(
-                                    "-${s.withdrawal.money()}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = RED
-                                )
-                                if (s.oneTimeOps != 0L) Text(
-                                    "${if (s.oneTimeOps > 0) "+" else ""}${s.oneTimeOps.money()}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (s.oneTimeOps > 0) GREEN else RED
-                                )
+                                Text("${t("deposit_interest")}: +${s.interest.money()}", style = MaterialTheme.typography.labelSmall, color = GREEN)
+                                if (s.contribution > 0) Text("+${s.contribution.money()}", style = MaterialTheme.typography.labelSmall, color = GREEN)
+                                if (s.withdrawal > 0) Text("-${s.withdrawal.money()}", style = MaterialTheme.typography.labelSmall, color = RED)
+                                if (s.oneTimeOps != 0L) Text("${if (s.oneTimeOps > 0) "+" else ""}${s.oneTimeOps.money()}", style = MaterialTheme.typography.labelSmall, color = if (s.oneTimeOps > 0) GREEN else RED)
                                 if (s.accruedInterestNotYetPaid > 0) {
-                                    Text(
-                                        "${t("deposit_interest")} (${t("deposit_cap_end")}): ${s.accruedInterestNotYetPaid.money()}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = YELLOW
-                                    )
+                                    Text("${t("deposit_interest")} (${t("deposit_cap_end")}): ${s.accruedInterestNotYetPaid.money()}", style = MaterialTheme.typography.labelSmall, color = YELLOW)
                                 }
                             }
                         }
@@ -494,41 +463,16 @@ fun DepositTimelineDialog(
                     if (ops.isNotEmpty()) {
                         item {
                             Spacer(Modifier.height(8.dp))
-                            Text(
-                                t("deposit_ops") + ":",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            Text(t("deposit_ops") + ":", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
                         }
                         items(ops) { op ->
-                            Row(
-                                Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(op.month, style = MaterialTheme.typography.bodySmall)
-                                    if (op.description.isNotBlank()) Text(
-                                        op.description,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.Gray
-                                    )
+                                    if (op.description.isNotBlank()) Text(op.description, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                                 }
-                                Text(
-                                    "${if (op.amountMinor > 0) "+" else ""}${op.amountMinor.money()}",
-                                    color = if (op.amountMinor > 0) GREEN else RED,
-                                    fontWeight = FontWeight.Medium,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                IconButton(
-                                    onClick = { opToDelete = op },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Delete, null,
-                                        tint = RED, modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                                Text("${if (op.amountMinor > 0) "+" else ""}${op.amountMinor.money()}", color = if (op.amountMinor > 0) GREEN else RED, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodySmall)
+                                IconButton(onClick = { opToDelete = op }, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Delete, null, tint = RED, modifier = Modifier.size(16.dp)) }
                             }
                         }
                     }
@@ -536,9 +480,7 @@ fun DepositTimelineDialog(
 
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = { showOpDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(t("deposit_op_new"))
+                    Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text(t("deposit_op_new"))
                 }
             }
         },
