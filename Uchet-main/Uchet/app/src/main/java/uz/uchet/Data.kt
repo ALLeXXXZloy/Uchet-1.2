@@ -84,6 +84,7 @@ data class ExchangeRateEntity(
     val rateToUzs: Double
 )
 
+// ---------- СТАРЫЙ ПРОГНОЗ (оставляем для совместимости) ----------
 @Entity(tableName = "plan_items")
 data class PlanItemEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -95,8 +96,87 @@ data class PlanItemEntity(
     val isFixed: Boolean = true
 )
 
+// ---------- НОВАЯ СИСТЕМА ПРОГНОЗОВ ----------
+
+@Entity(tableName = "forecasts")
+data class ForecastPlanEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val months: Int,                 // 3, 6, 9, 12, 24, 36
+    val startMonth: String,          // "YYYY-MM"
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "forecast_items",
+    foreignKeys = [
+        ForeignKey(
+            entity = ForecastPlanEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["forecastId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["forecastId"], name = "index_forecast_items_forecastId")]
+)
+data class ForecastItemEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val forecastId: Long,
+    val name: String,
+    val type: TxType,                // INCOME или EXPENSE (TRANSFER/ADJUSTMENT не используются)
+    val amountMinor: Long,
+    val startMonth: String,
+    val endMonth: String,
+    val isFixed: Boolean = true
+)
+
+@Entity(
+    tableName = "forecast_deposits",
+    foreignKeys = [
+        ForeignKey(
+            entity = ForecastPlanEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["forecastId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["forecastId"], name = "index_forecast_deposits_forecastId")]
+)
+data class ForecastDepositEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val forecastId: Long,
+    val name: String,
+    val initialAmountMinor: Long,
+    val annualRatePercent: Double,         // например 18.0 — 18% годовых
+    val startMonth: String,                // "YYYY-MM"
+    val endMonth: String,                  // "YYYY-MM"
+    val monthlyContributionMinor: Long = 0, // регулярное ежемесячное пополнение
+    val monthlyWithdrawalMinor: Long = 0    // регулярное ежемесячное снятие
+)
+
+@Entity(
+    tableName = "forecast_deposit_ops",
+    foreignKeys = [
+        ForeignKey(
+            entity = ForecastDepositEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["depositId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["depositId"], name = "index_forecast_deposit_ops_depositId")]
+)
+data class ForecastDepositOpEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val depositId: Long,
+    val month: String,                // "YYYY-MM"
+    val amountMinor: Long,            // >0 пополнение, <0 снятие
+    val description: String = ""
+)
+
 @Dao
 interface AppDao {
+    // ----- Транзакции / карты / бюджеты / категории -----
     @Query("SELECT * FROM txs WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp DESC")
     fun observe(start: Long, end: Long): Flow<List<Tx>>
 
@@ -175,7 +255,7 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertRate(rate: ExchangeRateEntity)
 
-    // ----- ПРОГНОЗ -----
+    // ----- Старый прогноз (plan_items) -----
     @Query("SELECT * FROM plan_items")
     fun observePlanItems(): Flow<List<PlanItemEntity>>
 
@@ -190,6 +270,64 @@ interface AppDao {
 
     @Query("DELETE FROM plan_items")
     suspend fun clearPlanItems()
+
+    // ----- НОВАЯ СИСТЕМА: Прогнозы -----
+    @Query("SELECT * FROM forecasts ORDER BY createdAt DESC")
+    fun observeForecasts(): Flow<List<ForecastPlanEntity>>
+
+    @Query("SELECT * FROM forecasts")
+    suspend fun getForecastsList(): List<ForecastPlanEntity>
+
+    @Query("SELECT * FROM forecasts WHERE id = :id")
+    suspend fun getForecastById(id: Long): ForecastPlanEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertForecast(f: ForecastPlanEntity): Long
+
+    @Query("DELETE FROM forecasts WHERE id = :id")
+    suspend fun deleteForecast(id: Long)
+
+    @Query("DELETE FROM forecasts")
+    suspend fun clearForecasts()
+
+    // ----- Forecast Items (доходы/расходы внутри прогноза) -----
+    @Query("SELECT * FROM forecast_items WHERE forecastId = :forecastId")
+    fun observeForecastItems(forecastId: Long): Flow<List<ForecastItemEntity>>
+
+    @Query("SELECT * FROM forecast_items")
+    suspend fun getAllForecastItems(): List<ForecastItemEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertForecastItem(item: ForecastItemEntity)
+
+    @Query("DELETE FROM forecast_items WHERE id = :id")
+    suspend fun deleteForecastItem(id: Long)
+
+    // ----- Forecast Deposits (вклады) -----
+    @Query("SELECT * FROM forecast_deposits WHERE forecastId = :forecastId")
+    fun observeForecastDeposits(forecastId: Long): Flow<List<ForecastDepositEntity>>
+
+    @Query("SELECT * FROM forecast_deposits")
+    suspend fun getAllForecastDeposits(): List<ForecastDepositEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertForecastDeposit(d: ForecastDepositEntity)
+
+    @Query("DELETE FROM forecast_deposits WHERE id = :id")
+    suspend fun deleteForecastDeposit(id: Long)
+
+    // ----- Forecast Deposit Ops (разовые операции по вкладам) -----
+    @Query("SELECT * FROM forecast_deposit_ops WHERE depositId = :depositId ORDER BY month ASC")
+    fun observeDepositOps(depositId: Long): Flow<List<ForecastDepositOpEntity>>
+
+    @Query("SELECT * FROM forecast_deposit_ops")
+    suspend fun getAllDepositOps(): List<ForecastDepositOpEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDepositOp(op: ForecastDepositOpEntity)
+
+    @Query("DELETE FROM forecast_deposit_ops WHERE id = :id")
+    suspend fun deleteDepositOp(id: Long)
 
     // ----- Очистка -----
     @Query("DELETE FROM txs")
@@ -215,9 +353,11 @@ interface AppDao {
     entities = [
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
         CategoryEntity::class, SavingsGoalEntity::class, ExchangeRateEntity::class,
-        PlanItemEntity::class
+        PlanItemEntity::class,
+        ForecastPlanEntity::class, ForecastItemEntity::class,
+        ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -258,6 +398,114 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        // v5 → v6: 4 новые таблицы + перенос plan_items в forecasts/forecast_items
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Создаём таблицы прогнозов
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `forecasts` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `months` INTEGER NOT NULL,
+                        `startMonth` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """)
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `forecast_items` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `forecastId` INTEGER NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `amountMinor` INTEGER NOT NULL,
+                        `startMonth` TEXT NOT NULL,
+                        `endMonth` TEXT NOT NULL,
+                        `isFixed` INTEGER NOT NULL,
+                        FOREIGN KEY(`forecastId`) REFERENCES `forecasts`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """)
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `forecast_deposits` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `forecastId` INTEGER NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `initialAmountMinor` INTEGER NOT NULL,
+                        `annualRatePercent` REAL NOT NULL,
+                        `startMonth` TEXT NOT NULL,
+                        `endMonth` TEXT NOT NULL,
+                        `monthlyContributionMinor` INTEGER NOT NULL,
+                        `monthlyWithdrawalMinor` INTEGER NOT NULL,
+                        FOREIGN KEY(`forecastId`) REFERENCES `forecasts`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """)
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `forecast_deposit_ops` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `depositId` INTEGER NOT NULL,
+                        `month` TEXT NOT NULL,
+                        `amountMinor` INTEGER NOT NULL,
+                        `description` TEXT NOT NULL,
+                        FOREIGN KEY(`depositId`) REFERENCES `forecast_deposits`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """)
+
+                // 2. Индексы на FK
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_forecast_items_forecastId` ON `forecast_items` (`forecastId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_forecast_deposits_forecastId` ON `forecast_deposits` (`forecastId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_forecast_deposit_ops_depositId` ON `forecast_deposit_ops` (`depositId`)")
+
+                // 3. Перенос старых plan_items в прогноз «По умолчанию»
+                var hasOldData = false
+                db.query("SELECT * FROM plan_items").use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        hasOldData = true
+                    }
+                }
+                if (hasOldData) {
+                    val now = System.currentTimeMillis()
+                    db.execSQL(
+                        "INSERT INTO forecasts (name, months, startMonth, createdAt) VALUES (?, ?, ?, ?)",
+                        arrayOf<Any>("Мой прогноз", 12, "2026-01", now)
+                    )
+                    val forecastId = db.query("SELECT last_insert_rowid()").use { c ->
+                        c.moveToFirst(); c.getLong(0)
+                    }
+                    db.query("SELECT * FROM plan_items").use { cursor ->
+                        val nameIdx = cursor.getColumnIndexOrThrow("name")
+                        val typeIdx = cursor.getColumnIndexOrThrow("type")
+                        val amtIdx = cursor.getColumnIndexOrThrow("amountMinor")
+                        val startIdx = cursor.getColumnIndexOrThrow("startMonth")
+                        val endIdx = cursor.getColumnIndexOrThrow("endMonth")
+                        val fixedIdx = cursor.getColumnIndexOrThrow("isFixed")
+                        while (cursor.moveToNext()) {
+                            db.execSQL(
+                                "INSERT INTO forecast_items (forecastId, name, type, amountMinor, startMonth, endMonth, isFixed) " +
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                arrayOf<Any>(
+                                    forecastId,
+                                    cursor.getString(nameIdx),
+                                    cursor.getString(typeIdx),
+                                    cursor.getLong(amtIdx),
+                                    cursor.getString(startIdx),
+                                    cursor.getString(endIdx),
+                                    cursor.getInt(fixedIdx)
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 4. Удаляем старую таблицу
+                db.execSQL("DROP TABLE IF EXISTS `plan_items`")
+            }
+        }
+
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -265,7 +513,7 @@ abstract class AppDb : RoomDatabase() {
                     AppDb::class.java,
                     "uchet_database"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 INSTANCE = instance
                 instance
