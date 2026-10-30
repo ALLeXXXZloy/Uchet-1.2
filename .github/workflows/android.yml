@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     
-    # УКАЗЫВАЕМ ПАПКУ ДЛЯ ВСЕХ КОМАНД СРАЗУ
+    # Указываем рабочую папку, где лежит build.gradle.kts
     defaults:
       run:
         working-directory: ./Uchet-main/Uchet
@@ -25,14 +25,13 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # Этот экшен автоматически установит Gradle нужной версии
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
+      # Запускаем тесты напрямую через установленный Gradle
       - name: Run Unit Tests
-        run: ./gradlew testDebugUnitTest
+        run: gradle testDebugUnitTest
 
       - name: Upload Test Report (if failed)
         if: failure()
