@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -151,189 +152,224 @@ class VM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun createBackup(onResult: (String) -> Unit) {
+    // Собираем JSON (без шифрования)
+    private suspend fun buildBackupJson(): String {
+        val allTx = allTxs.first()
+        val allCards = cards.first()
+        val allBudgets = budgets.first()
+        val allRecurring = dao.getRecurringList()
+        val allCats = dao.getCategoriesList()
+        val allGoals = goals.first()
+        val allPlans = dao.getPlanItemsList()
+
+        val root = JSONObject()
+
+        val txsArray = JSONArray()
+        allTx.forEach { t -> txsArray.put(JSONObject().apply {
+            put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name)
+            put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL)
+            put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL)
+            put("description", t.description); put("category", t.category); put("timestamp", t.timestamp)
+            put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL)
+        }) }
+        root.put("txs", txsArray)
+
+        val cardsArray = JSONArray()
+        allCards.forEach { c -> cardsArray.put(JSONObject().apply {
+            put("id", c.id); put("last4", c.last4); put("name", c.name)
+            put("currency", c.currency); put("initialBalanceMinor", c.initialBalanceMinor)
+        }) }
+        root.put("cards", cardsArray)
+
+        val budgetsArray = JSONArray()
+        allBudgets.forEach { b -> budgetsArray.put(JSONObject().apply {
+            put("category", b.category); put("limitMinor", b.limitMinor)
+        }) }
+        root.put("budgets", budgetsArray)
+
+        val recurringArray = JSONArray()
+        allRecurring.forEach { r -> recurringArray.put(JSONObject().apply {
+            put("id", r.id); put("amountMinor", r.amountMinor); put("type", r.type.name)
+            put("cardId", r.cardId ?: JSONObject.NULL); put("description", r.description)
+            put("category", r.category); put("dayOfMonth", r.dayOfMonth)
+            put("lastExecutedMonth", r.lastExecutedMonth)
+        }) }
+        root.put("recurring", recurringArray)
+
+        val catsArray = JSONArray()
+        allCats.forEach { c -> catsArray.put(JSONObject().apply {
+            put("name", c.name); put("type", c.type.name)
+        }) }
+        root.put("categories", catsArray)
+
+        val goalsArray = JSONArray()
+        allGoals.forEach { g -> goalsArray.put(JSONObject().apply {
+            put("id", g.id); put("name", g.name); put("targetAmountMinor", g.targetAmountMinor)
+            put("currentAmountMinor", g.currentAmountMinor)
+        }) }
+        root.put("goals", goalsArray)
+
+        val plansArray = JSONArray()
+        allPlans.forEach { p -> plansArray.put(JSONObject().apply {
+            put("id", p.id); put("name", p.name); put("type", p.type.name)
+            put("amountMinor", p.amountMinor); put("startMonth", p.startMonth)
+            put("endMonth", p.endMonth); put("isFixed", p.isFixed)
+        }) }
+        root.put("plan_items", plansArray)
+
+        return root.toString(2)
+    }
+
+    // НОВОЕ: зашифрованный бэкап
+    fun createBackup(password: String, onResult: (ByteArray?) -> Unit) {
         viewModelScope.launch {
             try {
-                val allTx = allTxs.first()
-                val allCards = cards.first()
-                val allBudgets = budgets.first()
-                val allRecurring = dao.getRecurringList()
-                val allCats = dao.getCategoriesList()
-                val allGoals = goals.first()
-                val allPlans = dao.getPlanItemsList()
-
-                val root = JSONObject()
-
-                val txsArray = JSONArray()
-                allTx.forEach { t -> txsArray.put(JSONObject().apply {
-                    put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name)
-                    put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL)
-                    put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL)
-                    put("description", t.description); put("category", t.category); put("timestamp", t.timestamp)
-                    put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL)
-                }) }
-                root.put("txs", txsArray)
-
-                val cardsArray = JSONArray()
-                allCards.forEach { c -> cardsArray.put(JSONObject().apply {
-                    put("id", c.id); put("last4", c.last4); put("name", c.name)
-                    put("currency", c.currency); put("initialBalanceMinor", c.initialBalanceMinor)
-                }) }
-                root.put("cards", cardsArray)
-
-                val budgetsArray = JSONArray()
-                allBudgets.forEach { b -> budgetsArray.put(JSONObject().apply {
-                    put("category", b.category); put("limitMinor", b.limitMinor)
-                }) }
-                root.put("budgets", budgetsArray)
-
-                val recurringArray = JSONArray()
-                allRecurring.forEach { r -> recurringArray.put(JSONObject().apply {
-                    put("id", r.id); put("amountMinor", r.amountMinor); put("type", r.type.name)
-                    put("cardId", r.cardId ?: JSONObject.NULL); put("description", r.description)
-                    put("category", r.category); put("dayOfMonth", r.dayOfMonth)
-                    put("lastExecutedMonth", r.lastExecutedMonth)
-                }) }
-                root.put("recurring", recurringArray)
-
-                val catsArray = JSONArray()
-                allCats.forEach { c -> catsArray.put(JSONObject().apply {
-                    put("name", c.name); put("type", c.type.name)
-                }) }
-                root.put("categories", catsArray)
-
-                val goalsArray = JSONArray()
-                allGoals.forEach { g -> goalsArray.put(JSONObject().apply {
-                    put("id", g.id); put("name", g.name); put("targetAmountMinor", g.targetAmountMinor)
-                    put("currentAmountMinor", g.currentAmountMinor)
-                }) }
-                root.put("goals", goalsArray)
-
-                val plansArray = JSONArray()
-                allPlans.forEach { p -> plansArray.put(JSONObject().apply {
-                    put("id", p.id); put("name", p.name); put("type", p.type.name)
-                    put("amountMinor", p.amountMinor); put("startMonth", p.startMonth)
-                    put("endMonth", p.endMonth); put("isFixed", p.isFixed)
-                }) }
-                root.put("plan_items", plansArray)
-
-                onResult(root.toString(2))
-            } catch (e: Exception) { onResult("") }
+                val jsonString = buildBackupJson()
+                val encrypted = withContext(Dispatchers.Default) {
+                    BackupEncryption.encrypt(jsonString, password)
+                }
+                onResult(encrypted)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onResult(null)
+            }
         }
     }
 
-    fun restoreBackup(jsonString: String, onResult: (Boolean) -> Unit) {
+    // Разбираем JSON и записываем в БД
+    private suspend fun applyBackupJson(root: JSONObject) {
+        val txsList = mutableListOf<Tx>()
+        val txsArray = root.optJSONArray("txs")
+        if (txsArray != null) {
+            for (i in 0 until txsArray.length()) {
+                val o = txsArray.getJSONObject(i)
+                txsList.add(Tx(
+                    id = o.optLong("id"), amountMinor = o.getLong("amountMinor"),
+                    type = TxType.valueOf(o.getString("type")),
+                    cardId = if (o.isNull("cardId")) null else o.getString("cardId"),
+                    toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"),
+                    toAmountMinor = if (o.isNull("toAmountMinor")) null else o.optLong("toAmountMinor"),
+                    description = o.optString("description"), category = o.optString("category"),
+                    timestamp = o.getLong("timestamp"), source = o.optString("source"),
+                    currency = o.optString("currency", "UZS"),
+                    photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath")
+                ))
+            }
+        }
+
+        val cardsList = mutableListOf<CardEntity>()
+        val cardsArray = root.optJSONArray("cards")
+        if (cardsArray != null) {
+            for (i in 0 until cardsArray.length()) {
+                val o = cardsArray.getJSONObject(i)
+                cardsList.add(CardEntity(
+                    id = o.getString("id"), last4 = o.getString("last4"),
+                    name = o.getString("name"), currency = o.getString("currency"),
+                    initialBalanceMinor = o.getLong("initialBalanceMinor")
+                ))
+            }
+        }
+
+        val budgetsList = mutableListOf<BudgetEntity>()
+        val budgetsArray = root.optJSONArray("budgets")
+        if (budgetsArray != null) {
+            for (i in 0 until budgetsArray.length()) {
+                val o = budgetsArray.getJSONObject(i)
+                budgetsList.add(BudgetEntity(category = o.getString("category"), limitMinor = o.getLong("limitMinor")))
+            }
+        }
+
+        val recurringList = mutableListOf<RecurringEntity>()
+        val recurringArray = root.optJSONArray("recurring")
+        if (recurringArray != null) {
+            for (i in 0 until recurringArray.length()) {
+                val o = recurringArray.getJSONObject(i)
+                recurringList.add(RecurringEntity(
+                    id = o.optLong("id"), amountMinor = o.getLong("amountMinor"),
+                    type = TxType.valueOf(o.getString("type")),
+                    cardId = if (o.isNull("cardId")) null else o.getString("cardId"),
+                    description = o.optString("description"), category = o.optString("category"),
+                    dayOfMonth = o.getInt("dayOfMonth"), lastExecutedMonth = o.optString("lastExecutedMonth")
+                ))
+            }
+        }
+
+        val catsList = mutableListOf<CategoryEntity>()
+        val catsArray = root.optJSONArray("categories")
+        if (catsArray != null) {
+            for (i in 0 until catsArray.length()) {
+                val o = catsArray.getJSONObject(i)
+                catsList.add(CategoryEntity(name = o.getString("name"), type = TxType.valueOf(o.getString("type"))))
+            }
+        }
+
+        val goalsList = mutableListOf<SavingsGoalEntity>()
+        val goalsArray = root.optJSONArray("goals")
+        if (goalsArray != null) {
+            for (i in 0 until goalsArray.length()) {
+                val o = goalsArray.getJSONObject(i)
+                goalsList.add(SavingsGoalEntity(
+                    id = o.optLong("id"), name = o.getString("name"),
+                    targetAmountMinor = o.getLong("targetAmountMinor"),
+                    currentAmountMinor = o.getLong("currentAmountMinor")
+                ))
+            }
+        }
+
+        val plansList = mutableListOf<PlanItemEntity>()
+        val plansArray = root.optJSONArray("plan_items")
+        if (plansArray != null) {
+            for (i in 0 until plansArray.length()) {
+                val o = plansArray.getJSONObject(i)
+                plansList.add(PlanItemEntity(
+                    id = o.optLong("id"), name = o.getString("name"),
+                    type = TxType.valueOf(o.getString("type")),
+                    amountMinor = o.getLong("amountMinor"),
+                    startMonth = o.getString("startMonth"),
+                    endMonth = o.getString("endMonth"),
+                    isFixed = o.optBoolean("isFixed", true)
+                ))
+            }
+        }
+
+        db.withTransaction {
+            dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
+            dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems()
+
+            dao.insertAll(txsList)
+            cardsList.forEach { dao.upsertCard(it) }
+            budgetsList.forEach { dao.upsertBudget(it) }
+            recurringList.forEach { dao.upsertRecurring(it) }
+            catsList.forEach { dao.upsertCategory(it) }
+            goalsList.forEach { dao.upsertGoal(it) }
+            plansList.forEach { dao.upsertPlanItem(it) }
+        }
+    }
+
+    // НОВОЕ: восстановление с паролем
+    fun restoreBackup(data: ByteArray, password: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val jsonString = withContext(Dispatchers.Default) {
+                    BackupEncryption.decrypt(data, password)
+                }
+                val root = JSONObject(jsonString)
+                applyBackupJson(root)
+                ensureCashAccount()
+                onResult(true)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onResult(false)
+            }
+        }
+    }
+
+    // Для совместимости со старыми незашифрованными .json
+    fun restoreBackupLegacy(jsonString: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             try {
                 val root = JSONObject(jsonString)
-
-                val txsList = mutableListOf<Tx>()
-                val txsArray = root.optJSONArray("txs")
-                if (txsArray != null) {
-                    for (i in 0 until txsArray.length()) {
-                        val o = txsArray.getJSONObject(i)
-                        txsList.add(Tx(
-                            id = o.optLong("id"), amountMinor = o.getLong("amountMinor"),
-                            type = TxType.valueOf(o.getString("type")),
-                            cardId = if (o.isNull("cardId")) null else o.getString("cardId"),
-                            toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"),
-                            toAmountMinor = if (o.isNull("toAmountMinor")) null else o.optLong("toAmountMinor"),
-                            description = o.optString("description"), category = o.optString("category"),
-                            timestamp = o.getLong("timestamp"), source = o.optString("source"),
-                            currency = o.optString("currency", "UZS"),
-                            photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath")
-                        ))
-                    }
-                }
-
-                val cardsList = mutableListOf<CardEntity>()
-                val cardsArray = root.optJSONArray("cards")
-                if (cardsArray != null) {
-                    for (i in 0 until cardsArray.length()) {
-                        val o = cardsArray.getJSONObject(i)
-                        cardsList.add(CardEntity(
-                            id = o.getString("id"), last4 = o.getString("last4"),
-                            name = o.getString("name"), currency = o.getString("currency"),
-                            initialBalanceMinor = o.getLong("initialBalanceMinor")
-                        ))
-                    }
-                }
-
-                val budgetsList = mutableListOf<BudgetEntity>()
-                val budgetsArray = root.optJSONArray("budgets")
-                if (budgetsArray != null) {
-                    for (i in 0 until budgetsArray.length()) {
-                        val o = budgetsArray.getJSONObject(i)
-                        budgetsList.add(BudgetEntity(category = o.getString("category"), limitMinor = o.getLong("limitMinor")))
-                    }
-                }
-
-                val recurringList = mutableListOf<RecurringEntity>()
-                val recurringArray = root.optJSONArray("recurring")
-                if (recurringArray != null) {
-                    for (i in 0 until recurringArray.length()) {
-                        val o = recurringArray.getJSONObject(i)
-                        recurringList.add(RecurringEntity(
-                            id = o.optLong("id"), amountMinor = o.getLong("amountMinor"),
-                            type = TxType.valueOf(o.getString("type")),
-                            cardId = if (o.isNull("cardId")) null else o.getString("cardId"),
-                            description = o.optString("description"), category = o.optString("category"),
-                            dayOfMonth = o.getInt("dayOfMonth"), lastExecutedMonth = o.optString("lastExecutedMonth")
-                        ))
-                    }
-                }
-
-                val catsList = mutableListOf<CategoryEntity>()
-                val catsArray = root.optJSONArray("categories")
-                if (catsArray != null) {
-                    for (i in 0 until catsArray.length()) {
-                        val o = catsArray.getJSONObject(i)
-                        catsList.add(CategoryEntity(name = o.getString("name"), type = TxType.valueOf(o.getString("type"))))
-                    }
-                }
-
-                val goalsList = mutableListOf<SavingsGoalEntity>()
-                val goalsArray = root.optJSONArray("goals")
-                if (goalsArray != null) {
-                    for (i in 0 until goalsArray.length()) {
-                        val o = goalsArray.getJSONObject(i)
-                        goalsList.add(SavingsGoalEntity(
-                            id = o.optLong("id"), name = o.getString("name"),
-                            targetAmountMinor = o.getLong("targetAmountMinor"),
-                            currentAmountMinor = o.getLong("currentAmountMinor")
-                        ))
-                    }
-                }
-
-                val plansList = mutableListOf<PlanItemEntity>()
-                val plansArray = root.optJSONArray("plan_items")
-                if (plansArray != null) {
-                    for (i in 0 until plansArray.length()) {
-                        val o = plansArray.getJSONObject(i)
-                        plansList.add(PlanItemEntity(
-                            id = o.optLong("id"), name = o.getString("name"),
-                            type = TxType.valueOf(o.getString("type")),
-                            amountMinor = o.getLong("amountMinor"),
-                            startMonth = o.getString("startMonth"),
-                            endMonth = o.getString("endMonth"),
-                            isFixed = o.optBoolean("isFixed", true)
-                        ))
-                    }
-                }
-
-                db.withTransaction {
-                    dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
-                    dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems()
-
-                    dao.insertAll(txsList)
-                    cardsList.forEach { dao.upsertCard(it) }
-                    budgetsList.forEach { dao.upsertBudget(it) }
-                    recurringList.forEach { dao.upsertRecurring(it) }
-                    catsList.forEach { dao.upsertCategory(it) }
-                    goalsList.forEach { dao.upsertGoal(it) }
-                    plansList.forEach { dao.upsertPlanItem(it) }
-                }
-
+                applyBackupJson(root)
                 ensureCashAccount()
                 onResult(true)
             } catch (e: Exception) {
