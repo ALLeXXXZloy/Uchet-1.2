@@ -13,11 +13,10 @@ enum class TxType(val label: String) {
     ADJUSTMENT("Корректировка")
 }
 
-// НОВОЕ: способы капитализации вклада
 enum class CapitalizationType {
-    MONTHLY,      // ежемесячная
-    DAILY,        // ежедневная
-    END_OF_TERM   // в конце срока
+    MONTHLY,
+    DAILY,
+    END_OF_TERM
 }
 
 @Entity(
@@ -102,8 +101,6 @@ data class PlanItemEntity(
     val isFixed: Boolean = true
 )
 
-// ---------- ПРОГНОЗЫ ----------
-
 @Entity(tableName = "forecasts")
 data class ForecastPlanEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -158,7 +155,6 @@ data class ForecastDepositEntity(
     val endMonth: String,
     val monthlyContributionMinor: Long = 0,
     val monthlyWithdrawalMinor: Long = 0,
-    // НОВОЕ: способ капитализации
     val capitalization: CapitalizationType = CapitalizationType.MONTHLY
 )
 
@@ -328,6 +324,10 @@ interface AppDao {
     @Query("SELECT * FROM forecast_deposit_ops WHERE depositId = :depositId ORDER BY month ASC")
     fun observeDepositOps(depositId: Long): Flow<List<ForecastDepositOpEntity>>
 
+    // НОВОЕ: все операции по всем вкладам одного прогноза
+    @Query("SELECT * FROM forecast_deposit_ops WHERE depositId IN (SELECT id FROM forecast_deposits WHERE forecastId = :forecastId)")
+    fun observeAllOpsForForecast(forecastId: Long): Flow<List<ForecastDepositOpEntity>>
+
     @Query("SELECT * FROM forecast_deposit_ops")
     suspend fun getAllDepositOps(): List<ForecastDepositOpEntity>
 
@@ -490,7 +490,6 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
-        // v6 → v7: добавляем способ капитализации
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE forecast_deposits ADD COLUMN capitalization TEXT NOT NULL DEFAULT 'MONTHLY'")
