@@ -37,7 +37,7 @@ class VM(app: Application) : AndroidViewModel(app) {
     val goals = dao.observeGoals().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<SavingsGoalEntity>())
     val rates = dao.observeRates().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ExchangeRateEntity>())
 
-    // Старый прогноз (совместимость до этапа B)
+    // Старый прогноз (совместимость)
     val planItems = dao.observePlanItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<PlanItemEntity>())
 
     // Новая система прогнозов
@@ -135,12 +135,10 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun deleteGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.deleteGoal(goal) } }
 
     // ---------- Старый прогноз (plan_items) ----------
-
     fun savePlanItem(item: PlanItemEntity) { viewModelScope.launch { dao.upsertPlanItem(item) } }
     fun deletePlanItem(id: Long) { viewModelScope.launch { dao.deletePlanItem(id) } }
 
-    // ---------- НОВАЯ СИСТЕМА: Прогнозы ----------
-
+    // ---------- Новая система: Прогнозы ----------
     fun saveForecast(f: ForecastPlanEntity, onSaved: (Long) -> Unit = {}) {
         viewModelScope.launch {
             val insertedId = dao.upsertForecast(f)
@@ -160,7 +158,6 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun observeDepositOps(depositId: Long): Flow<List<ForecastDepositOpEntity>> =
         dao.observeDepositOps(depositId)
 
-    // НОВОЕ: все операции по всем вкладам одного прогноза
     fun observeAllOpsForForecast(forecastId: Long): Flow<List<ForecastDepositOpEntity>> =
         dao.observeAllOpsForForecast(forecastId)
 
@@ -292,6 +289,8 @@ class VM(app: Application) : AndroidViewModel(app) {
         allForecastItems.forEach { i -> fiArray.put(JSONObject().apply {
             put("id", i.id); put("forecastId", i.forecastId); put("name", i.name)
             put("type", i.type.name); put("amountMinor", i.amountMinor)
+            put("currency", i.currency)
+            put("originalAmountMinor", i.originalAmountMinor ?: JSONObject.NULL)
             put("startMonth", i.startMonth); put("endMonth", i.endMonth); put("isFixed", i.isFixed)
         }) }
         root.put("forecast_items", fiArray)
@@ -299,7 +298,10 @@ class VM(app: Application) : AndroidViewModel(app) {
         val fdArray = JSONArray()
         allForecastDeposits.forEach { d -> fdArray.put(JSONObject().apply {
             put("id", d.id); put("forecastId", d.forecastId); put("name", d.name)
-            put("initialAmountMinor", d.initialAmountMinor); put("annualRatePercent", d.annualRatePercent)
+            put("initialAmountMinor", d.initialAmountMinor)
+            put("currency", d.currency)
+            put("originalInitialAmountMinor", d.originalInitialAmountMinor ?: JSONObject.NULL)
+            put("annualRatePercent", d.annualRatePercent)
             put("startMonth", d.startMonth); put("endMonth", d.endMonth)
             put("monthlyContributionMinor", d.monthlyContributionMinor)
             put("monthlyWithdrawalMinor", d.monthlyWithdrawalMinor)
@@ -449,6 +451,8 @@ class VM(app: Application) : AndroidViewModel(app) {
                     id = o.optLong("id"), forecastId = o.getLong("forecastId"),
                     name = o.getString("name"), type = TxType.valueOf(o.getString("type")),
                     amountMinor = o.getLong("amountMinor"),
+                    currency = o.optString("currency", "UZS"),
+                    originalAmountMinor = if (o.isNull("originalAmountMinor")) null else o.optLong("originalAmountMinor"),
                     startMonth = o.getString("startMonth"), endMonth = o.getString("endMonth"),
                     isFixed = o.optBoolean("isFixed", true)
                 ))
@@ -461,15 +465,14 @@ class VM(app: Application) : AndroidViewModel(app) {
             for (i in 0 until fdArray.length()) {
                 val o = fdArray.getJSONObject(i)
                 val capStr = o.optString("capitalization", "MONTHLY")
-                val cap = try {
-                    CapitalizationType.valueOf(capStr)
-                } catch (e: Exception) {
-                    CapitalizationType.MONTHLY
-                }
+                val cap = try { CapitalizationType.valueOf(capStr) } catch (e: Exception) { CapitalizationType.MONTHLY }
+                
                 fdList.add(ForecastDepositEntity(
                     id = o.optLong("id"), forecastId = o.getLong("forecastId"),
                     name = o.getString("name"),
                     initialAmountMinor = o.getLong("initialAmountMinor"),
+                    currency = o.optString("currency", "UZS"),
+                    originalInitialAmountMinor = if (o.isNull("originalInitialAmountMinor")) null else o.optLong("originalInitialAmountMinor"),
                     annualRatePercent = o.getDouble("annualRatePercent"),
                     startMonth = o.getString("startMonth"), endMonth = o.getString("endMonth"),
                     monthlyContributionMinor = o.optLong("monthlyContributionMinor", 0L),
