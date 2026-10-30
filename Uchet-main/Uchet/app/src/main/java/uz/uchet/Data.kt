@@ -70,14 +70,16 @@ data class RecurringEntity(
     val lastExecutedMonth: String? = null
 )
 
-// НОВАЯ ТАБЛИЦА: Статусы подтверждения регулярных платежей
+// Статусы подтверждения регулярных платежей.
+// Используется «Стандартным прогнозом»: при наступлении даты регулярной операции
+// пользователю предлагается подтвердить сумму или отложить на завтра.
 @Entity(tableName = "recurring_confirmations", primaryKeys = ["recurringId", "month"])
 data class RecurringConfirmationEntity(
     val recurringId: Long,
-    val month: String, // "YYYY-MM"
-    val status: String, // "CONFIRMED", "POSTPONED"
+    val month: String,                      // "YYYY-MM"
+    val status: String,                     // "CONFIRMED", "POSTPONED"
     val actualAmountMinor: Long? = null,
-    val lastPostponedDate: String? = null // "YYYY-MM-DD"
+    val lastPostponedDate: String? = null   // "YYYY-MM-DD"
 )
 
 @Entity(tableName = "categories")
@@ -200,6 +202,9 @@ interface AppDao {
     @Query("SELECT * FROM txs ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<Tx>>
 
+    @Query("SELECT * FROM txs ORDER BY timestamp DESC")
+    suspend fun getAllTxs(): List<Tx>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(tx: Tx)
 
@@ -246,8 +251,17 @@ interface AppDao {
     @Query("SELECT * FROM recurring_confirmations WHERE recurringId = :id AND month = :month")
     suspend fun getConfirmation(id: Long, month: String): RecurringConfirmationEntity?
 
+    @Query("SELECT * FROM recurring_confirmations")
+    fun observeConfirmations(): Flow<List<RecurringConfirmationEntity>>
+
+    @Query("SELECT * FROM recurring_confirmations")
+    suspend fun getAllConfirmations(): List<RecurringConfirmationEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertConfirmation(conf: RecurringConfirmationEntity)
+
+    @Query("DELETE FROM recurring_confirmations WHERE recurringId = :recurringId")
+    suspend fun deleteConfirmationsForRecurring(recurringId: Long)
 
     @Query("DELETE FROM recurring_confirmations")
     suspend fun clearConfirmations()
@@ -518,13 +532,12 @@ abstract class AppDb : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE forecast_items ADD COLUMN currency TEXT NOT NULL DEFAULT 'UZS'")
                 db.execSQL("ALTER TABLE forecast_items ADD COLUMN originalAmountMinor INTEGER DEFAULT NULL")
-                
+
                 db.execSQL("ALTER TABLE forecast_deposits ADD COLUMN currency TEXT NOT NULL DEFAULT 'UZS'")
                 db.execSQL("ALTER TABLE forecast_deposits ADD COLUMN originalInitialAmountMinor INTEGER DEFAULT NULL")
             }
         }
 
-        // НОВАЯ МИГРАЦИЯ: Добавляем таблицу для подтверждений
         private val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""
