@@ -37,15 +37,54 @@ class VM(app: Application) : AndroidViewModel(app) {
     val goals = dao.observeGoals().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<SavingsGoalEntity>())
     val rates = dao.observeRates().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ExchangeRateEntity>())
 
+    // Подтверждения регулярных операций («Стандартный прогноз»)
+    val confirmations = dao.observeConfirmations()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<RecurringConfirmationEntity>())
+
     // Старый прогноз (совместимость)
     val planItems = dao.observePlanItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<PlanItemEntity>())
 
     // Новая система прогнозов
     val forecasts = dao.observeForecasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ForecastPlanEntity>())
 
+    /**
+     * Регулярные операции, ожидающие подтверждения СЕГОДНЯ.
+     *
+     * Логика:
+     *  - дата регулярного платежа наступила (день <= сегодня);
+     *  - CONFIRMED → не спрашиваем;
+     *  - POSTPONED с lastPostponedDate == сегодня → уже отложено на сегодня, не спрашиваем;
+     *  - POSTPONED со вчерашним/старым lastPostponedDate → снова показываем (следующий день);
+     *  - нет записи → показываем.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val pendingRecurring: StateFlow<List<RecurringEntity>> = combine(
+        recurring, confirmations
+    ) { recs, confs ->
+        val today = LocalDate.now()
+        val todayStr = today.toString()
+        val monthStr = YearMonth.from(today).toString()
+        val daysInMonth = today.lengthOfMonth()
+
+        recs.filter { r ->
+            val effectiveDay = minOf(r.dayOfMonth, daysInMonth)
+            if (effectiveDay > today.dayOfMonth) return@filter false
+
+            val conf = confs.find { it.recurringId == r.id && it.month == monthStr }
+            when {
+                conf?.status == "CONFIRMED" -> false
+                conf?.status == "POSTPONED" && conf.lastPostponedDate == todayStr -> false
+                else -> true
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         viewModelScope.launch {
-            checkAndExecuteRecurring(); seedDefaultCategories(); ensureCashAccount(); updateRates()
+            seedDefaultCategories()
+            ensureCashAccount()
+            updateRates()
+            migrateLegacyAutoTxs()
         }
     }
 
@@ -82,22 +121,23 @@ class VM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun checkAndExecuteRecurring() {
-        val now = LocalDate.now()
-        val currentMonthStr = YearMonth.now().toString()
-        val currentDay = now.dayOfMonth
-        val templates = dao.getRecurringList()
-        for (t in templates) {
-            val effectiveDay = minOf(t.dayOfMonth, now.lengthOfMonth())
-            if (effectiveDay <= currentDay && t.lastExecutedMonth != currentMonthStr) {
-                val tx = Tx(
-                    amountMinor = t.amountMinor, type = t.type, cardId = t.cardId,
-                    description = t.description, category = t.category,
-                    timestamp = now.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-                    source = "AUTO"
-                )
-                dao.upsert(tx)
-                dao.upsertRecurring(t.copy(lastExecutedMonth = currentMonthStr))
+    /**
+     * Плавная миграция для пользователей старой версии, у которых
+     * checkAndExecuteRecurring() успел создать Tx с source=AUTO в этом месяце.
+     * Помечаем такую операцию как уже подтверждённую, чтобы «Стандартный прогноз»
+     * не спрашивал пользователя повторно и не создавал дубликат транзакции.
+     */
+    private suspend fun migrateLegacyAutoTxs() {
+        val recs = dao.getRecurringList()
+        val monthStr = YearMonth.now().toString()
+        recs.forEach { r ->
+            if (r.lastExecutedMonth == monthStr && dao.getConfirmation(r.id, monthStr) == null) {
+                dao.upsertConfirmation(RecurringConfirmationEntity(
+                    recurringId = r.id,
+                    month = monthStr,
+                    status = "CONFIRMED",
+                    actualAmountMinor = r.amountMinor
+                ))
             }
         }
     }
@@ -121,7 +161,14 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun saveBudget(budget: BudgetEntity) { viewModelScope.launch { dao.upsertBudget(budget) } }
     fun deleteBudget(category: String) { viewModelScope.launch { dao.deleteBudget(category) } }
     fun saveRecurring(r: RecurringEntity) { viewModelScope.launch { dao.upsertRecurring(r) } }
-    fun deleteRecurring(r: RecurringEntity) { viewModelScope.launch { dao.deleteRecurring(r) } }
+
+    fun deleteRecurring(r: RecurringEntity) {
+        viewModelScope.launch {
+            dao.deleteRecurring(r)
+            dao.deleteConfirmationsForRecurring(r.id)
+        }
+    }
+
     fun saveCategory(c: CategoryEntity) { viewModelScope.launch { dao.upsertCategory(c) } }
 
     fun deleteCategory(name: String) {
@@ -133,6 +180,61 @@ class VM(app: Application) : AndroidViewModel(app) {
 
     fun saveGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.upsertGoal(goal) } }
     fun deleteGoal(goal: SavingsGoalEntity) { viewModelScope.launch { dao.deleteGoal(goal) } }
+
+    // ---------- «Стандартный прогноз»: подтверждение регулярных ----------
+
+    /**
+     * Пользователь подтвердил регулярную операцию с фактической суммой.
+     * Создаёт транзакцию с реальной датой (день регулярного платежа) и
+     * помечает подтверждение как CONFIRMED.
+     */
+    fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long) {
+        if (actualAmountMinor <= 0) return
+        viewModelScope.launch {
+            val today = LocalDate.now()
+            val monthStr = YearMonth.from(today).toString()
+
+            // Защита от повторного подтверждения
+            val existing = dao.getConfirmation(r.id, monthStr)
+            if (existing?.status == "CONFIRMED") return@launch
+
+            val effectiveDay = minOf(r.dayOfMonth, today.lengthOfMonth())
+            val txDate = today.withDayOfMonth(effectiveDay)
+            val txTimestamp = txDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+            dao.upsert(Tx(
+                amountMinor = actualAmountMinor,
+                type = r.type,
+                cardId = r.cardId,
+                description = r.description,
+                category = r.category,
+                timestamp = txTimestamp,
+                source = "RECURRING"
+            ))
+
+            dao.upsertConfirmation(RecurringConfirmationEntity(
+                recurringId = r.id,
+                month = monthStr,
+                status = "CONFIRMED",
+                actualAmountMinor = actualAmountMinor
+            ))
+        }
+    }
+
+    /**
+     * Пользователь ответил «не поступило / не потрачено».
+     * Откладываем до завтра: сегодня больше не спрашиваем.
+     */
+    fun postponeRecurring(r: RecurringEntity) {
+        viewModelScope.launch {
+            dao.upsertConfirmation(RecurringConfirmationEntity(
+                recurringId = r.id,
+                month = YearMonth.now().toString(),
+                status = "POSTPONED",
+                lastPostponedDate = LocalDate.now().toString()
+            ))
+        }
+    }
 
     // ---------- Старый прогноз (plan_items) ----------
     fun savePlanItem(item: PlanItemEntity) { viewModelScope.launch { dao.upsertPlanItem(item) } }
@@ -222,6 +324,7 @@ class VM(app: Application) : AndroidViewModel(app) {
         val allForecastItems = dao.getAllForecastItems()
         val allForecastDeposits = dao.getAllForecastDeposits()
         val allDepositOps = dao.getAllDepositOps()
+        val allConfirmations = dao.getAllConfirmations()
 
         val root = JSONObject()
 
@@ -256,6 +359,14 @@ class VM(app: Application) : AndroidViewModel(app) {
             put("lastExecutedMonth", r.lastExecutedMonth)
         }) }
         root.put("recurring", recurringArray)
+
+        val confirmationsArray = JSONArray()
+        allConfirmations.forEach { c -> confirmationsArray.put(JSONObject().apply {
+            put("recurringId", c.recurringId); put("month", c.month); put("status", c.status)
+            put("actualAmountMinor", c.actualAmountMinor ?: JSONObject.NULL)
+            put("lastPostponedDate", c.lastPostponedDate ?: JSONObject.NULL)
+        }) }
+        root.put("recurring_confirmations", confirmationsArray)
 
         val catsArray = JSONArray()
         allCats.forEach { c -> catsArray.put(JSONObject().apply {
@@ -391,6 +502,21 @@ class VM(app: Application) : AndroidViewModel(app) {
             }
         }
 
+        val confirmationsList = mutableListOf<RecurringConfirmationEntity>()
+        val confirmationsArray = root.optJSONArray("recurring_confirmations")
+        if (confirmationsArray != null) {
+            for (i in 0 until confirmationsArray.length()) {
+                val o = confirmationsArray.getJSONObject(i)
+                confirmationsList.add(RecurringConfirmationEntity(
+                    recurringId = o.getLong("recurringId"),
+                    month = o.getString("month"),
+                    status = o.getString("status"),
+                    actualAmountMinor = if (o.isNull("actualAmountMinor")) null else o.optLong("actualAmountMinor"),
+                    lastPostponedDate = if (o.isNull("lastPostponedDate")) null else o.optString("lastPostponedDate")
+                ))
+            }
+        }
+
         val catsList = mutableListOf<CategoryEntity>()
         val catsArray = root.optJSONArray("categories")
         if (catsArray != null) {
@@ -466,7 +592,7 @@ class VM(app: Application) : AndroidViewModel(app) {
                 val o = fdArray.getJSONObject(i)
                 val capStr = o.optString("capitalization", "MONTHLY")
                 val cap = try { CapitalizationType.valueOf(capStr) } catch (e: Exception) { CapitalizationType.MONTHLY }
-                
+
                 fdList.add(ForecastDepositEntity(
                     id = o.optLong("id"), forecastId = o.getLong("forecastId"),
                     name = o.getString("name"),
@@ -497,12 +623,14 @@ class VM(app: Application) : AndroidViewModel(app) {
 
         db.withTransaction {
             dao.clearTxs(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
+            dao.clearConfirmations()
             dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems(); dao.clearForecasts()
 
             dao.insertAll(txsList)
             cardsList.forEach { dao.upsertCard(it) }
             budgetsList.forEach { dao.upsertBudget(it) }
             recurringList.forEach { dao.upsertRecurring(it) }
+            confirmationsList.forEach { dao.upsertConfirmation(it) }
             catsList.forEach { dao.upsertCategory(it) }
             goalsList.forEach { dao.upsertGoal(it) }
             plansList.forEach { dao.upsertPlanItem(it) }
