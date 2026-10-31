@@ -156,7 +156,11 @@ object SmsParser {
             val type = when { isExpense -> TxType.EXPENSE; isIncome -> TxType.INCOME; lowerDesc.contains("перевод") -> TxType.TRANSFER; else -> TxType.EXPENSE }
             val category = guessCategory(lowerDesc, "", customRules, type).category
             val displayDesc = desc.replace(Regex("""[;:]"""), "").take(80).trim()
-            result.add(Tx(amountMinor = amountMinor, type = type, cardId = cardId, description = displayDesc, category = category, timestamp = ts, source = "IMPORT"))
+            result.add(Tx(
+                amountMinor = amountMinor, type = type, cardId = cardId, description = displayDesc,
+                category = category, timestamp = ts, source = "IMPORT",
+                rawText = desc   // ★ D: PDF-импорт — сохраняем исходное описание как контекст
+            ))
         }
         return result
     }
@@ -243,7 +247,14 @@ object SmsParser {
 
     private fun normalizeAmount(str: String): Long? = try { BigDecimal(str.replace(Regex("[^\\d.,]"), "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() } catch (_: Exception) { null }
 
-    private fun BankTx.toTx(source: String) = Tx(amountMinor = amountMinor, type = type, cardId = cardLast4?.let { "${it}_$currency" }, description = merchant, category = category, timestamp = timestamp, source = source, currency = currency)
+    // ★ D: сохраняем rawBody как rawText — это контекст для CorrectionEntity
+    private fun BankTx.toTx(source: String) = Tx(
+        amountMinor = amountMinor, type = type,
+        cardId = cardLast4?.let { "${it}_$currency" },
+        description = merchant, category = category, timestamp = timestamp,
+        source = source, currency = currency,
+        rawText = rawBody
+    )
 
     private data class AmountMatch(val value: Long, val sign: Char?, val start: Int, val precedingLower: String)
 }
