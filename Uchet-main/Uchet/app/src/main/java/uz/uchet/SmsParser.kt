@@ -14,7 +14,9 @@ enum class SmsCategory { TRANSACTION, OTP, DEBT_REMINDER, ADVERTISING, PERSONAL 
 data class BankTx(
     val amountMinor: Long, val type: TxType, val cardLast4: String?, val balanceMinor: Long?,
     val merchant: String, val category: String, val timestamp: Long, val sender: String,
-    val rawBody: String, val currency: String = "UZS"
+    val rawBody: String, val currency: String = "UZS",
+    val ruleAppliedId: Long? = null,
+    val ruleAppliedKeyword: String? = null
 )
 
 object SmsParser {
@@ -152,8 +154,7 @@ object SmsParser {
             val isExpense = sign == "-" || lowerDesc.contains("списание") || lowerDesc.contains("оплата") || lowerDesc.contains("покупка") || lowerDesc.contains("снятие") || lowerDesc.contains("atm") || lowerDesc.contains("выд нал") || lowerDesc.contains("перевод с visa")
             val isIncome = sign == "+" || lowerDesc.contains("зачисление") || lowerDesc.contains("поступление") || lowerDesc.contains("пополнение") || lowerDesc.contains("возврат") || lowerDesc.contains("перевод с uzcard") || lowerDesc.contains("перевод на visa")
             val type = when { isExpense -> TxType.EXPENSE; isIncome -> TxType.INCOME; lowerDesc.contains("перевод") -> TxType.TRANSFER; else -> TxType.EXPENSE }
-            // ★ #1 + #7: передаём type
-            val category = guessCategory(lowerDesc, "", customRules, type)
+            val category = guessCategory(lowerDesc, "", customRules, type).category
             val displayDesc = desc.replace(Regex("""[;:]"""), "").take(80).trim()
             result.add(Tx(amountMinor = amountMinor, type = type, cardId = cardId, description = displayDesc, category = category, timestamp = ts, source = "IMPORT"))
         }
@@ -171,9 +172,12 @@ object SmsParser {
         val type = when { hasExpense && !hasIncome -> TxType.EXPENSE; hasIncome && !hasExpense -> TxType.INCOME; txAmount.sign == '-' -> TxType.EXPENSE; txAmount.sign == '+' -> TxType.INCOME; hasExpense -> TxType.EXPENSE; hasIncome -> TxType.INCOME; else -> TxType.EXPENSE }
         val card = extractCardLast4(body)
         val merchant = extractMerchant(body)
-        // ★ #1 + #7: передаём type
-        val category = guessCategory(lower, merchant, customRules, type)
-        return BankTx(amountMinor = txAmount.value, type = type, cardLast4 = card, balanceMinor = balance, merchant = merchant, category = category, timestamp = timestamp, sender = sender, rawBody = body)
+        val match = guessCategory(lower, merchant, customRules, type)
+        return BankTx(
+            amountMinor = txAmount.value, type = type, cardLast4 = card, balanceMinor = balance,
+            merchant = merchant, category = match.category, timestamp = timestamp, sender = sender, rawBody = body,
+            ruleAppliedId = match.ruleId, ruleAppliedKeyword = match.keyword
+        )
     }
 
     private fun extractAmounts(text: String): List<AmountMatch> {
@@ -202,19 +206,16 @@ object SmsParser {
         return ""
     }
 
-    // ★ #1 + #7: фильтр по типу + самое длинное ключевое слово
-    private fun guessCategory(lower: String, merchant: String, customRules: List<CustomKeywordRule>, expectedType: TxType): String {
+    // ★ #5: возвращает RuleMatch с ruleId/keyword
+    private fun guessCategory(lower: String, merchant: String, customRules: List<CustomKeywordRule>, expectedType: TxType): RuleMatch {
         val t = "$lower ${merchant.lowercase()}"
-
-        // 1. Пользовательские правила: только совпадающие по типу, выбираем самое специфичное (длинное)
         val matched = customRules
             .filter { it.type == expectedType && t.contains(it.keyword) }
             .maxByOrNull { it.keyword.length }
-        if (matched != null) return matched.category
+        if (matched != null) return RuleMatch(matched.category, matched.id, matched.keyword)
 
-        // 2. Стандартные правила
         fun hit(vararg words: String) = words.any { t.contains(it) }
-        return when {
+        val stdCategory = when {
             hit("yandex.go", "yandex go", "taxi", "taksi", "transport", "avtobus", "metan", "cng", "azs", "benzin", "auto") -> "🚕 Транспорт"
             hit("market", "korzinka", "xalq retail", "uzum market", "magnit", "apelsin", "makro", "dilzar", "torg", "idea", "texnomart", "mediapark", "electronics", "galaxy", "iphone") -> "🛒 Покупки"
             hit("food", "restoran", "restaurant", "burger", "pizza", "kfc", "mcdonald", "lavash", "shaurma", "anglesey", "osh", "havas", "somsa", "cafe", "coffee") -> "🍔 Еда"
@@ -224,6 +225,7 @@ object SmsParser {
             hit("salary", "zarplata", "maosh", "зарплата", "aliment") -> "💵 Зарплата"
             else -> "📦 Другое"
         }
+        return RuleMatch(stdCategory, null, null)
     }
 
     private fun isWeakOtp(lower: String): Boolean {
