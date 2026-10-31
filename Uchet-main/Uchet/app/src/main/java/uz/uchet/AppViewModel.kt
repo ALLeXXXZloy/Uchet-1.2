@@ -36,6 +36,8 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     val forecasts = dao.observeForecasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ForecastPlanEntity>())
     val debts = dao.observeDebts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<DebtEntity>())
     val customRules = dao.observeCustomRules().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CustomKeywordRule>())
+    // ★★ #3
+    val corrections = dao.observeCorrections().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CorrectionEntity>())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val pendingRecurring: StateFlow<List<RecurringEntity>> = combine(recurring, confirmations) { recs, confs ->
@@ -222,11 +224,50 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
     fun deleteCustomRule(rule: CustomKeywordRule) { viewModelScope.launch { dao.deleteCustomRule(rule) } }
-
-    // ★ #2: счётчики
     fun bumpRuleApplied(ruleId: Long) { viewModelScope.launch { dao.bumpCustomRuleApplied(ruleId, System.currentTimeMillis()) } }
     fun bumpRuleRejected(ruleId: Long) { viewModelScope.launch { dao.bumpCustomRuleRejected(ruleId) } }
     fun deleteUnusedRules() { viewModelScope.launch { dao.deleteUnusedCustomRules() } }
+
+    // ★★ #3: Corrections
+    fun normalizeMerchantHint(s: String): String {
+        if (s.isBlank()) return ""
+        return s.lowercase()
+            .replace(Regex("[^a-zа-яё0-9\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(30)
+    }
+
+    /**
+     * Записывает коррекцию пользователя. Если для (merchantHint, field, parsedValue) уже есть —
+     * инкрементит appliedCount. Иначе — вставляет новую запись.
+     */
+    fun recordCorrection(source: String, merchantHint: String, field: String, parsedValue: String, correctedValue: String) {
+        if (parsedValue == correctedValue) return
+        if (merchantHint.isBlank()) return
+        if (correctedValue.isBlank()) return
+        val hint = normalizeMerchantHint(merchantHint)
+        if (hint.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val existing = dao.findCorrection(hint, field, parsedValue)
+                if (existing != null) {
+                    dao.bumpCorrection(existing.id, System.currentTimeMillis())
+                } else {
+                    dao.upsertCorrection(CorrectionEntity(
+                        source = source,
+                        merchantHint = hint,
+                        field = field,
+                        parsedValue = parsedValue,
+                        correctedValue = correctedValue
+                    ))
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    fun deleteCorrection(c: CorrectionEntity) { viewModelScope.launch { dao.deleteCorrection(c) } }
+    fun clearCorrections() { viewModelScope.launch { dao.clearCorrections() } }
 
     private suspend fun buildBackupJson(): String {
         val allTx = allTxs.first()
@@ -243,6 +284,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         val allConfirmations = dao.getAllConfirmations()
         val allDebts = dao.getAllDebts()
         val allRules = dao.getAllCustomRules()
+        val allCorrections = dao.getAllCorrections()   // ★★ #3
 
         val root = JSONObject()
 
@@ -254,13 +296,21 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         allDebts.forEach { d -> debtsArray.put(JSONObject().apply { put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency) }) }
         root.put("debts", debtsArray)
 
-        // ★ #2: новые поля в бэкапе
         val rulesArray = JSONArray()
         allRules.forEach { r -> rulesArray.put(JSONObject().apply {
             put("id", r.id); put("keyword", r.keyword); put("category", r.category); put("type", r.type.name)
             put("appliedCount", r.appliedCount); put("lastAppliedAt", r.lastAppliedAt ?: JSONObject.NULL); put("rejectedCount", r.rejectedCount)
         }) }
         root.put("custom_rules", rulesArray)
+
+        // ★★ #3: сериализация corrections
+        val corrArray = JSONArray()
+        allCorrections.forEach { c -> corrArray.put(JSONObject().apply {
+            put("id", c.id); put("source", c.source); put("merchantHint", c.merchantHint)
+            put("field", c.field); put("parsedValue", c.parsedValue); put("correctedValue", c.correctedValue)
+            put("appliedCount", c.appliedCount); put("lastSeenAt", c.lastSeenAt); put("createdAt", c.createdAt)
+        }) }
+        root.put("corrections", corrArray)
 
         val cardsArray = JSONArray()
         allCards.forEach { c -> cardsArray.put(JSONObject().apply { put("id", c.id); put("last4", c.last4); put("name", c.name); put("currency", c.currency); put("initialBalanceMinor", c.initialBalanceMinor) }) }
@@ -339,7 +389,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             }
         }
 
-        // ★ #2: читаем новые поля (со значениями по умолчанию для старых бэкапов)
         val rulesList = mutableListOf<CustomKeywordRule>()
         root.optJSONArray("custom_rules")?.let { rulesArray ->
             for (i in 0 until rulesArray.length()) {
@@ -352,6 +401,25 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                     appliedCount = o.optInt("appliedCount", 0),
                     lastAppliedAt = if (o.isNull("lastAppliedAt")) null else o.optLong("lastAppliedAt"),
                     rejectedCount = o.optInt("rejectedCount", 0)
+                ))
+            }
+        }
+
+        // ★★ #3: читаем corrections (со значениями по умолчанию для старых бэкапов)
+        val correctionsList = mutableListOf<CorrectionEntity>()
+        root.optJSONArray("corrections")?.let { corrArray ->
+            for (i in 0 until corrArray.length()) {
+                val o = corrArray.getJSONObject(i)
+                correctionsList.add(CorrectionEntity(
+                    id = o.optLong("id"),
+                    source = o.optString("source", "MANUAL"),
+                    merchantHint = o.getString("merchantHint"),
+                    field = o.getString("field"),
+                    parsedValue = o.getString("parsedValue"),
+                    correctedValue = o.getString("correctedValue"),
+                    appliedCount = o.optInt("appliedCount", 1),
+                    lastSeenAt = o.optLong("lastSeenAt", System.currentTimeMillis()),
+                    createdAt = o.optLong("createdAt", System.currentTimeMillis())
                 ))
             }
         }
@@ -446,12 +514,13 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
 
         db.withTransaction {
-            dao.clearTxs(); dao.clearDebts(); dao.clearCustomRules(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
+            dao.clearTxs(); dao.clearDebts(); dao.clearCustomRules(); dao.clearCorrections(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
             dao.clearConfirmations(); dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems(); dao.clearForecasts()
 
             dao.insertAll(txsList)
             debtsList.forEach { dao.upsertDebt(it) }
             rulesList.forEach { dao.upsertCustomRule(it) }
+            correctionsList.forEach { dao.upsertCorrection(it) }   // ★★ #3
             cardsList.forEach { dao.upsertCard(it) }
             budgetsList.forEach { dao.upsertBudget(it) }
             recurringList.forEach { dao.upsertRecurring(it) }
