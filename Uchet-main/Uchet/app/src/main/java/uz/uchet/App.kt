@@ -65,7 +65,9 @@ fun App(
     val categories by vm.categories.collectAsState()
     val forecasts by vm.forecasts.collectAsState()
     val debts by vm.debts.collectAsState()
-    
+    // ★ НОВОЕ: правила самообучения
+    val customRules by vm.customRules.collectAsState()
+
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
         cards.associate { card ->
             val cardTxs = allTxs.filter { it.cardId == card.id }
@@ -96,6 +98,8 @@ fun App(
     var showGoalManager by remember { mutableStateOf(false) }
     var showDebtManager by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
+    // ★ НОВОЕ: менеджер правил
+    var showRuleManager by remember { mutableStateOf(false) }
 
     var editing by remember { mutableStateOf<Tx?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -112,7 +116,7 @@ fun App(
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }
     var showCardImportConfirm by remember { mutableStateOf(false) }
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
-    
+
     var showMenu by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -194,7 +198,8 @@ fun App(
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
                 val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
-                val parsedTxs = SmsParser.parseImportedFile(text, allTxs)
+                // ★ ИСПРАВЛЕНО: передаём customRules
+                val parsedTxs = withContext(Dispatchers.IO) { SmsParser.parseImportedFile(text, allTxs, customRules) }
                 if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true } else snackbarHostState.showSnackbar(t("no_tx_found"))
             } catch (e: Exception) { snackbarHostState.showSnackbar(t("file_read_error")) }
         } }
@@ -256,10 +261,28 @@ fun App(
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text(t("scan_sms")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = { showMenu = false; scanInboxSms(context, allTxs) { found -> if (found.isNotEmpty()) { importedTxs = found; showImportConfirm = true } else scope.launch { snackbarHostState.showSnackbar(t("new_sms_not_found")) } } })
+                                // ★ ИСПРАВЛЕНО: передаём customRules в SmsParser.scanInbox + выносим в IO
+                                DropdownMenuItem(
+                                    text = { Text(t("scan_sms")) },
+                                    leadingIcon = { Icon(Icons.Default.Message, null) },
+                                    onClick = {
+                                        showMenu = false
+                                        scope.launch {
+                                            val found = withContext(Dispatchers.IO) { SmsParser.scanInbox(context, allTxs, customRules) }
+                                            if (found.isNotEmpty()) { importedTxs = found; showImportConfirm = true }
+                                            else snackbarHostState.showSnackbar(t("new_sms_not_found"))
+                                        }
+                                    }
+                                )
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
+                                // ★ НОВОЕ: пункт меню управления правилами
+                                DropdownMenuItem(
+                                    text = { Text(t("learned_rules")) },
+                                    leadingIcon = { Icon(Icons.Default.School, null) },
+                                    onClick = { showMenu = false; showRuleManager = true }
+                                )
                                 HorizontalDivider()
                                 DropdownMenuItem(text = { Text(t("export_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; pdfExportLauncher.launch("uchet_report_${month}.pdf") })
                                 DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
@@ -282,13 +305,13 @@ fun App(
         when (currentTab) {
             0 -> OperationsScreen(
                 vm = vm, paddingValues = pad, currentLang = currentLang.value,
-                onEditTx = { editing = it }, 
-                onDeleteTx = { tx -> 
+                onEditTx = { editing = it },
+                onDeleteTx = { tx ->
                     vm.delete(tx)
                     scope.launch {
                         val result = snackbarHostState.showSnackbar(
-                            message = t("deleted"), 
-                            actionLabel = t("undo"), 
+                            message = t("deleted"),
+                            actionLabel = t("undo"),
                             duration = SnackbarDuration.Short
                         )
                         if (result == SnackbarResult.ActionPerformed) vm.save(tx)
@@ -314,16 +337,31 @@ fun App(
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
     if (showDebtManager) DebtManagerSheet(debts, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false })
 
+    // ★ НОВОЕ: менеджер правил
+    if (showRuleManager) RuleManagerSheet(
+        rules = customRules,
+        currentLang = currentLang.value,
+        expenseCategories = expenseCategories,
+        incomeCategories = incomeCategories,
+        onSave = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
+        onDelete = { rule -> vm.deleteCustomRule(rule) },
+        onDismiss = { showRuleManager = false }
+    )
+
     if (adding || editing != null) {
+        // ★ ИСПРАВЛЕНО: передаём customRules и onSaveRule
         TxDialog(
             initial = editing, quickTemplate = selectedQuickTemplate, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories,
-            currentLang = currentLang.value, isPendingSms = isPendingSms, autoStartVoice = isVoiceTxAdding, rates = rates, vm = vm,
+            currentLang = currentLang.value, isPendingSms = isPendingSms, autoStartVoice = isVoiceTxAdding, rates = rates,
+            customRules = customRules,
+            vm = vm,
             onDismiss = { if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }; adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null },
             onSave = { vm.save(it); if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }; adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null },
+            onSaveRule = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
             onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
         )
     }
-    
+
     if (showImportConfirm && importedTxs != null) {
         val txsToImport = importedTxs!!
         AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text(t("import_data")) }, text = { Text("${t("import_confirm")} ${txsToImport.size}") },
