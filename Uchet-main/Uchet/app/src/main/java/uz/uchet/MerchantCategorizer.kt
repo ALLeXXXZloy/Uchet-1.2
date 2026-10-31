@@ -2,25 +2,24 @@ package uz.uchet
 
 object MerchantCategorizer {
 
-    // ★ #1 + #7: фильтр по типу + самое длинное ключевое слово
+    // ★ #5: возвращает RuleMatch? (ruleId/keyword заполнены при матче правила)
     fun getCategory(
         merchantName: String?,
         availableCategories: List<String>,
         customRules: List<CustomKeywordRule> = emptyList(),
         expectedType: TxType = TxType.EXPENSE
-    ): String? {
+    ): RuleMatch? {
         if (merchantName.isNullOrBlank()) return null
         val name = merchantName.lowercase()
 
-        // 1. Пользовательские правила — приоритетнее стандартных
         val matched = customRules
             .filter { it.type == expectedType && name.contains(it.keyword.lowercase()) }
             .maxByOrNull { it.keyword.length }
         if (matched != null) {
-            return availableCategories.find { it == matched.category } ?: matched.category
+            val cat = availableCategories.find { it == matched.category } ?: matched.category
+            return RuleMatch(cat, matched.id, matched.keyword)
         }
 
-        // 2. Стандартные правила
         fun findCat(vararg keywords: String): String? {
             val match = keywords.any { name.contains(it) }
             if (!match) return null
@@ -28,7 +27,7 @@ object MerchantCategorizer {
             return availableCategories.find { it.contains(target, ignoreCase = true) }
         }
 
-        return when {
+        val std = when {
             name.contains("korzinka") || name.contains("makro") || name.contains("magnat") ||
             name.contains("uzum") || name.contains("apelsin") || name.contains("dilzar") ||
             name.contains("xalq retail") || name.contains("torg") || name.contains("market") ->
@@ -54,5 +53,6 @@ object MerchantCategorizer {
 
             else -> null
         }
+        return std?.let { RuleMatch(it, null, null) }
     }
 }
