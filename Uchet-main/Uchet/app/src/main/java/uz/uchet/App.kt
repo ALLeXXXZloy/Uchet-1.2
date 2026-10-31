@@ -3,6 +3,7 @@ package uz.uchet
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -38,10 +39,14 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import org.koin.androidx.compose.koinViewModel
+import java.io.File
 import java.time.YearMonth
+import java.util.UUID
+import kotlin.coroutines.resume
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -66,7 +71,6 @@ fun App(
     val forecasts by vm.forecasts.collectAsState()
     val debts by vm.debts.collectAsState()
     val customRules by vm.customRules.collectAsState()
-    // ★★ #3
     val corrections by vm.corrections.collectAsState()
 
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
@@ -100,7 +104,6 @@ fun App(
     var showDebtManager by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
     var showRuleManager by remember { mutableStateOf(false) }
-    // ★★ #3
     var showCorrectionManager by remember { mutableStateOf(false) }
 
     var editing by remember { mutableStateOf<Tx?>(null) }
@@ -111,6 +114,8 @@ fun App(
 
     var pendingRuleAppliedId by remember { mutableStateOf<Long?>(null) }
     var pendingRuleAppliedKeyword by remember { mutableStateOf<String?>(null) }
+    // ★ D: исходный текст из очереди
+    var pendingRawText by remember { mutableStateOf<String?>(null) }
 
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showPasswordDialogBackup by remember { mutableStateOf(false) }
@@ -122,6 +127,13 @@ fun App(
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }
     var showCardImportConfirm by remember { mutableStateOf(false) }
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
+
+    // ★ D: bulk-импорт чеков
+    var bulkTotal by remember { mutableIntStateOf(0) }
+    var bulkProcessed by remember { mutableIntStateOf(0) }
+    var bulkInProgress by remember { mutableStateOf(false) }
+    var bulkResultCount by remember { mutableIntStateOf(0) }
+    var showBulkResult by remember { mutableStateOf(false) }
 
     var showMenu by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
@@ -168,10 +180,12 @@ fun App(
                 description = pendingObj.optString("description"),
                 category = pendingObj.optString("category"),
                 timestamp = pendingObj.optLong("timestamp"),
-                source = "SMS"
+                source = "SMS",
+                rawText = pendingObj.optString("rawBody").takeIf { it.isNotBlank() }
             )
             pendingRuleAppliedId = if (pendingObj.isNull("ruleAppliedId")) null else pendingObj.optLong("ruleAppliedId")
             pendingRuleAppliedKeyword = if (pendingObj.isNull("ruleAppliedKeyword")) null else pendingObj.optString("ruleAppliedKeyword").takeIf { it.isNotBlank() }
+            pendingRawText = pendingObj.optString("rawBody").takeIf { it.isNotBlank() }
             editing = pendingTx
             isPendingSms = true
         } catch (e: Exception) { PendingQueue.pop(context) }
@@ -185,6 +199,60 @@ fun App(
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) checkPendingSms() }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // ★ D: suspend-обёртка над ML Kit OCR
+    suspend fun recognizeText(bitmap: Bitmap): String = suspendCancellableCoroutine { cont ->
+        try {
+            val image = InputImage.fromBitmap(bitmap, 0)
+            TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                .process(image)
+                .addOnSuccessListener { visionText -> cont.resume(visionText.text) }
+                .addOnFailureListener { cont.resume("") }
+        } catch (e: Exception) { cont.resume("") }
+    }
+
+    // ★ D: bulk-импорт чеков
+    val bulkReceiptsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        bulkTotal = uris.size
+        bulkProcessed = 0
+        bulkInProgress = true
+        scope.launch {
+            val imported = mutableListOf<Tx>()
+            val expenseCats = categories.filter { it.type == TxType.EXPENSE }.map { it.name }
+            for ((idx, uri) in uris.withIndex()) {
+                bulkProcessed = idx
+                try {
+                    val bitmap = withContext(Dispatchers.IO) { uriToBitmap(context, uri) } ?: continue
+                    val rawText = withContext(Dispatchers.IO) { recognizeText(bitmap) }
+                    if (rawText.isBlank()) continue
+                    val receipt = ReceiptParser.parse(rawText)
+                    var amount = receipt.amountMinor
+                    if (amount == null || amount <= 0) amount = ReceiptParser.extractBiggestAmount(rawText)
+                    if (amount == null || amount <= 0) continue
+                    val seller = receipt.sellerName ?: ""
+                    val cat = MerchantCategorizer.getCategory(seller, expenseCats, customRules, TxType.EXPENSE)?.category ?: "📦 Другое"
+                    // Сохраняем фото чека
+                    val photoFile = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
+                    photoFile.parentFile?.mkdirs()
+                    withContext(Dispatchers.IO) { photoFile.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) } }
+                    imported.add(Tx(
+                        amountMinor = amount, type = TxType.EXPENSE,
+                        description = seller, category = cat,
+                        timestamp = receipt.dateMillis ?: System.currentTimeMillis(),
+                        source = "OCR", photoPath = photoFile.absolutePath, rawText = rawText
+                    ))
+                } catch (e: Exception) { /* пропускаем битый файл */ }
+            }
+            bulkProcessed = uris.size
+            if (imported.isNotEmpty()) vm.bulkSave(imported)
+            bulkResultCount = imported.size
+            bulkInProgress = false
+            showBulkResult = true
+        }
     }
 
     val pdfExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/pdf")) { uri: Uri? ->
@@ -291,6 +359,12 @@ fun App(
                                 )
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
+                                // ★ D: bulk-импорт чеков
+                                DropdownMenuItem(
+                                    text = { Text(t("import_receipts_bulk")) },
+                                    leadingIcon = { Icon(Icons.Default.Collections, null) },
+                                    onClick = { showMenu = false; bulkReceiptsLauncher.launch(arrayOf("image/*")) }
+                                )
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
                                 HorizontalDivider()
                                 DropdownMenuItem(
@@ -298,7 +372,6 @@ fun App(
                                     leadingIcon = { Icon(Icons.Default.School, null) },
                                     onClick = { showMenu = false; showRuleManager = true }
                                 )
-                                // ★★ #3: пункт "Коррекции"
                                 DropdownMenuItem(
                                     text = { Text(t("learned_corrections")) },
                                     leadingIcon = { Icon(Icons.Default.EditNote, null) },
@@ -369,7 +442,6 @@ fun App(
         onDismiss = { showRuleManager = false }
     )
 
-    // ★★ #3: менеджер коррекций
     if (showCorrectionManager) CorrectionManagerSheet(
         corrections = corrections,
         currentLang = currentLang.value,
@@ -387,28 +459,31 @@ fun App(
             customRules = customRules,
             ruleAppliedId = pendingRuleAppliedId,
             ruleAppliedKeyword = pendingRuleAppliedKeyword,
+            rawSourceText = pendingRawText,   // ★ D
             vm = vm,
             onDismiss = {
                 if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
                 adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null
-                pendingRuleAppliedId = null; pendingRuleAppliedKeyword = null
+                pendingRuleAppliedId = null; pendingRuleAppliedKeyword = null; pendingRawText = null
             },
             onSave = {
                 vm.save(it)
                 if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
                 adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null
-                pendingRuleAppliedId = null; pendingRuleAppliedKeyword = null
+                pendingRuleAppliedId = null; pendingRuleAppliedKeyword = null; pendingRawText = null
             },
             onSaveRule = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
             onRuleApplied = { id -> vm.bumpRuleApplied(id) },
             onRuleRejected = { id -> vm.bumpRuleRejected(id) },
-            onRecordCorrection = { hint, field, parsed, corrected ->
+            // ★ D: теперь 5 параметров, включая rawText
+            onRecordCorrection = { hint, field, parsed, corrected, rawText ->
                 vm.recordCorrection(
                     source = editing?.source ?: (if (isPendingSms) "SMS" else "MANUAL"),
                     merchantHint = hint,
                     field = field,
                     parsedValue = parsed,
-                    correctedValue = corrected
+                    correctedValue = corrected,
+                    rawText = rawText
                 )
             },
             onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
@@ -427,6 +502,42 @@ fun App(
             confirmButton = { TextButton(onClick = { cardsToImport.forEach { c -> vm.saveCard(c) }; scope.launch { snackbarHostState.showSnackbar(t("cards_added")) }; showCardImportConfirm = false; importedCards = null }) { Text(t("confirm"), color = GREEN) } },
             dismissButton = { TextButton(onClick = { showCardImportConfirm = false; importedCards = null }) { Text(t("cancel")) } })
     }
+
+    // ★ D: прогресс bulk-импорта чеков
+    if (bulkInProgress) {
+        AlertDialog(
+            onDismissRequest = { /* запрещаем закрывать до завершения */ },
+            title = { Text(t("import_receipts_bulk")) },
+            text = {
+                Column {
+                    LinearProgressIndicator(
+                        progress = { if (bulkTotal > 0) bulkProcessed.toFloat() / bulkTotal.toFloat() else 0f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("$bulkProcessed / $bulkTotal")
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // ★ D: результат bulk-импорта
+    if (showBulkResult) {
+        AlertDialog(
+            onDismissRequest = { showBulkResult = false },
+            title = { Text(t("import_receipts_bulk")) },
+            text = { Text("${t("bulk_import_done")} $bulkResultCount ${t("bulk_import_suffix")}") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBulkResult = false
+                    currentTab = 0
+                }) { Text(t("open_for_review"), color = GREEN) }
+            },
+            dismissButton = { TextButton(onClick = { showBulkResult = false }) { Text(t("close")) } }
+        )
+    }
+
     if (showBalanceDetails) {
         AlertDialog(onDismissRequest = { showBalanceDetails = false }, title = { Text(t("total_balance")) }, text = { Column { cards.forEach { c -> val bal = cardBalancesInUzs[c.id] ?: 0L; Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("${c.name} (${c.currency})", fontWeight = androidx.compose.ui.text.font.FontWeight.Medium); Text("${bal.money()} UZS", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = if (bal >= 0) GREEN else RED) } } } }, confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("close")) } })
     }
