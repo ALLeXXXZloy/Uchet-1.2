@@ -2,14 +2,18 @@ package uz.uchet
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
@@ -46,11 +50,22 @@ class MainActivity : FragmentActivity() {
         setContent {
             val theme by currentTheme
             val lang by currentLang
+            val context = LocalContext.current
+            val isDark = isSystemInDarkTheme()
+
             val colorScheme = when (theme) {
                 AppTheme.LIGHT -> lightColorScheme()
                 AppTheme.DARK -> darkColorScheme()
-                AppTheme.SYSTEM -> if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
+                AppTheme.SYSTEM -> {
+                    // ПОДДЕРЖКА MATERIAL YOU (Android 12+)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                    } else {
+                        if (isDark) darkColorScheme() else lightColorScheme()
+                    }
+                }
             }
+
             MaterialTheme(colorScheme = colorScheme) {
                 Surface {
                     var isAuthenticated by remember { mutableStateOf(false) }
