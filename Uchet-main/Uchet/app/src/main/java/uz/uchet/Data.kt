@@ -10,6 +10,13 @@ enum class TxType(val label: String) { INCOME("Доход"), EXPENSE("Расхо
 enum class CapitalizationType { MONTHLY, DAILY, END_OF_TERM }
 enum class DebtType { LENT, BORROWED }
 
+/** ★ #5: результат срабатывания правила. Возвращается парсерами при матчинге. */
+data class RuleMatch(
+    val category: String,
+    val ruleId: Long?,
+    val keyword: String?
+)
+
 @Entity(tableName = "txs", indices = [Index(value = ["timestamp"], name = "index_txs_timestamp"), Index(value = ["cardId"], name = "index_txs_cardId"), Index(value = ["toCardId"], name = "index_txs_toCardId"), Index(value = ["category"], name = "index_txs_category")])
 data class Tx(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -51,13 +58,16 @@ data class DebtEntity(
     val dateMillis: Long, val isPaid: Boolean = false, val description: String = "", val currency: String = "UZS"
 )
 
-// НОВАЯ ТАБЛИЦА ДЛЯ САМООБУЧЕНИЯ
+// ★ #2: добавлены appliedCount, lastAppliedAt, rejectedCount
 @Entity(tableName = "custom_keyword_rules")
 data class CustomKeywordRule(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val keyword: String,
     val category: String,
-    val type: TxType
+    val type: TxType,
+    val appliedCount: Int = 0,
+    val lastAppliedAt: Long? = null,
+    val rejectedCount: Int = 0
 )
 
 @Entity(tableName = "plan_items")
@@ -130,13 +140,25 @@ interface AppDao {
     @Delete suspend fun deleteDebt(debt: DebtEntity)
     @Query("DELETE FROM debts") suspend fun clearDebts()
 
-    // НОВЫЕ МЕТОДЫ ДЛЯ ПРАВИЛ
+    // === Custom rules ===
     @Query("SELECT * FROM custom_keyword_rules") fun observeCustomRules(): Flow<List<CustomKeywordRule>>
     @Query("SELECT * FROM custom_keyword_rules") suspend fun getAllCustomRules(): List<CustomKeywordRule>
+    @Query("SELECT * FROM custom_keyword_rules WHERE id = :id") suspend fun getCustomRuleById(id: Long): CustomKeywordRule?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCustomRule(rule: CustomKeywordRule)
     @Delete suspend fun deleteCustomRule(rule: CustomKeywordRule)
     @Query("DELETE FROM custom_keyword_rules") suspend fun clearCustomRules()
 
+    // ★ #2: инкремент счётчиков
+    @Query("UPDATE custom_keyword_rules SET appliedCount = appliedCount + 1, lastAppliedAt = :ts WHERE id = :id")
+    suspend fun bumpCustomRuleApplied(id: Long, ts: Long)
+
+    @Query("UPDATE custom_keyword_rules SET rejectedCount = rejectedCount + 1 WHERE id = :id")
+    suspend fun bumpCustomRuleRejected(id: Long)
+
+    @Query("DELETE FROM custom_keyword_rules WHERE appliedCount = 0")
+    suspend fun deleteUnusedCustomRules()
+
+    // === Plan / Forecast ===
     @Query("SELECT * FROM plan_items") fun observePlanItems(): Flow<List<PlanItemEntity>>
     @Query("SELECT * FROM plan_items") suspend fun getPlanItemsList(): List<PlanItemEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPlanItem(item: PlanItemEntity)
@@ -171,11 +193,11 @@ interface AppDao {
     entities = [
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
         RecurringConfirmationEntity::class, CategoryEntity::class, SavingsGoalEntity::class,
-        ExchangeRateEntity::class, DebtEntity::class, CustomKeywordRule::class, // <-- ДОБАВИЛИ ПРАВИЛА
+        ExchangeRateEntity::class, DebtEntity::class, CustomKeywordRule::class,
         PlanItemEntity::class, ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 11, // <-- ОБНОВИЛИ ВЕРСИЮ
+    version = 12,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -184,7 +206,7 @@ abstract class AppDb : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: AppDb? = null
 
-        private val MIGRATION_2_3 = object : Migration(2, 3) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_timestamp` ON `txs` (`timestamp`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_cardId`    ON `txs` (`cardId`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_toCardId`  ON `txs` (`toCardId`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_category`  ON `txs` (`category`)") } }
+        private val MIGRATION_2_3 = object : Migration(2, 3) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_timestamp` ON `txs` (`timestamp`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_cardId` ON `txs` (`cardId`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_toCardId` ON `txs` (`toCardId`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_category` ON `txs` (`category`)") } }
         private val MIGRATION_3_4 = object : Migration(3, 4) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE txs ADD COLUMN toAmountMinor INTEGER DEFAULT NULL") } }
         private val MIGRATION_4_5 = object : Migration(4, 5) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `plan_items` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `startMonth` TEXT NOT NULL, `endMonth` TEXT NOT NULL, `isFixed` INTEGER NOT NULL)") } }
         private val MIGRATION_5_6 = object : Migration(5, 6) {
@@ -210,17 +232,20 @@ abstract class AppDb : RoomDatabase() {
         }
         private val MIGRATION_8_9 = object : Migration(8, 9) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `recurring_confirmations` (`recurringId` INTEGER NOT NULL, `month` TEXT NOT NULL, `status` TEXT NOT NULL, `actualAmountMinor` INTEGER DEFAULT NULL, `lastPostponedDate` TEXT DEFAULT NULL, PRIMARY KEY(`recurringId`, `month`))") } }
         private val MIGRATION_9_10 = object : Migration(9, 10) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `debts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personName` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `type` TEXT NOT NULL, `dateMillis` INTEGER NOT NULL, `isPaid` INTEGER NOT NULL, `description` TEXT NOT NULL, `currency` TEXT NOT NULL)") } }
-        // МИГРАЦИЯ ДЛЯ ПРАВИЛ
-        private val MIGRATION_10_11 = object : Migration(10, 11) {
+        private val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `custom_keyword_rules` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `keyword` TEXT NOT NULL, `category` TEXT NOT NULL, `type` TEXT NOT NULL)") } }
+        // ★ #2: миграция 11→12
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("CREATE TABLE IF NOT EXISTS `custom_keyword_rules` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `keyword` TEXT NOT NULL, `category` TEXT NOT NULL, `type` TEXT NOT NULL)")
+                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN appliedCount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN lastAppliedAt INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN rejectedCount INTEGER NOT NULL DEFAULT 0")
             }
         }
 
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(context.applicationContext, AppDb::class.java, "uchet_database")
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     .build()
                 INSTANCE = instance
                 instance
