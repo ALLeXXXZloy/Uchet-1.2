@@ -17,7 +17,6 @@ class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
         
-        // Используем goAsync для защиты от ANR
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -28,13 +27,16 @@ class SmsReceiver : BroadcastReceiver() {
                 val prefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
                 val isDebugMode = prefs.getBoolean("sms_debug_mode", false)
                 
-                // Убрали length <= 6, оставили только явные банковские маркеры
                 val BANK_SENDERS = listOf("kapital", "uzum", "anorbank", "tbc", "agro", "tenge", "bank", "aloqa")
                 val isBank = BANK_SENDERS.any { sender.contains(it, ignoreCase = true) } || isDebugMode
 
                 if (!isBank || fullText.isEmpty()) return@launch
 
-                val (category, tx) = SmsParser.classify(sender, fullText, System.currentTimeMillis())
+                // ПОЛУЧАЕМ ПОЛЬЗОВАТЕЛЬСКИЕ ПРАВИЛА ИЗ БАЗЫ
+                val db = AppDb.get(context)
+                val rules = db.dao().getAllCustomRules()
+
+                val (category, tx) = SmsParser.classify(sender, fullText, System.currentTimeMillis(), rules)
                 if (category != SmsCategory.TRANSACTION || tx == null) return@launch
 
                 PendingQueue.push(context, tx)
@@ -49,9 +51,7 @@ class SmsReceiver : BroadcastReceiver() {
         val channelId = "sms_channel"
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(channelId, "SMS операции", NotificationManager.IMPORTANCE_HIGH)
-            )
+            nm.createNotificationChannel(NotificationChannel(channelId, "SMS операции", NotificationManager.IMPORTANCE_HIGH))
         }
         val pi = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java).apply {
@@ -60,7 +60,6 @@ class SmsReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
-        // Используем money() для красивого формата
         val typeStr = if (tx.type == TxType.INCOME) Translations.t("income", AppLanguage.RU) else Translations.t("expense", AppLanguage.RU)
         val n = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
