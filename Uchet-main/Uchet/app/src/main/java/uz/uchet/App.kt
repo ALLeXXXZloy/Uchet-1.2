@@ -66,6 +66,8 @@ fun App(
     val forecasts by vm.forecasts.collectAsState()
     val debts by vm.debts.collectAsState()
     val customRules by vm.customRules.collectAsState()
+    // ★★ #3
+    val corrections by vm.corrections.collectAsState()
 
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
         cards.associate { card ->
@@ -98,6 +100,8 @@ fun App(
     var showDebtManager by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
     var showRuleManager by remember { mutableStateOf(false) }
+    // ★★ #3
+    var showCorrectionManager by remember { mutableStateOf(false) }
 
     var editing by remember { mutableStateOf<Tx?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -105,7 +109,6 @@ fun App(
     var isVoiceTxAdding by remember { mutableStateOf(false) }
     var isPendingSms by remember { mutableStateOf(false) }
 
-    // ★ #5: состояния для explainability
     var pendingRuleAppliedId by remember { mutableStateOf<Long?>(null) }
     var pendingRuleAppliedKeyword by remember { mutableStateOf<String?>(null) }
 
@@ -167,7 +170,6 @@ fun App(
                 timestamp = pendingObj.optLong("timestamp"),
                 source = "SMS"
             )
-            // ★ #5: читаем поля explainability
             pendingRuleAppliedId = if (pendingObj.isNull("ruleAppliedId")) null else pendingObj.optLong("ruleAppliedId")
             pendingRuleAppliedKeyword = if (pendingObj.isNull("ruleAppliedKeyword")) null else pendingObj.optString("ruleAppliedKeyword").takeIf { it.isNotBlank() }
             editing = pendingTx
@@ -290,10 +292,17 @@ fun App(
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
+                                HorizontalDivider()
                                 DropdownMenuItem(
                                     text = { Text(t("learned_rules")) },
                                     leadingIcon = { Icon(Icons.Default.School, null) },
                                     onClick = { showMenu = false; showRuleManager = true }
+                                )
+                                // ★★ #3: пункт "Коррекции"
+                                DropdownMenuItem(
+                                    text = { Text(t("learned_corrections")) },
+                                    leadingIcon = { Icon(Icons.Default.EditNote, null) },
+                                    onClick = { showMenu = false; showCorrectionManager = true }
                                 )
                                 HorizontalDivider()
                                 DropdownMenuItem(text = { Text(t("export_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; pdfExportLauncher.launch("uchet_report_${month}.pdf") })
@@ -360,6 +369,15 @@ fun App(
         onDismiss = { showRuleManager = false }
     )
 
+    // ★★ #3: менеджер коррекций
+    if (showCorrectionManager) CorrectionManagerSheet(
+        corrections = corrections,
+        currentLang = currentLang.value,
+        onDelete = { c -> vm.deleteCorrection(c) },
+        onClearAll = { vm.clearCorrections() },
+        onDismiss = { showCorrectionManager = false }
+    )
+
     if (adding || editing != null) {
         TxDialog(
             initial = editing, quickTemplate = selectedQuickTemplate, cards = cards,
@@ -384,6 +402,15 @@ fun App(
             onSaveRule = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
             onRuleApplied = { id -> vm.bumpRuleApplied(id) },
             onRuleRejected = { id -> vm.bumpRuleRejected(id) },
+            onRecordCorrection = { hint, field, parsed, corrected ->
+                vm.recordCorrection(
+                    source = editing?.source ?: (if (isPendingSms) "SMS" else "MANUAL"),
+                    merchantHint = hint,
+                    field = field,
+                    parsedValue = parsed,
+                    correctedValue = corrected
+                )
+            },
             onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
         )
     }
