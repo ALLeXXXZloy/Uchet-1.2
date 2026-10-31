@@ -51,10 +51,15 @@ fun TxDialog(
     autoStartVoice: Boolean = false,
     rates: List<ExchangeRateEntity>,
     customRules: List<CustomKeywordRule>,
+    // ★ #5: explainability
+    ruleAppliedId: Long? = null,
+    ruleAppliedKeyword: String? = null,
     vm: VM,
     onDismiss: () -> Unit,
     onSave: (Tx) -> Unit,
     onSaveRule: (String, String, TxType) -> Unit,
+    onRuleApplied: (Long) -> Unit = {},
+    onRuleRejected: (Long) -> Unit = {},
     onDelete: (() -> Unit)?
 ) {
     val context = LocalContext.current
@@ -63,12 +68,12 @@ fun TxDialog(
 
     var type by remember { mutableStateOf(quickTemplate?.type ?: initial?.type ?: TxType.EXPENSE) }
     var category by remember { mutableStateOf(quickTemplate?.category ?: initial?.category ?: expenseCategories.lastOrNull() ?: "📦 Другое") }
-    var amount by remember { 
+    var amount by remember {
         mutableStateOf(
             quickTemplate?.averageAmountMinor?.let { BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() }
-            ?: initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() } 
+            ?: initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() }
             ?: ""
-        ) 
+        )
     }
     var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
     var selectedCardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
@@ -81,10 +86,15 @@ fun TxDialog(
     var photoPath by remember { mutableStateOf(initial?.photoPath) }
     var error by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
-    
+
     var showRuleInput by remember { mutableStateOf(false) }
     var ruleKeyword by remember { mutableStateOf(initial?.description ?: "") }
-    
+
+    // ★ #5: состояние сработавшего правила
+    var appliedRuleId by remember { mutableStateOf(ruleAppliedId) }
+    var appliedRuleKeyword by remember { mutableStateOf(ruleAppliedKeyword) }
+    var appliedRuleCategory by remember { mutableStateOf(if (ruleAppliedId != null) category else null) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val t = { key: String -> Translations.t(key, currentLang) }
@@ -102,7 +112,7 @@ fun TxDialog(
     var newCardCurrency by remember { mutableStateOf("UZS") }
 
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
-    
+
     val fromCardCurrency = cards.find { it.id == selectedCardId }?.currency ?: "UZS"
     val toCardCurrency = cards.find { it.id == toCardId }?.currency ?: "UZS"
     val isCurrencyDiff = type == TxType.TRANSFER && fromCardCurrency != toCardCurrency
@@ -117,6 +127,12 @@ fun TxDialog(
                 if (parsed.isCash) selectedCardId = "CASH"
                 else parsed.cardLast4?.let { l4 -> cards.find { it.last4 == l4 }?.let { selectedCardId = it.id } }
                 parsed.categoryName?.let { category = it }
+                // ★ #5: голос мог найти правило
+                if (parsed.ruleAppliedId != null) {
+                    appliedRuleId = parsed.ruleAppliedId
+                    appliedRuleKeyword = parsed.ruleAppliedKeyword
+                    appliedRuleCategory = parsed.categoryName
+                }
                 if (parsed.description.isNotBlank()) {
                     desc = parsed.description
                     if (ruleKeyword.isBlank()) ruleKeyword = parsed.description
@@ -159,8 +175,10 @@ fun TxDialog(
                     if (!qrData.merchant.isNullOrBlank()) {
                         desc = qrData.merchant
                         if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        // ★ #1: чек = расход, фильтруем правила по EXPENSE
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { category = it }
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let {
+                            category = it.category
+                            if (it.ruleId != null) { appliedRuleId = it.ruleId; appliedRuleKeyword = it.keyword; appliedRuleCategory = it.category }
+                        }
                     }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
                     scope.launch { snackbarHostState.showSnackbar("✅ Сумма и дата извлечены из QR-кода") }
@@ -186,8 +204,10 @@ fun TxDialog(
                     if (!qrData.merchant.isNullOrBlank()) {
                         desc = qrData.merchant
                         if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        // ★ #1: чек = расход
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { category = it }
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let {
+                            category = it.category
+                            if (it.ruleId != null) { appliedRuleId = it.ruleId; appliedRuleKeyword = it.keyword; appliedRuleCategory = it.category }
+                        }
                     }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
                 }
@@ -205,11 +225,13 @@ fun TxDialog(
                 val receipt = ReceiptParser.parse(rawText)
                 if (receipt.amountMinor != null) {
                     ocrAmount = receipt.amountMinor
-                    receipt.sellerName?.let { 
+                    receipt.sellerName?.let {
                         desc = it
                         if (ruleKeyword.isBlank()) ruleKeyword = it
-                        // ★ #1: чек = расход
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { cat -> category = cat } 
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { match ->
+                            category = match.category
+                            if (match.ruleId != null) { appliedRuleId = match.ruleId; appliedRuleKeyword = match.keyword; appliedRuleCategory = match.category }
+                        }
                     }
                     receipt.dateMillis?.let { date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT) }
                 }
@@ -270,13 +292,48 @@ fun TxDialog(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
-                if (isPendingSms) { 
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { 
-                        Column(Modifier.padding(12.dp)) { 
+                if (isPendingSms) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                        Column(Modifier.padding(12.dp)) {
                             Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Text(t("sms_title"), style = MaterialTheme.typography.bodySmall) 
-                        } 
-                    } 
+                            Text(t("sms_title"), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+
+                // ★ #5: бейдж сработавшего правила
+                if (appliedRuleId != null) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = GREEN.copy(alpha = 0.15f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("🟢", fontSize = 16.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    t("rule_applied_badge"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                val kw = appliedRuleKeyword ?: "?"
+                                val cat = appliedRuleCategory ?: category
+                                Text(
+                                    "«$kw» → ${Translations.translateCategory(cat, currentLang)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(onClick = {
+                                appliedRuleId?.let { onRuleRejected(it) }
+                                appliedRuleId = null
+                                appliedRuleKeyword = null
+                                appliedRuleCategory = null
+                            }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = t("rule_reject"), tint = RED, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
                 }
 
                 Box(Modifier.fillMaxWidth()) {
@@ -350,9 +407,9 @@ fun TxDialog(
                     }
                     if (showRuleInput) {
                         OutlinedTextField(
-                            value = ruleKeyword, 
-                            onValueChange = { ruleKeyword = it }, 
-                            label = { Text("Ключевое слово") }, 
+                            value = ruleKeyword,
+                            onValueChange = { ruleKeyword = it },
+                            label = { Text("Ключевое слово") },
                             placeholder = { Text("Например: Uzum, Шаурма") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
@@ -375,7 +432,7 @@ fun TxDialog(
                     }
                     val toAmountMinor = if (isCurrencyDiff) runCatching { BigDecimal(toAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() else null
                     val d = runCatching { LocalDate.parse(date.trim(), DATE_FMT) }.getOrNull()
-                    
+
                     when {
                         amountMinor == null || amountMinor <= 0 -> error = t("error")
                         isCurrencyDiff && (toAmountMinor == null || toAmountMinor <= 0) -> error = "Введите сумму зачисления"
@@ -385,7 +442,9 @@ fun TxDialog(
                             if (showRuleInput && ruleKeyword.isNotBlank()) {
                                 onSaveRule(ruleKeyword, category, type)
                             }
-                            
+                            // ★ #5: инкремент счётчика сработавшего правила
+                            appliedRuleId?.let { onRuleApplied(it) }
+
                             val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
                             onSave(Tx(
                                 id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, toCardId = toCardId, toAmountMinor = toAmountMinor,
