@@ -152,7 +152,8 @@ object SmsParser {
             val isExpense = sign == "-" || lowerDesc.contains("списание") || lowerDesc.contains("оплата") || lowerDesc.contains("покупка") || lowerDesc.contains("снятие") || lowerDesc.contains("atm") || lowerDesc.contains("выд нал") || lowerDesc.contains("перевод с visa")
             val isIncome = sign == "+" || lowerDesc.contains("зачисление") || lowerDesc.contains("поступление") || lowerDesc.contains("пополнение") || lowerDesc.contains("возврат") || lowerDesc.contains("перевод с uzcard") || lowerDesc.contains("перевод на visa")
             val type = when { isExpense -> TxType.EXPENSE; isIncome -> TxType.INCOME; lowerDesc.contains("перевод") -> TxType.TRANSFER; else -> TxType.EXPENSE }
-            val category = guessCategory(lowerDesc, "", customRules)
+            // ★ #1 + #7: передаём type
+            val category = guessCategory(lowerDesc, "", customRules, type)
             val displayDesc = desc.replace(Regex("""[;:]"""), "").take(80).trim()
             result.add(Tx(amountMinor = amountMinor, type = type, cardId = cardId, description = displayDesc, category = category, timestamp = ts, source = "IMPORT"))
         }
@@ -170,7 +171,8 @@ object SmsParser {
         val type = when { hasExpense && !hasIncome -> TxType.EXPENSE; hasIncome && !hasExpense -> TxType.INCOME; txAmount.sign == '-' -> TxType.EXPENSE; txAmount.sign == '+' -> TxType.INCOME; hasExpense -> TxType.EXPENSE; hasIncome -> TxType.INCOME; else -> TxType.EXPENSE }
         val card = extractCardLast4(body)
         val merchant = extractMerchant(body)
-        val category = guessCategory(lower, merchant, customRules)
+        // ★ #1 + #7: передаём type
+        val category = guessCategory(lower, merchant, customRules, type)
         return BankTx(amountMinor = txAmount.value, type = type, cardLast4 = card, balanceMinor = balance, merchant = merchant, category = category, timestamp = timestamp, sender = sender, rawBody = body)
     }
 
@@ -200,15 +202,17 @@ object SmsParser {
         return ""
     }
 
-    private fun guessCategory(lower: String, merchant: String, customRules: List<CustomKeywordRule>): String {
+    // ★ #1 + #7: фильтр по типу + самое длинное ключевое слово
+    private fun guessCategory(lower: String, merchant: String, customRules: List<CustomKeywordRule>, expectedType: TxType): String {
         val t = "$lower ${merchant.lowercase()}"
-        
-        // 1. ПРОВЕРЯЕМ КАСТОМНЫЕ ПРАВИЛА
-        for (rule in customRules) {
-            if (t.contains(rule.keyword)) return rule.category
-        }
-        
-        // 2. СТАНДАРТНЫЕ ПРАВИЛА
+
+        // 1. Пользовательские правила: только совпадающие по типу, выбираем самое специфичное (длинное)
+        val matched = customRules
+            .filter { it.type == expectedType && t.contains(it.keyword) }
+            .maxByOrNull { it.keyword.length }
+        if (matched != null) return matched.category
+
+        // 2. Стандартные правила
         fun hit(vararg words: String) = words.any { t.contains(it) }
         return when {
             hit("yandex.go", "yandex go", "taxi", "taksi", "transport", "avtobus", "metan", "cng", "azs", "benzin", "auto") -> "🚕 Транспорт"
