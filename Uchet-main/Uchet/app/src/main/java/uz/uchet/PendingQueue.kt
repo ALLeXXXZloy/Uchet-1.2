@@ -20,12 +20,15 @@ object PendingQueue {
             put("category", tx.category)
             put("timestamp", tx.timestamp)
             put("currency", tx.currency)
-            // ★ #5
             put("ruleAppliedId", tx.ruleAppliedId ?: JSONObject.NULL)
             put("ruleAppliedKeyword", tx.ruleAppliedKeyword ?: JSONObject.NULL)
+            // ★ D: сохраняем полный исходный текст СМС/уведомления,
+            // чтобы App.kt мог передать его в TxDialog → CorrectionEntity.rawText
+            put("rawBody", tx.rawBody)
         }
 
         queue.put(obj)
+        // commit(), а не apply(): гарантируем запись на диск до конца onReceive
         prefs.edit().putString(KEY_QUEUE, queue.toString()).commit()
     }
 
