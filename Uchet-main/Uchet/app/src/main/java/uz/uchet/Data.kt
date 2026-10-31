@@ -6,23 +6,11 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
-enum class TxType(val label: String) {
-    INCOME("Доход"), EXPENSE("Расход"), TRANSFER("Перевод себе"), ADJUSTMENT("Корректировка")
-}
-
+enum class TxType(val label: String) { INCOME("Доход"), EXPENSE("Расход"), TRANSFER("Перевод себе"), ADJUSTMENT("Корректировка") }
 enum class CapitalizationType { MONTHLY, DAILY, END_OF_TERM }
+enum class DebtType { LENT, BORROWED }
 
-enum class DebtType { LENT, BORROWED } // LENT - я дал в долг, BORROWED - я взял в долг
-
-@Entity(
-    tableName = "txs",
-    indices = [
-        Index(value = ["timestamp"], name = "index_txs_timestamp"),
-        Index(value = ["cardId"],    name = "index_txs_cardId"),
-        Index(value = ["toCardId"],  name = "index_txs_toCardId"),
-        Index(value = ["category"],  name = "index_txs_category")
-    ]
-)
+@Entity(tableName = "txs", indices = [Index(value = ["timestamp"], name = "index_txs_timestamp"), Index(value = ["cardId"], name = "index_txs_cardId"), Index(value = ["toCardId"], name = "index_txs_toCardId"), Index(value = ["category"], name = "index_txs_category")])
 data class Tx(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val amountMinor: Long, val type: TxType,
@@ -32,10 +20,7 @@ data class Tx(
 )
 
 @Entity(tableName = "cards")
-data class CardEntity(
-    @PrimaryKey val id: String, val last4: String, val name: String,
-    val currency: String, val initialBalanceMinor: Long
-)
+data class CardEntity(@PrimaryKey val id: String, val last4: String, val name: String, val currency: String, val initialBalanceMinor: Long)
 
 @Entity(tableName = "budgets")
 data class BudgetEntity(@PrimaryKey val category: String, val limitMinor: Long)
@@ -44,136 +29,86 @@ data class BudgetEntity(@PrimaryKey val category: String, val limitMinor: Long)
 data class RecurringEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val amountMinor: Long, val type: TxType, val cardId: String? = null,
-    val description: String = "", val category: String = "", val dayOfMonth: Int,
-    val lastExecutedMonth: String? = null
+    val description: String = "", val category: String = "", val dayOfMonth: Int, val lastExecutedMonth: String? = null
 )
 
 @Entity(tableName = "recurring_confirmations", primaryKeys = ["recurringId", "month"])
-data class RecurringConfirmationEntity(
-    val recurringId: Long, val month: String, val status: String,
-    val actualAmountMinor: Long? = null, val lastPostponedDate: String? = null
-)
+data class RecurringConfirmationEntity(val recurringId: Long, val month: String, val status: String, val actualAmountMinor: Long? = null, val lastPostponedDate: String? = null)
 
 @Entity(tableName = "categories")
 data class CategoryEntity(@PrimaryKey val name: String, val type: TxType)
 
 @Entity(tableName = "goals")
-data class SavingsGoalEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val name: String, val targetAmountMinor: Long, val currentAmountMinor: Long = 0
-)
+data class SavingsGoalEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val targetAmountMinor: Long, val currentAmountMinor: Long = 0)
 
 @Entity(tableName = "rates")
 data class ExchangeRateEntity(@PrimaryKey val currency: String, val rateToUzs: Double)
 
-// НОВАЯ ТАБЛИЦА ДОЛГОВ
 @Entity(tableName = "debts")
 data class DebtEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val personName: String,
-    val amountMinor: Long,
-    val type: DebtType,
-    val dateMillis: Long,
-    val isPaid: Boolean = false,
-    val description: String = "",
-    val currency: String = "UZS"
+    val personName: String, val amountMinor: Long, val type: DebtType,
+    val dateMillis: Long, val isPaid: Boolean = false, val description: String = "", val currency: String = "UZS"
 )
 
-// ... остальные таблицы прогнозов остаются без изменений ...
-@Entity(tableName = "plan_items")
-data class PlanItemEntity(
+// НОВАЯ ТАБЛИЦА ДЛЯ САМООБУЧЕНИЯ
+@Entity(tableName = "custom_keyword_rules")
+data class CustomKeywordRule(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val name: String, val type: TxType, val amountMinor: Long,
-    val startMonth: String, val endMonth: String, val isFixed: Boolean = true
+    val keyword: String,
+    val category: String,
+    val type: TxType
 )
+
+@Entity(tableName = "plan_items")
+data class PlanItemEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val type: TxType, val amountMinor: Long, val startMonth: String, val endMonth: String, val isFixed: Boolean = true)
 
 @Entity(tableName = "forecasts")
-data class ForecastPlanEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val name: String, val months: Int, val startMonth: String,
-    val createdAt: Long = System.currentTimeMillis()
-)
+data class ForecastPlanEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val months: Int, val startMonth: String, val createdAt: Long = System.currentTimeMillis())
 
-@Entity(
-    tableName = "forecast_items",
-    foreignKeys = [ForeignKey(entity = ForecastPlanEntity::class, parentColumns = ["id"], childColumns = ["forecastId"], onDelete = ForeignKey.CASCADE)],
-    indices = [Index(value = ["forecastId"], name = "index_forecast_items_forecastId")]
-)
-data class ForecastItemEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val forecastId: Long, val name: String, val type: TxType,
-    val amountMinor: Long, val currency: String = "UZS", val originalAmountMinor: Long? = null,
-    val startMonth: String, val endMonth: String, val isFixed: Boolean = true
-)
+@Entity(tableName = "forecast_items", foreignKeys = [ForeignKey(entity = ForecastPlanEntity::class, parentColumns = ["id"], childColumns = ["forecastId"], onDelete = ForeignKey.CASCADE)], indices = [Index(value = ["forecastId"], name = "index_forecast_items_forecastId")])
+data class ForecastItemEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val forecastId: Long, val name: String, val type: TxType, val amountMinor: Long, val currency: String = "UZS", val originalAmountMinor: Long? = null, val startMonth: String, val endMonth: String, val isFixed: Boolean = true)
 
-@Entity(
-    tableName = "forecast_deposits",
-    foreignKeys = [ForeignKey(entity = ForecastPlanEntity::class, parentColumns = ["id"], childColumns = ["forecastId"], onDelete = ForeignKey.CASCADE)],
-    indices = [Index(value = ["forecastId"], name = "index_forecast_deposits_forecastId")]
-)
-data class ForecastDepositEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val forecastId: Long, val name: String, val initialAmountMinor: Long,
-    val currency: String = "UZS", val originalInitialAmountMinor: Long? = null,
-    val annualRatePercent: Double, val startMonth: String, val endMonth: String,
-    val monthlyContributionMinor: Long = 0, val monthlyWithdrawalMinor: Long = 0,
-    val capitalization: CapitalizationType = CapitalizationType.MONTHLY
-)
+@Entity(tableName = "forecast_deposits", foreignKeys = [ForeignKey(entity = ForecastPlanEntity::class, parentColumns = ["id"], childColumns = ["forecastId"], onDelete = ForeignKey.CASCADE)], indices = [Index(value = ["forecastId"], name = "index_forecast_deposits_forecastId")])
+data class ForecastDepositEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val forecastId: Long, val name: String, val initialAmountMinor: Long, val currency: String = "UZS", val originalInitialAmountMinor: Long? = null, val annualRatePercent: Double, val startMonth: String, val endMonth: String, val monthlyContributionMinor: Long = 0, val monthlyWithdrawalMinor: Long = 0, val capitalization: CapitalizationType = CapitalizationType.MONTHLY)
 
-@Entity(
-    tableName = "forecast_deposit_ops",
-    foreignKeys = [ForeignKey(entity = ForecastDepositEntity::class, parentColumns = ["id"], childColumns = ["depositId"], onDelete = ForeignKey.CASCADE)],
-    indices = [Index(value = ["depositId"], name = "index_forecast_deposit_ops_depositId")]
-)
-data class ForecastDepositOpEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val depositId: Long, val month: String, val amountMinor: Long, val description: String = ""
-)
+@Entity(tableName = "forecast_deposit_ops", foreignKeys = [ForeignKey(entity = ForecastDepositEntity::class, parentColumns = ["id"], childColumns = ["depositId"], onDelete = ForeignKey.CASCADE)], indices = [Index(value = ["depositId"], name = "index_forecast_deposit_ops_depositId")])
+data class ForecastDepositOpEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val depositId: Long, val month: String, val amountMinor: Long, val description: String = "")
 
 @Dao
 interface AppDao {
-    // --- TXS ---
-    @Query("SELECT * FROM txs WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp DESC")
-    fun observe(start: Long, end: Long): Flow<List<Tx>>
-    @Query("SELECT * FROM txs ORDER BY timestamp DESC")
-    fun observeAll(): Flow<List<Tx>>
-    @Query("SELECT * FROM txs ORDER BY timestamp DESC")
-    suspend fun getAllTxs(): List<Tx>
+    @Query("SELECT * FROM txs WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp DESC") fun observe(start: Long, end: Long): Flow<List<Tx>>
+    @Query("SELECT * FROM txs ORDER BY timestamp DESC") fun observeAll(): Flow<List<Tx>>
+    @Query("SELECT * FROM txs ORDER BY timestamp DESC") suspend fun getAllTxs(): List<Tx>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(tx: Tx)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(txs: List<Tx>)
     @Delete suspend fun delete(tx: Tx)
     @Query("DELETE FROM txs") suspend fun clearTxs()
 
-    // --- CARDS ---
     @Query("SELECT * FROM cards") fun observeCards(): Flow<List<CardEntity>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCard(card: CardEntity)
     @Query("DELETE FROM cards WHERE id = :id") suspend fun deleteCard(id: String)
     @Query("UPDATE txs SET cardId = NULL WHERE cardId = :cardId") suspend fun unlinkCardTransactions(cardId: String)
     @Query("DELETE FROM cards") suspend fun clearCards()
 
-    // --- BUDGETS ---
     @Query("SELECT * FROM budgets") fun observeBudgets(): Flow<List<BudgetEntity>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertBudget(budget: BudgetEntity)
     @Query("DELETE FROM budgets WHERE category = :category") suspend fun deleteBudget(category: String)
     @Query("DELETE FROM budgets") suspend fun clearBudgets()
 
-    // --- RECURRING ---
     @Query("SELECT * FROM recurring") fun observeRecurring(): Flow<List<RecurringEntity>>
     @Query("SELECT * FROM recurring") suspend fun getRecurringList(): List<RecurringEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertRecurring(r: RecurringEntity)
     @Delete suspend fun deleteRecurring(r: RecurringEntity)
     @Query("DELETE FROM recurring") suspend fun clearRecurring()
 
-    // --- CONFIRMATIONS ---
-    @Query("SELECT * FROM recurring_confirmations WHERE recurringId = :id AND month = :month")
-    suspend fun getConfirmation(id: Long, month: String): RecurringConfirmationEntity?
+    @Query("SELECT * FROM recurring_confirmations WHERE recurringId = :id AND month = :month") suspend fun getConfirmation(id: Long, month: String): RecurringConfirmationEntity?
     @Query("SELECT * FROM recurring_confirmations") fun observeConfirmations(): Flow<List<RecurringConfirmationEntity>>
     @Query("SELECT * FROM recurring_confirmations") suspend fun getAllConfirmations(): List<RecurringConfirmationEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertConfirmation(conf: RecurringConfirmationEntity)
     @Query("DELETE FROM recurring_confirmations WHERE recurringId = :recurringId") suspend fun deleteConfirmationsForRecurring(recurringId: Long)
     @Query("DELETE FROM recurring_confirmations") suspend fun clearConfirmations()
 
-    // --- CATEGORIES ---
     @Query("SELECT * FROM categories") fun observeCategories(): Flow<List<CategoryEntity>>
     @Query("SELECT * FROM categories") suspend fun getCategoriesList(): List<CategoryEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCategory(c: CategoryEntity)
@@ -181,31 +116,33 @@ interface AppDao {
     @Query("UPDATE txs SET category = :newCategory WHERE category = :oldCategory") suspend fun replaceCategory(oldCategory: String, newCategory: String)
     @Query("DELETE FROM categories") suspend fun clearCategories()
 
-    // --- GOALS ---
     @Query("SELECT * FROM goals") fun observeGoals(): Flow<List<SavingsGoalEntity>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertGoal(goal: SavingsGoalEntity)
     @Delete suspend fun deleteGoal(goal: SavingsGoalEntity)
     @Query("DELETE FROM goals") suspend fun clearGoals()
 
-    // --- RATES ---
     @Query("SELECT * FROM rates") fun observeRates(): Flow<List<ExchangeRateEntity>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertRate(rate: ExchangeRateEntity)
 
-    // --- DEBTS --- (НОВОЕ)
     @Query("SELECT * FROM debts ORDER BY isPaid ASC, dateMillis DESC") fun observeDebts(): Flow<List<DebtEntity>>
     @Query("SELECT * FROM debts") suspend fun getAllDebts(): List<DebtEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertDebt(debt: DebtEntity)
     @Delete suspend fun deleteDebt(debt: DebtEntity)
     @Query("DELETE FROM debts") suspend fun clearDebts()
 
-    // --- PLAN ITEMS ---
+    // НОВЫЕ МЕТОДЫ ДЛЯ ПРАВИЛ
+    @Query("SELECT * FROM custom_keyword_rules") fun observeCustomRules(): Flow<List<CustomKeywordRule>>
+    @Query("SELECT * FROM custom_keyword_rules") suspend fun getAllCustomRules(): List<CustomKeywordRule>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCustomRule(rule: CustomKeywordRule)
+    @Delete suspend fun deleteCustomRule(rule: CustomKeywordRule)
+    @Query("DELETE FROM custom_keyword_rules") suspend fun clearCustomRules()
+
     @Query("SELECT * FROM plan_items") fun observePlanItems(): Flow<List<PlanItemEntity>>
     @Query("SELECT * FROM plan_items") suspend fun getPlanItemsList(): List<PlanItemEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPlanItem(item: PlanItemEntity)
     @Query("DELETE FROM plan_items WHERE id = :id") suspend fun deletePlanItem(id: Long)
     @Query("DELETE FROM plan_items") suspend fun clearPlanItems()
 
-    // --- FORECASTS ---
     @Query("SELECT * FROM forecasts ORDER BY createdAt DESC") fun observeForecasts(): Flow<List<ForecastPlanEntity>>
     @Query("SELECT * FROM forecasts") suspend fun getForecastsList(): List<ForecastPlanEntity>
     @Query("SELECT * FROM forecasts WHERE id = :id") suspend fun getForecastById(id: Long): ForecastPlanEntity?
@@ -234,11 +171,11 @@ interface AppDao {
     entities = [
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
         RecurringConfirmationEntity::class, CategoryEntity::class, SavingsGoalEntity::class,
-        ExchangeRateEntity::class, DebtEntity::class, // <-- ДОБАВИЛИ ДОЛГИ
+        ExchangeRateEntity::class, DebtEntity::class, CustomKeywordRule::class, // <-- ДОБАВИЛИ ПРАВИЛА
         PlanItemEntity::class, ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 10, // <-- ОБНОВИЛИ ВЕРСИЮ
+    version = 11, // <-- ОБНОВИЛИ ВЕРСИЮ
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -247,20 +184,9 @@ abstract class AppDb : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: AppDb? = null
 
-        private val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_timestamp` ON `txs` (`timestamp`)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_cardId`    ON `txs` (`cardId`)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_toCardId`  ON `txs` (`toCardId`)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_category`  ON `txs` (`category`)")
-            }
-        }
+        private val MIGRATION_2_3 = object : Migration(2, 3) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_timestamp` ON `txs` (`timestamp`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_cardId`    ON `txs` (`cardId`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_toCardId`  ON `txs` (`toCardId`)"); db.execSQL("CREATE INDEX IF NOT EXISTS `index_txs_category`  ON `txs` (`category`)") } }
         private val MIGRATION_3_4 = object : Migration(3, 4) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE txs ADD COLUMN toAmountMinor INTEGER DEFAULT NULL") } }
-        private val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("CREATE TABLE IF NOT EXISTS `plan_items` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `startMonth` TEXT NOT NULL, `endMonth` TEXT NOT NULL, `isFixed` INTEGER NOT NULL)")
-            }
-        }
+        private val MIGRATION_4_5 = object : Migration(4, 5) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `plan_items` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `startMonth` TEXT NOT NULL, `endMonth` TEXT NOT NULL, `isFixed` INTEGER NOT NULL)") } }
         private val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `forecasts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `months` INTEGER NOT NULL, `startMonth` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)")
@@ -282,22 +208,19 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("ALTER TABLE forecast_deposits ADD COLUMN originalInitialAmountMinor INTEGER DEFAULT NULL")
             }
         }
-        private val MIGRATION_8_9 = object : Migration(8, 9) {
+        private val MIGRATION_8_9 = object : Migration(8, 9) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `recurring_confirmations` (`recurringId` INTEGER NOT NULL, `month` TEXT NOT NULL, `status` TEXT NOT NULL, `actualAmountMinor` INTEGER DEFAULT NULL, `lastPostponedDate` TEXT DEFAULT NULL, PRIMARY KEY(`recurringId`, `month`))") } }
+        private val MIGRATION_9_10 = object : Migration(9, 10) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `debts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personName` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `type` TEXT NOT NULL, `dateMillis` INTEGER NOT NULL, `isPaid` INTEGER NOT NULL, `description` TEXT NOT NULL, `currency` TEXT NOT NULL)") } }
+        // МИГРАЦИЯ ДЛЯ ПРАВИЛ
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("CREATE TABLE IF NOT EXISTS `recurring_confirmations` (`recurringId` INTEGER NOT NULL, `month` TEXT NOT NULL, `status` TEXT NOT NULL, `actualAmountMinor` INTEGER DEFAULT NULL, `lastPostponedDate` TEXT DEFAULT NULL, PRIMARY KEY(`recurringId`, `month`))")
-            }
-        }
-        // НОВАЯ МИГРАЦИЯ ДЛЯ ДОЛГОВ
-        private val MIGRATION_9_10 = object : Migration(9, 10) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("CREATE TABLE IF NOT EXISTS `debts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personName` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `type` TEXT NOT NULL, `dateMillis` INTEGER NOT NULL, `isPaid` INTEGER NOT NULL, `description` TEXT NOT NULL, `currency` TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `custom_keyword_rules` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `keyword` TEXT NOT NULL, `category` TEXT NOT NULL, `type` TEXT NOT NULL)")
             }
         }
 
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(context.applicationContext, AppDb::class.java, "uchet_database")
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     .build()
                 INSTANCE = instance
                 instance
