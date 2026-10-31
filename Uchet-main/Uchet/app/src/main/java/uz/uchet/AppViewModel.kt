@@ -35,8 +35,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     val planItems = dao.observePlanItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<PlanItemEntity>())
     val forecasts = dao.observeForecasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ForecastPlanEntity>())
     val debts = dao.observeDebts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<DebtEntity>())
-    
-    // НОВЫЙ ПОТОК
     val customRules = dao.observeCustomRules().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CustomKeywordRule>())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -216,7 +214,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    // НОВЫЕ МЕТОДЫ ДЛЯ ПРАВИЛ
+    // === Custom rules ===
     fun saveCustomRule(keyword: String, category: String, type: TxType) {
         if (keyword.isBlank()) return
         viewModelScope.launch {
@@ -224,6 +222,11 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
     fun deleteCustomRule(rule: CustomKeywordRule) { viewModelScope.launch { dao.deleteCustomRule(rule) } }
+
+    // ★ #2: счётчики
+    fun bumpRuleApplied(ruleId: Long) { viewModelScope.launch { dao.bumpCustomRuleApplied(ruleId, System.currentTimeMillis()) } }
+    fun bumpRuleRejected(ruleId: Long) { viewModelScope.launch { dao.bumpCustomRuleRejected(ruleId) } }
+    fun deleteUnusedRules() { viewModelScope.launch { dao.deleteUnusedCustomRules() } }
 
     private suspend fun buildBackupJson(): String {
         val allTx = allTxs.first()
@@ -251,8 +254,12 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         allDebts.forEach { d -> debtsArray.put(JSONObject().apply { put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency) }) }
         root.put("debts", debtsArray)
 
+        // ★ #2: новые поля в бэкапе
         val rulesArray = JSONArray()
-        allRules.forEach { r -> rulesArray.put(JSONObject().apply { put("id", r.id); put("keyword", r.keyword); put("category", r.category); put("type", r.type.name) }) }
+        allRules.forEach { r -> rulesArray.put(JSONObject().apply {
+            put("id", r.id); put("keyword", r.keyword); put("category", r.category); put("type", r.type.name)
+            put("appliedCount", r.appliedCount); put("lastAppliedAt", r.lastAppliedAt ?: JSONObject.NULL); put("rejectedCount", r.rejectedCount)
+        }) }
         root.put("custom_rules", rulesArray)
 
         val cardsArray = JSONArray()
@@ -332,11 +339,20 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             }
         }
 
+        // ★ #2: читаем новые поля (со значениями по умолчанию для старых бэкапов)
         val rulesList = mutableListOf<CustomKeywordRule>()
         root.optJSONArray("custom_rules")?.let { rulesArray ->
             for (i in 0 until rulesArray.length()) {
                 val o = rulesArray.getJSONObject(i)
-                rulesList.add(CustomKeywordRule(o.optLong("id"), o.getString("keyword"), o.getString("category"), TxType.valueOf(o.getString("type"))))
+                rulesList.add(CustomKeywordRule(
+                    id = o.optLong("id"),
+                    keyword = o.getString("keyword"),
+                    category = o.getString("category"),
+                    type = TxType.valueOf(o.getString("type")),
+                    appliedCount = o.optInt("appliedCount", 0),
+                    lastAppliedAt = if (o.isNull("lastAppliedAt")) null else o.optLong("lastAppliedAt"),
+                    rejectedCount = o.optInt("rejectedCount", 0)
+                ))
             }
         }
 
