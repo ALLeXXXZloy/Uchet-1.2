@@ -1,6 +1,7 @@
 package uz.uchet
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -47,6 +48,8 @@ import java.time.YearMonth
 fun App(
     vm: VM = koinViewModel(),
     pendingCheckTrigger: MutableState<Int>? = null,
+    widgetActionTrigger: MutableState<Int>? = null,
+    intent: Intent? = null,
     currentTheme: MutableState<AppTheme>,
     currentLang: MutableState<AppLanguage>
 ) {
@@ -61,7 +64,7 @@ fun App(
     val rates by vm.rates.collectAsState()
     val categories by vm.categories.collectAsState()
     val forecasts by vm.forecasts.collectAsState()
-    val debts by vm.debts.collectAsState() // НОВОЕ
+    val debts by vm.debts.collectAsState()
     
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
         cards.associate { card ->
@@ -91,7 +94,7 @@ fun App(
     var showRecurringManager by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
     var showGoalManager by remember { mutableStateOf(false) }
-    var showDebtManager by remember { mutableStateOf(false) } // НОВОЕ
+    var showDebtManager by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
 
     var editing by remember { mutableStateOf<Tx?>(null) }
@@ -115,6 +118,20 @@ fun App(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val t = { key: String -> Translations.t(key, currentLang.value) }
+
+    // --- ОБРАБОТКА КЛИКА ИЗ ВИДЖЕТА ---
+    val widgetTrigger = widgetActionTrigger?.value ?: 0
+    LaunchedEffect(widgetTrigger) {
+        val actionCategory = intent?.getStringExtra("QUICK_ACTION_CATEGORY")
+        val actionType = intent?.getStringExtra("QUICK_ACTION_TYPE")
+        if (actionCategory != null && actionType != null) {
+            val txType = if (actionType == "INCOME") TxType.INCOME else TxType.EXPENSE
+            selectedQuickTemplate = QuickTemplate(category = actionCategory, averageAmountMinor = 0L, type = txType)
+            adding = true
+            intent.removeExtra("QUICK_ACTION_CATEGORY")
+        }
+    }
+    // ----------------------------------
 
     LaunchedEffect(cards) {
         if (cards.none { it.id == "CASH" }) {
@@ -160,22 +177,10 @@ fun App(
         }
     }
     val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
-        uri?.let {
-            try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }; scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } }
-            catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } }
-        }
+        uri?.let { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(generateCsv(allTxs).toByteArray()) }; scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } } }
     }
     val jsonExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
-        uri?.let {
-            val pwd = pendingBackupPassword
-            if (pwd != null) {
-                vm.createBackup(pwd) { blob ->
-                    if (blob != null) { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(blob) }; scope.launch { snackbarHostState.showSnackbar(t("backup_saved_ok")) } } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } } }
-                    else scope.launch { snackbarHostState.showSnackbar(t("error")) }
-                    pendingBackupPassword = null
-                }
-            }
-        }
+        uri?.let { val pwd = pendingBackupPassword; if (pwd != null) { vm.createBackup(pwd) { blob -> if (blob != null) { try { context.contentResolver.openOutputStream(it)?.use { s -> s.write(blob) }; scope.launch { snackbarHostState.showSnackbar(t("backup_saved_ok")) } } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } } } else scope.launch { snackbarHostState.showSnackbar(t("error")) }; pendingBackupPassword = null } } }
     }
     val jsonImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
@@ -297,7 +302,7 @@ fun App(
     if (showCardManager) CardManagerSheet(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
-    if (showDebtManager) DebtManagerSheet(debts, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false }) // НОВЫЙ ВЫЗОВ
+    if (showDebtManager) DebtManagerSheet(debts, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false })
 
     if (adding || editing != null) {
         TxDialog(
