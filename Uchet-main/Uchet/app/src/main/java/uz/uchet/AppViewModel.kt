@@ -36,7 +36,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     val forecasts = dao.observeForecasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ForecastPlanEntity>())
     val debts = dao.observeDebts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<DebtEntity>())
     val customRules = dao.observeCustomRules().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CustomKeywordRule>())
-    // ★★ #3
     val corrections = dao.observeCorrections().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CorrectionEntity>())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -228,7 +227,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     fun bumpRuleRejected(ruleId: Long) { viewModelScope.launch { dao.bumpCustomRuleRejected(ruleId) } }
     fun deleteUnusedRules() { viewModelScope.launch { dao.deleteUnusedCustomRules() } }
 
-    // ★★ #3: Corrections
+    // === Corrections ===
     fun normalizeMerchantHint(s: String): String {
         if (s.isBlank()) return ""
         return s.lowercase()
@@ -241,8 +240,17 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     /**
      * Записывает коррекцию пользователя. Если для (merchantHint, field, parsedValue) уже есть —
      * инкрементит appliedCount. Иначе — вставляет новую запись.
+     *
+     * @param rawText полный исходный текст (СМС / OCR-чек / голос), для этапа D
      */
-    fun recordCorrection(source: String, merchantHint: String, field: String, parsedValue: String, correctedValue: String) {
+    fun recordCorrection(
+        source: String,
+        merchantHint: String,
+        field: String,
+        parsedValue: String,
+        correctedValue: String,
+        rawText: String = ""
+    ) {
         if (parsedValue == correctedValue) return
         if (merchantHint.isBlank()) return
         if (correctedValue.isBlank()) return
@@ -252,14 +260,20 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             try {
                 val existing = dao.findCorrection(hint, field, parsedValue)
                 if (existing != null) {
-                    dao.bumpCorrection(existing.id, System.currentTimeMillis())
+                    // Обновляем счётчик и дополняем rawText, если раньше был пустой
+                    if (existing.rawText.isBlank() && rawText.isNotBlank()) {
+                        dao.upsertCorrection(existing.copy(rawText = rawText, appliedCount = existing.appliedCount + 1, lastSeenAt = System.currentTimeMillis()))
+                    } else {
+                        dao.bumpCorrection(existing.id, System.currentTimeMillis())
+                    }
                 } else {
                     dao.upsertCorrection(CorrectionEntity(
                         source = source,
                         merchantHint = hint,
                         field = field,
                         parsedValue = parsedValue,
-                        correctedValue = correctedValue
+                        correctedValue = correctedValue,
+                        rawText = rawText
                     ))
                 }
             } catch (e: Exception) { e.printStackTrace() }
@@ -284,12 +298,21 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         val allConfirmations = dao.getAllConfirmations()
         val allDebts = dao.getAllDebts()
         val allRules = dao.getAllCustomRules()
-        val allCorrections = dao.getAllCorrections()   // ★★ #3
+        val allCorrections = dao.getAllCorrections()
 
         val root = JSONObject()
 
+        // ★ D: сохраняем rawText в txs
         val txsArray = JSONArray()
-        allTx.forEach { t -> txsArray.put(JSONObject().apply { put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name); put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL); put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL); put("description", t.description); put("category", t.category); put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL) }) }
+        allTx.forEach { t -> txsArray.put(JSONObject().apply {
+            put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name)
+            put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL)
+            put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL)
+            put("description", t.description); put("category", t.category)
+            put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency)
+            put("photoPath", t.photoPath ?: JSONObject.NULL)
+            put("rawText", t.rawText ?: JSONObject.NULL)
+        }) }
         root.put("txs", txsArray)
 
         val debtsArray = JSONArray()
@@ -303,12 +326,13 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }) }
         root.put("custom_rules", rulesArray)
 
-        // ★★ #3: сериализация corrections
+        // ★ D: сохраняем rawText в corrections
         val corrArray = JSONArray()
         allCorrections.forEach { c -> corrArray.put(JSONObject().apply {
             put("id", c.id); put("source", c.source); put("merchantHint", c.merchantHint)
             put("field", c.field); put("parsedValue", c.parsedValue); put("correctedValue", c.correctedValue)
             put("appliedCount", c.appliedCount); put("lastSeenAt", c.lastSeenAt); put("createdAt", c.createdAt)
+            put("rawText", c.rawText)
         }) }
         root.put("corrections", corrArray)
 
@@ -374,10 +398,22 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         root.optJSONArray("txs")?.let { txsArray ->
             for (i in 0 until txsArray.length()) {
                 val o = txsArray.getJSONObject(i)
-                txsList.add(Tx(o.optLong("id"), o.getLong("amountMinor"), TxType.valueOf(o.getString("type")),
-                    if (o.isNull("cardId")) null else o.getString("cardId"), if (o.isNull("toCardId")) null else o.optString("toCardId"),
-                    if (o.isNull("toAmountMinor")) null else o.optLong("toAmountMinor"), o.optString("description"), o.optString("category"),
-                    o.getLong("timestamp"), o.optString("source"), o.optString("currency", "UZS"), if (o.isNull("photoPath")) null else o.getString("photoPath")))
+                txsList.add(Tx(
+                    id = o.optLong("id"),
+                    amountMinor = o.getLong("amountMinor"),
+                    type = TxType.valueOf(o.getString("type")),
+                    cardId = if (o.isNull("cardId")) null else o.getString("cardId"),
+                    toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"),
+                    toAmountMinor = if (o.isNull("toAmountMinor")) null else o.optLong("toAmountMinor"),
+                    description = o.optString("description"),
+                    category = o.optString("category"),
+                    timestamp = o.getLong("timestamp"),
+                    source = o.optString("source"),
+                    currency = o.optString("currency", "UZS"),
+                    photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"),
+                    // ★ D: rawText может отсутствовать в старых бэкапах
+                    rawText = if (o.isNull("rawText")) null else o.optString("rawText").takeIf { it.isNotBlank() }
+                ))
             }
         }
 
@@ -405,7 +441,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             }
         }
 
-        // ★★ #3: читаем corrections (со значениями по умолчанию для старых бэкапов)
         val correctionsList = mutableListOf<CorrectionEntity>()
         root.optJSONArray("corrections")?.let { corrArray ->
             for (i in 0 until corrArray.length()) {
@@ -419,7 +454,9 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                     correctedValue = o.getString("correctedValue"),
                     appliedCount = o.optInt("appliedCount", 1),
                     lastSeenAt = o.optLong("lastSeenAt", System.currentTimeMillis()),
-                    createdAt = o.optLong("createdAt", System.currentTimeMillis())
+                    createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                    // ★ D: rawText может отсутствовать в старых бэкапах
+                    rawText = o.optString("rawText", "")
                 ))
             }
         }
@@ -520,7 +557,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             dao.insertAll(txsList)
             debtsList.forEach { dao.upsertDebt(it) }
             rulesList.forEach { dao.upsertCustomRule(it) }
-            correctionsList.forEach { dao.upsertCorrection(it) }   // ★★ #3
+            correctionsList.forEach { dao.upsertCorrection(it) }
             cardsList.forEach { dao.upsertCard(it) }
             budgetsList.forEach { dao.upsertBudget(it) }
             recurringList.forEach { dao.upsertRecurring(it) }
