@@ -159,8 +159,8 @@ fun TxDialog(
                     if (!qrData.merchant.isNullOrBlank()) {
                         desc = qrData.merchant
                         if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        // ★ ИСПРАВЛЕНО: передаём customRules
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules)?.let { category = it }
+                        // ★ #1: чек = расход, фильтруем правила по EXPENSE
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { category = it }
                     }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
                     scope.launch { snackbarHostState.showSnackbar("✅ Сумма и дата извлечены из QR-кода") }
@@ -186,8 +186,8 @@ fun TxDialog(
                     if (!qrData.merchant.isNullOrBlank()) {
                         desc = qrData.merchant
                         if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        // ★ ИСПРАВЛЕНО: передаём customRules
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules)?.let { category = it }
+                        // ★ #1: чек = расход
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { category = it }
                     }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
                 }
@@ -208,8 +208,8 @@ fun TxDialog(
                     receipt.sellerName?.let { 
                         desc = it
                         if (ruleKeyword.isBlank()) ruleKeyword = it
-                        // ★ ИСПРАВЛЕНО: передаём customRules
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules)?.let { cat -> category = cat } 
+                        // ★ #1: чек = расход
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { cat -> category = cat } 
                     }
                     receipt.dateMillis?.let { date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT) }
                 }
