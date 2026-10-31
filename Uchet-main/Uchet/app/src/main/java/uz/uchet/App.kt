@@ -37,6 +37,8 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import org.koin.androidx.compose.koinViewModel
 import java.time.YearMonth
 
@@ -51,6 +53,7 @@ fun App(
     val context = LocalContext.current
     val month by vm.month.collectAsState()
     val allTxs by vm.allTxs.collectAsState()
+    val txs by vm.txs.collectAsState() // Для PDF отчета
     val cards by vm.cards.collectAsState()
     val budgets by vm.budgets.collectAsState()
     val recurring by vm.recurring.collectAsState()
@@ -151,6 +154,19 @@ fun App(
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) checkPendingSms() }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // --- ЛАУНЧЕР ДЛЯ PDF ---
+    val pdfExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/pdf")) { uri: Uri? ->
+        uri?.let {
+            scope.launch {
+                val success = withContext(Dispatchers.IO) {
+                    PdfReportGenerator.generateReport(context, it, txs, month, currentLang.value)
+                }
+                if (success) snackbarHostState.showSnackbar("PDF отчет сохранен")
+                else snackbarHostState.showSnackbar(t("error"))
+            }
+        }
     }
 
     val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
@@ -282,6 +298,10 @@ fun App(
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
                                 HorizontalDivider()
+                                DropdownMenuItem(text = { Text(t("export_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { 
+                                    showMenu = false
+                                    pdfExportLauncher.launch("uchet_report_${month}.pdf") 
+                                })
                                 DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
                                 DropdownMenuItem(text = { Text(t("backup")) }, leadingIcon = { Icon(Icons.Default.Backup, null) }, onClick = { showMenu = false; showPasswordDialogBackup = true })
                                 DropdownMenuItem(text = { Text(t("restore")) }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { showMenu = false; jsonImportLauncher.launch(arrayOf("*/*")) })
@@ -315,7 +335,7 @@ fun App(
                 onShowBalanceDetails = { showBalanceDetails = true },
                 onQuickTemplateClick = { template -> selectedQuickTemplate = template; adding = true }
             )
-            1 -> AnalyticsScreen(txs = vm.txs.collectAsState().value, allTxs = allTxs, currentLang = currentLang.value, onBack = { currentTab = 0 })
+            1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { currentTab = 0 })
             2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
             3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
         }
