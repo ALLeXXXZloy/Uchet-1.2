@@ -699,7 +699,7 @@ fun DebtManagerSheet(
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ НОВАЯ ФУНКЦИЯ: RuleManagerSheet — управление правилами самообучения ★★★
+// ★★★ RuleManagerSheet — управление правилами самообучения (шаг B: счётчики) ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -710,6 +710,7 @@ fun RuleManagerSheet(
     incomeCategories: List<String>,
     onSave: (String, String, TxType) -> Unit,
     onDelete: (CustomKeywordRule) -> Unit,
+    onDeleteUnused: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val t = { key: String -> Translations.t(key, currentLang) }
@@ -718,6 +719,9 @@ fun RuleManagerSheet(
     var type by remember { mutableStateOf(TxType.EXPENSE) }
     var ruleToDelete by remember { mutableStateOf<CustomKeywordRule?>(null) }
     var showCategoryMenu by remember { mutableStateOf(false) }
+    var showConfirmDeleteUnused by remember { mutableStateOf(false) }
+
+    val unusedCount = rules.count { it.appliedCount == 0 }
 
     LaunchedEffect(type) {
         val list = if (type == TxType.INCOME) incomeCategories else expenseCategories
@@ -735,6 +739,20 @@ fun RuleManagerSheet(
                 }
             },
             dismissButton = { TextButton(onClick = { ruleToDelete = null }) { Text(t("no")) } }
+        )
+    }
+
+    if (showConfirmDeleteUnused) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDeleteUnused = false },
+            title = { Text(t("rule_delete_unused")) },
+            text = { Text("Будет удалено $unusedCount правил, которые ещё ни разу не сработали.") },
+            confirmButton = {
+                TextButton(onClick = { onDeleteUnused(); showConfirmDeleteUnused = false }) {
+                    Text(t("yes"), color = RED)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showConfirmDeleteUnused = false }) { Text(t("no")) } }
         )
     }
 
@@ -760,17 +778,56 @@ fun RuleManagerSheet(
                     Card(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(rule.keyword, fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(rule.keyword, fontWeight = FontWeight.Bold)
+                                    if (rule.appliedCount > 0) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "×${rule.appliedCount}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = GREEN,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    if (rule.rejectedCount > 0) {
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            "✕${rule.rejectedCount}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = RED
+                                        )
+                                    }
+                                }
                                 Text(
                                     "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color.Gray
                                 )
+                                rule.lastAppliedAt?.let { ts ->
+                                    Text(
+                                        formatLastApplied(ts),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray.copy(alpha = 0.8f)
+                                    )
+                                }
                             }
                             IconButton(onClick = { ruleToDelete = rule }) {
                                 Icon(Icons.Default.Delete, null, tint = RED)
                             }
                         }
+                    }
+                }
+
+                if (unusedCount > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { showConfirmDeleteUnused = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)
+                    ) {
+                        Icon(Icons.Default.CleaningServices, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("${t("rule_delete_unused")} ($unusedCount)")
                     }
                 }
             }
@@ -822,5 +879,16 @@ fun RuleManagerSheet(
 
             Spacer(Modifier.height(32.dp))
         }
+    }
+}
+
+private fun formatLastApplied(ts: Long): String {
+    val diffMin = (System.currentTimeMillis() - ts) / 60_000L
+    return when {
+        diffMin < 1 -> "сработало только что"
+        diffMin < 60 -> "сработало ${diffMin} мин назад"
+        diffMin < 60 * 24 -> "сработало ${diffMin / 60} ч назад"
+        diffMin < 60 * 24 * 30 -> "сработало ${diffMin / (60 * 24)} дн назад"
+        else -> "сработало ${diffMin / (60 * 24 * 30)} мес назад"
     }
 }
