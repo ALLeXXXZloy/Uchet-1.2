@@ -65,7 +65,6 @@ fun App(
     val categories by vm.categories.collectAsState()
     val forecasts by vm.forecasts.collectAsState()
     val debts by vm.debts.collectAsState()
-    // ★ НОВОЕ: правила самообучения
     val customRules by vm.customRules.collectAsState()
 
     val cardBalancesInUzs = remember(cards, allTxs, rates) {
@@ -98,7 +97,6 @@ fun App(
     var showGoalManager by remember { mutableStateOf(false) }
     var showDebtManager by remember { mutableStateOf(false) }
     var showBalanceDetails by remember { mutableStateOf(false) }
-    // ★ НОВОЕ: менеджер правил
     var showRuleManager by remember { mutableStateOf(false) }
 
     var editing by remember { mutableStateOf<Tx?>(null) }
@@ -106,6 +104,11 @@ fun App(
     var selectedQuickTemplate by remember { mutableStateOf<QuickTemplate?>(null) }
     var isVoiceTxAdding by remember { mutableStateOf(false) }
     var isPendingSms by remember { mutableStateOf(false) }
+
+    // ★ #5: состояния для explainability
+    var pendingRuleAppliedId by remember { mutableStateOf<Long?>(null) }
+    var pendingRuleAppliedKeyword by remember { mutableStateOf<String?>(null) }
+
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showPasswordDialogBackup by remember { mutableStateOf(false) }
     var showPasswordDialogRestore by remember { mutableStateOf(false) }
@@ -155,8 +158,20 @@ fun App(
         if (editing != null || adding) return
         val pendingObj = PendingQueue.peek(context) ?: return
         try {
-            val pendingTx = Tx(id = 0, amountMinor = pendingObj.getLong("amountMinor"), type = TxType.valueOf(pendingObj.getString("type")), cardId = if (pendingObj.isNull("card")) null else pendingObj.getString("card"), description = pendingObj.optString("description"), category = pendingObj.optString("category"), timestamp = pendingObj.optLong("timestamp"), source = "SMS")
-            editing = pendingTx; isPendingSms = true
+            val pendingTx = Tx(
+                id = 0, amountMinor = pendingObj.getLong("amountMinor"),
+                type = TxType.valueOf(pendingObj.getString("type")),
+                cardId = if (pendingObj.isNull("card")) null else pendingObj.getString("card"),
+                description = pendingObj.optString("description"),
+                category = pendingObj.optString("category"),
+                timestamp = pendingObj.optLong("timestamp"),
+                source = "SMS"
+            )
+            // ★ #5: читаем поля explainability
+            pendingRuleAppliedId = if (pendingObj.isNull("ruleAppliedId")) null else pendingObj.optLong("ruleAppliedId")
+            pendingRuleAppliedKeyword = if (pendingObj.isNull("ruleAppliedKeyword")) null else pendingObj.optString("ruleAppliedKeyword").takeIf { it.isNotBlank() }
+            editing = pendingTx
+            isPendingSms = true
         } catch (e: Exception) { PendingQueue.pop(context) }
     }
 
@@ -198,7 +213,6 @@ fun App(
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
                 val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
-                // ★ ИСПРАВЛЕНО: передаём customRules
                 val parsedTxs = withContext(Dispatchers.IO) { SmsParser.parseImportedFile(text, allTxs, customRules) }
                 if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true } else snackbarHostState.showSnackbar(t("no_tx_found"))
             } catch (e: Exception) { snackbarHostState.showSnackbar(t("file_read_error")) }
@@ -261,7 +275,6 @@ fun App(
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                // ★ ИСПРАВЛЕНО: передаём customRules в SmsParser.scanInbox + выносим в IO
                                 DropdownMenuItem(
                                     text = { Text(t("scan_sms")) },
                                     leadingIcon = { Icon(Icons.Default.Message, null) },
@@ -277,7 +290,6 @@ fun App(
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
-                                // ★ НОВОЕ: пункт меню управления правилами
                                 DropdownMenuItem(
                                     text = { Text(t("learned_rules")) },
                                     leadingIcon = { Icon(Icons.Default.School, null) },
@@ -337,7 +349,6 @@ fun App(
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
     if (showDebtManager) DebtManagerSheet(debts, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false })
 
-    // ★ НОВОЕ: менеджер правил
     if (showRuleManager) RuleManagerSheet(
         rules = customRules,
         currentLang = currentLang.value,
@@ -345,19 +356,34 @@ fun App(
         incomeCategories = incomeCategories,
         onSave = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
         onDelete = { rule -> vm.deleteCustomRule(rule) },
+        onDeleteUnused = { vm.deleteUnusedRules() },
         onDismiss = { showRuleManager = false }
     )
 
     if (adding || editing != null) {
-        // ★ ИСПРАВЛЕНО: передаём customRules и onSaveRule
         TxDialog(
-            initial = editing, quickTemplate = selectedQuickTemplate, cards = cards, expenseCategories = expenseCategories, incomeCategories = incomeCategories,
-            currentLang = currentLang.value, isPendingSms = isPendingSms, autoStartVoice = isVoiceTxAdding, rates = rates,
+            initial = editing, quickTemplate = selectedQuickTemplate, cards = cards,
+            expenseCategories = expenseCategories, incomeCategories = incomeCategories,
+            currentLang = currentLang.value, isPendingSms = isPendingSms,
+            autoStartVoice = isVoiceTxAdding, rates = rates,
             customRules = customRules,
+            ruleAppliedId = pendingRuleAppliedId,
+            ruleAppliedKeyword = pendingRuleAppliedKeyword,
             vm = vm,
-            onDismiss = { if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }; adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null },
-            onSave = { vm.save(it); if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }; adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null },
+            onDismiss = {
+                if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
+                adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null
+                pendingRuleAppliedId = null; pendingRuleAppliedKeyword = null
+            },
+            onSave = {
+                vm.save(it)
+                if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
+                adding = false; editing = null; isVoiceTxAdding = false; selectedQuickTemplate = null
+                pendingRuleAppliedId = null; pendingRuleAppliedKeyword = null
+            },
             onSaveRule = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
+            onRuleApplied = { id -> vm.bumpRuleApplied(id) },
+            onRuleRejected = { id -> vm.bumpRuleRejected(id) },
             onDelete = if (isPendingSms) null else editing?.let { e -> { vm.delete(e); editing = null; scope.launch { val timerJob = launch { delay(5000); snackbarHostState.currentSnackbarData?.dismiss() }; val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Indefinite); timerJob.cancel(); if (result == SnackbarResult.ActionPerformed) vm.save(e) } } }
         )
     }
