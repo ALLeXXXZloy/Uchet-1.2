@@ -51,7 +51,6 @@ fun TxDialog(
     autoStartVoice: Boolean = false,
     rates: List<ExchangeRateEntity>,
     customRules: List<CustomKeywordRule>,
-    // ★ #5: explainability
     ruleAppliedId: Long? = null,
     ruleAppliedKeyword: String? = null,
     vm: VM,
@@ -60,6 +59,8 @@ fun TxDialog(
     onSaveRule: (String, String, TxType) -> Unit,
     onRuleApplied: (Long) -> Unit = {},
     onRuleRejected: (Long) -> Unit = {},
+    // ★★ #3: колбэк записи коррекции
+    onRecordCorrection: (merchantHint: String, field: String, parsedValue: String, correctedValue: String) -> Unit = { _, _, _, _ -> },
     onDelete: (() -> Unit)?
 ) {
     val context = LocalContext.current
@@ -90,7 +91,6 @@ fun TxDialog(
     var showRuleInput by remember { mutableStateOf(false) }
     var ruleKeyword by remember { mutableStateOf(initial?.description ?: "") }
 
-    // ★ #5: состояние сработавшего правила
     var appliedRuleId by remember { mutableStateOf(ruleAppliedId) }
     var appliedRuleKeyword by remember { mutableStateOf(ruleAppliedKeyword) }
     var appliedRuleCategory by remember { mutableStateOf(if (ruleAppliedId != null) category else null) }
@@ -127,7 +127,6 @@ fun TxDialog(
                 if (parsed.isCash) selectedCardId = "CASH"
                 else parsed.cardLast4?.let { l4 -> cards.find { it.last4 == l4 }?.let { selectedCardId = it.id } }
                 parsed.categoryName?.let { category = it }
-                // ★ #5: голос мог найти правило
                 if (parsed.ruleAppliedId != null) {
                     appliedRuleId = parsed.ruleAppliedId
                     appliedRuleKeyword = parsed.ruleAppliedKeyword
@@ -301,7 +300,6 @@ fun TxDialog(
                     }
                 }
 
-                // ★ #5: бейдж сработавшего правила
                 if (appliedRuleId != null) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = GREEN.copy(alpha = 0.15f)),
@@ -442,15 +440,31 @@ fun TxDialog(
                             if (showRuleInput && ruleKeyword.isNotBlank()) {
                                 onSaveRule(ruleKeyword, category, type)
                             }
-                            // ★ #5: инкремент счётчика сработавшего правила
                             appliedRuleId?.let { onRuleApplied(it) }
 
                             val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
-                            onSave(Tx(
+                            val finalTx = Tx(
                                 id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, toCardId = toCardId, toAmountMinor = toAmountMinor,
                                 description = desc.trim(), category = category, timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(),
                                 source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath
-                            ))
+                            )
+
+                            // ★★ #3: записываем коррекции (только при редактировании существующей)
+                            if (initial != null) {
+                                val hint = initial.description.ifBlank { desc.trim() }
+                                if (initial.amountMinor != finalTx.amountMinor)
+                                    onRecordCorrection(hint, "amount", initial.amountMinor.toString(), finalTx.amountMinor.toString())
+                                if (initial.type != finalTx.type)
+                                    onRecordCorrection(hint, "type", initial.type.name, finalTx.type.name)
+                                if (initial.cardId != finalTx.cardId)
+                                    onRecordCorrection(hint, "card", initial.cardId ?: "null", finalTx.cardId ?: "null")
+                                if (initial.category != finalTx.category)
+                                    onRecordCorrection(hint, "category", initial.category, finalTx.category)
+                                if (initial.description.trim().isNotBlank() && initial.description.trim() != finalTx.description.trim())
+                                    onRecordCorrection(hint, "merchant", initial.description.trim(), finalTx.description.trim())
+                            }
+
+                            onSave(finalTx)
                         }
                     }
                 }) { Text(if (isPendingSms) t("confirm") else t("save")) }
