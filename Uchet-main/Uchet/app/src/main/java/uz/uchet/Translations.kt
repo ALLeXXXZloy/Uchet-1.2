@@ -124,7 +124,17 @@ object Translations {
             "not_arrived" to "Не поступило",
             "not_spent" to "Не потрачено",
             "pending_forecast" to "регулярных операций ожидают подтверждения",
-            "operations" to "Операции"
+            "operations" to "Операции",
+            // --- Долги ---
+            "debts" to "Долги",
+            "i_owe" to "Я должен",
+            "owed_to_me" to "Мне должны",
+            "mark_paid" to "Оплачено",
+            "person_name" to "Имя человека",
+            "debt_paid" to "Оплаченные долги",
+            "total_i_owe" to "Общий долг",
+            "total_owed_to_me" to "Должны мне",
+            "debt_returned" to "Возврат долга"
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -248,7 +258,17 @@ object Translations {
             "not_arrived" to "Tushmadi",
             "not_spent" to "Sarflanmadi",
             "pending_forecast" to "muntazam operatsiya tasdiqlashni kutmoqda",
-            "operations" to "Operatsiyalar"
+            "operations" to "Operatsiyalar",
+            // --- Qarzlar ---
+            "debts" to "Qarzlar",
+            "i_owe" to "Men qarzdorman",
+            "owed_to_me" to "Menga qarzdorlar",
+            "mark_paid" to "To'landi deb belgilash",
+            "person_name" to "Odamning ismi",
+            "debt_paid" to "To'langan qarzlar",
+            "total_i_owe" to "Umumiy qarz",
+            "total_owed_to_me" to "Menga qarzdor",
+            "debt_returned" to "Qarzni qaytarish"
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -372,7 +392,17 @@ object Translations {
             "not_arrived" to "Not received",
             "not_spent" to "Not spent",
             "pending_forecast" to "recurring operations pending",
-            "operations" to "Operations"
+            "operations" to "Operations",
+            // --- Debts ---
+            "debts" to "Debts",
+            "i_owe" to "I owe",
+            "owed_to_me" to "Owed to me",
+            "mark_paid" to "Mark as paid",
+            "person_name" to "Person name",
+            "debt_paid" to "Paid debts",
+            "total_i_owe" to "Total I owe",
+            "total_owed_to_me" to "Total owed to me",
+            "debt_returned" to "Debt return"
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -496,7 +526,17 @@ object Translations {
             "not_arrived" to "Ворид нашуд",
             "not_spent" to "Сарф нашуд",
             "pending_forecast" to "амалиёти мунтазам интизори тасдиқ",
-            "operations" to "Амалиётҳо"
+            "operations" to "Амалиётҳо",
+            // --- Қарзҳо ---
+            "debts" to "Қарзҳо",
+            "i_owe" to "Ман қарздорам",
+            "owed_to_me" to "Ба ман қарздоранд",
+            "mark_paid" to "Ҳамчун пардохтшуда қайд кунед",
+            "person_name" to "Номи шахс",
+            "debt_paid" to "Қарзҳои пардохтшуда",
+            "total_i_owe" to "Қарзи умумӣ",
+            "total_owed_to_me" to "Ба ман қарздор",
+            "debt_returned" to "Бозгашти қарз"
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -620,7 +660,17 @@ object Translations {
             "not_arrived" to "Túsmedi",
             "not_spent" to "Sarplanbadı",
             "pending_forecast" to "muntazam operatsiya tastıyıqlawdı kútpekte",
-            "operations" to "Operatsiyalar"
+            "operations" to "Operatsiyalar",
+            // --- Qarzlar ---
+            "debts" to "Qarzlar",
+            "i_owe" to "Men qarzdarman",
+            "owed_to_me" to "Maǵan qarzdarlar",
+            "mark_paid" to "Tólendi dep belgilew",
+            "person_name" to "Adamnıń atı",
+            "debt_paid" to "Tólengen qarzlar",
+            "total_i_owe" to "Ulıwma qarz",
+            "total_owed_to_me" to "Maǵan qarzdar",
+            "debt_returned" to "Qarzdı qaytarıw"
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -744,7 +794,17 @@ object Translations {
             "not_arrived" to "Түспеді",
             "not_spent" to "Жұмсалмады",
             "pending_forecast" to "тұрақты операция растауды күтуде",
-            "operations" to "Операциялар"
+            "operations" to "Операциялар",
+            // --- Қарыздар ---
+            "debts" to "Қарыздар",
+            "i_owe" to "Мен қарыздармын",
+            "owed_to_me" to "Маған қарыздар",
+            "mark_paid" to "Төленді деп белгілеу",
+            "person_name" to "Адамның аты",
+            "debt_paid" to "Төленген қарыздар",
+            "total_i_owe" to "Жалпы қарыз",
+            "total_owed_to_me" to "Маған қарыздар",
+            "debt_returned" to "Қарызды қайтару"
         )
     )
 
