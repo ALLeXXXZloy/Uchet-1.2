@@ -1,5 +1,6 @@
 package uz.uchet
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -21,19 +23,21 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OperationsScreen(
     vm: VM,
     paddingValues: PaddingValues,
     currentLang: AppLanguage,
     onEditTx: (Tx) -> Unit,
+    onDeleteTx: (Tx) -> Unit, // НОВЫЙ КОЛЛБЭК ДЛЯ УДАЛЕНИЯ
     onSwitchTab: (Int) -> Unit,
     onShowCardManager: () -> Unit,
     onShowBudgetManager: () -> Unit,
     onShowRecurringManager: () -> Unit,
     onShowCategoryManager: () -> Unit,
     onShowGoalManager: () -> Unit,
-    onShowDebtManager: () -> Unit, // НОВЫЙ КОЛЛБЭК
+    onShowDebtManager: () -> Unit,
     onShowBalanceDetails: () -> Unit,
     onQuickTemplateClick: (QuickTemplate) -> Unit
 ) {
@@ -44,7 +48,7 @@ fun OperationsScreen(
     val rates by vm.rates.collectAsState()
     val allTxs by vm.allTxs.collectAsState()
     val pendingRecurring by vm.pendingRecurring.collectAsState()
-    val debts by vm.debts.collectAsState() // Получаем долги для бейджа
+    val debts by vm.debts.collectAsState()
 
     val t = { key: String -> Translations.t(key, currentLang) }
 
@@ -163,7 +167,6 @@ fun OperationsScreen(
             }
         }
 
-        // БЛОК БЫСТРЫХ КНОПОК
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowGoalManager() }.padding(4.dp)) { Icon(Icons.Default.Savings, t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
@@ -171,12 +174,8 @@ fun OperationsScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowRecurringManager() }.padding(4.dp)) { Icon(Icons.Default.Autorenew, t("recurring"), tint = MaterialTheme.colorScheme.primary); Text(t("recurring"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowBudgetManager() }.padding(4.dp)) { Icon(Icons.Default.AccountBalanceWallet, t("budgets"), tint = MaterialTheme.colorScheme.primary); Text(t("budgets"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowCardManager() }.padding(4.dp)) { Icon(Icons.Default.CreditCard, t("my_accounts"), tint = MaterialTheme.colorScheme.primary); Text(t("my_accounts"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                // Кнопка долгов
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowDebtManager() }.padding(4.dp)) {
-                    BadgedBox(badge = {
-                        val activeDebts = debts.count { !it.isPaid }
-                        if (activeDebts > 0) Badge { Text("$activeDebts") }
-                    }) { Icon(Icons.Default.Handshake, t("debts"), tint = MaterialTheme.colorScheme.primary) }
+                    BadgedBox(badge = { val activeDebts = debts.count { !it.isPaid }; if (activeDebts > 0) Badge { Text("$activeDebts") } }) { Icon(Icons.Default.Handshake, t("debts"), tint = MaterialTheme.colorScheme.primary) }
                     Text(t("debts"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
                 }
             }
@@ -256,9 +255,59 @@ fun OperationsScreen(
             }
         }
 
+        // --- ОБНОВЛЕННЫЙ СПИСОК С ПОДДЕРЖКОЙ СВАЙПОВ ---
         byDay.forEach { (day, list) ->
             item { Text(day.format(DATE_FMT), Modifier.padding(top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = Color.Gray) }
-            items(list, key = { it.id }) { tx -> TxRow(tx, currentLang) { onEditTx(tx) } }
+            items(list, key = { it.id }) { tx ->
+                val dismissState = rememberSwipeToDismissBoxState(
+                    confirmValueChange = {
+                        when (it) {
+                            SwipeToDismissBoxValue.EndToStart -> { onDeleteTx(tx); true }
+                            SwipeToDismissBoxValue.StartToEnd -> { onEditTx(tx); false } // false, чтобы не удалять элемент визуально
+                            else -> false
+                        }
+                    }
+                )
+
+                SwipeToDismissBox(
+                    state = dismissState,
+                    backgroundContent = {
+                        val color = when (dismissState.dismissDirection) {
+                            SwipeToDismissBoxValue.StartToEnd -> BLUE.copy(alpha = 0.5f)
+                            SwipeToDismissBoxValue.EndToStart -> RED.copy(alpha = 0.5f)
+                            else -> Color.Transparent
+                        }
+                        val alignment = when (dismissState.dismissDirection) {
+                            SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                            SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                            else -> Alignment.Center
+                        }
+                        val icon = when (dismissState.dismissDirection) {
+                            SwipeToDismissBoxValue.StartToEnd -> Icons.Default.Edit
+                            SwipeToDismissBoxValue.EndToStart -> Icons.Default.Delete
+                            else -> Icons.Default.Clear
+                        }
+
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(color)
+                                .padding(horizontal = 20.dp),
+                            contentAlignment = alignment
+                        ) {
+                            Icon(icon, contentDescription = null, tint = Color.White)
+                        }
+                    },
+                    content = {
+                        // Оборачиваем в Box, чтобы добавить фон и скругления
+                        Box(Modifier.background(MaterialTheme.colorScheme.surface)) {
+                            TxRow(tx, currentLang) { onEditTx(tx) }
+                        }
+                    }
+                )
+            }
         }
+        // ------------------------------------------------
     }
 }
