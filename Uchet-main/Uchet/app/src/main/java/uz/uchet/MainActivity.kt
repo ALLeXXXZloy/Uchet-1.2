@@ -22,6 +22,9 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // --- ИНИЦИАЛИЗАЦИЯ УВЕДОМЛЕНИЙ ---
+        NotificationHelper.createNotificationChannel(this)
+        
         // --- ИНИЦИАЛИЗАЦИЯ KOIN ---
         startKoin {
             androidContext(this@MainActivity)
