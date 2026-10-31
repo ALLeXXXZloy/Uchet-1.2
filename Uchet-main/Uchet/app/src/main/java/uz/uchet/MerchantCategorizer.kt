@@ -2,24 +2,25 @@ package uz.uchet
 
 object MerchantCategorizer {
 
+    // ★ #1 + #7: фильтр по типу + самое длинное ключевое слово
     fun getCategory(
         merchantName: String?,
         availableCategories: List<String>,
-        customRules: List<CustomKeywordRule> = emptyList()   // ★ НОВОЕ
+        customRules: List<CustomKeywordRule> = emptyList(),
+        expectedType: TxType = TxType.EXPENSE
     ): String? {
         if (merchantName.isNullOrBlank()) return null
         val name = merchantName.lowercase()
 
-        // ★ 1. Пользовательские (выученные) правила — приоритетнее стандартных
-        for (rule in customRules) {
-            if (name.contains(rule.keyword.lowercase())) {
-                // Возвращаем точное совпадение из списка категорий,
-                // иначе — то, что записано в правиле
-                return availableCategories.find { it == rule.category } ?: rule.category
-            }
+        // 1. Пользовательские правила — приоритетнее стандартных
+        val matched = customRules
+            .filter { it.type == expectedType && name.contains(it.keyword.lowercase()) }
+            .maxByOrNull { it.keyword.length }
+        if (matched != null) {
+            return availableCategories.find { it == matched.category } ?: matched.category
         }
 
-        // 2. Стандартные правила (без изменений)
+        // 2. Стандартные правила
         fun findCat(vararg keywords: String): String? {
             val match = keywords.any { name.contains(it) }
             if (!match) return null
