@@ -16,16 +16,15 @@ import org.koin.core.context.startKoin
 
 class MainActivity : FragmentActivity() {
     private val pendingCheckTrigger = mutableStateOf(0)
+    private val widgetActionTrigger = mutableStateOf(0)
     private val currentTheme = mutableStateOf(AppTheme.SYSTEM)
     private val currentLang = mutableStateOf(AppLanguage.RU)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // --- ИНИЦИАЛИЗАЦИЯ УВЕДОМЛЕНИЙ ---
         NotificationHelper.createNotificationChannel(this)
         
-        // --- ИНИЦИАЛИЗАЦИЯ KOIN ---
         startKoin {
             androidContext(this@MainActivity)
             modules(appModule)
@@ -56,7 +55,13 @@ class MainActivity : FragmentActivity() {
                 Surface {
                     var isAuthenticated by remember { mutableStateOf(false) }
                     if (isAuthenticated) {
-                        App(pendingCheckTrigger = pendingCheckTrigger, currentTheme = currentTheme, currentLang = currentLang)
+                        App(
+                            pendingCheckTrigger = pendingCheckTrigger, 
+                            widgetActionTrigger = widgetActionTrigger, 
+                            intent = intent,
+                            currentTheme = currentTheme, 
+                            currentLang = currentLang
+                        )
                     } else {
                         LockScreen(activity = this@MainActivity, lang = lang, onUnlocked = { isAuthenticated = true })
                     }
@@ -69,5 +74,6 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingCheckTrigger.value++
+        widgetActionTrigger.value++
     }
 }
