@@ -28,12 +28,13 @@ object NotificationHelper {
         }
     }
 
-    fun scheduleDailyReminder(context: Context) {
+    // ОБНОВЛЕНО: добавлены параметры hour и minute
+    fun scheduleDailyReminder(context: Context, hour: Int = 21, minute: Int = 0) {
         val now = LocalDateTime.now()
-        val targetTime = now.withHour(21).withMinute(0).withSecond(0)
+        val targetTime = now.withHour(hour).withMinute(minute).withSecond(0)
         
         val delayMillis = if (now.isAfter(targetTime)) {
-            // Если 21:00 уже прошло, планируем на завтра
+            // Если выбранное время уже прошло сегодня, планируем на завтра
             Duration.between(now, targetTime.plusDays(1)).toMillis()
         } else {
             Duration.between(now, targetTime).toMillis()
