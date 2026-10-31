@@ -23,7 +23,10 @@ data class Tx(
     val amountMinor: Long, val type: TxType,
     val cardId: String? = null, val toCardId: String? = null, val toAmountMinor: Long? = null,
     val description: String = "", val category: String = "", val timestamp: Long,
-    val source: String = "MANUAL", val currency: String = "UZS", val photoPath: String? = null
+    val source: String = "MANUAL", val currency: String = "UZS", val photoPath: String? = null,
+    // ★ D: исходный текст (СМС / OCR-чек / голосовая фраза), из которого распознана операция.
+    // Используется при записи CorrectionEntity, чтобы этап D видел контекст ошибки парсера.
+    val rawText: String? = null
 )
 
 @Entity(tableName = "cards")
@@ -70,7 +73,7 @@ data class CustomKeywordRule(
     val rejectedCount: Int = 0
 )
 
-// ★★ #3: Коррекция — запоминаем любое исправление поля пользователем
+// ★★ #3 + D: Коррекция — запоминаем любое исправление поля пользователем + контекст
 @Entity(
     tableName = "corrections",
     indices = [
@@ -81,14 +84,16 @@ data class CustomKeywordRule(
 )
 data class CorrectionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val source: String,              // "SMS" | "IMPORT" | "MANUAL" | "VOICE" | "NOTIF"
+    val source: String,              // "SMS" | "IMPORT" | "MANUAL" | "VOICE" | "NOTIF" | "OCR"
     val merchantHint: String,        // нормализованный merchant (lowercase, trim, первые 30 символов)
     val field: String,               // "amount" | "type" | "card" | "category" | "merchant"
     val parsedValue: String,         // что было распознано
     val correctedValue: String,      // что поставил пользователь
     val appliedCount: Int = 1,       // сколько раз так исправляли
     val lastSeenAt: Long = System.currentTimeMillis(),
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    // ★ D: исходный текст (СМС / OCR-чек / голос), из которого парсер вытащил parsedValue.
+    val rawText: String = ""
 )
 
 @Entity(tableName = "plan_items")
@@ -178,7 +183,7 @@ interface AppDao {
     @Query("DELETE FROM custom_keyword_rules WHERE appliedCount = 0")
     suspend fun deleteUnusedCustomRules()
 
-    // ★★ #3: Corrections
+    // === Corrections ===
     @Query("SELECT * FROM corrections ORDER BY lastSeenAt DESC")
     fun observeCorrections(): Flow<List<CorrectionEntity>>
 
@@ -239,11 +244,11 @@ interface AppDao {
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
         RecurringConfirmationEntity::class, CategoryEntity::class, SavingsGoalEntity::class,
         ExchangeRateEntity::class, DebtEntity::class, CustomKeywordRule::class,
-        CorrectionEntity::class,   // ★★ #3
+        CorrectionEntity::class,
         PlanItemEntity::class, ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -286,7 +291,6 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN rejectedCount INTEGER NOT NULL DEFAULT 0")
             }
         }
-        // ★★ #3: миграция 12→13
         private val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""
@@ -307,6 +311,13 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_merchant_field` ON `corrections` (`merchantHint`, `field`)")
             }
         }
+        // ★ D: миграция 13→14 — добавляем rawText в txs и corrections
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE txs ADD COLUMN rawText TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE corrections ADD COLUMN rawText TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
@@ -314,7 +325,7 @@ abstract class AppDb : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                         MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
-                        MIGRATION_12_13
+                        MIGRATION_12_13, MIGRATION_13_14
                     )
                     .build()
                 INSTANCE = instance
