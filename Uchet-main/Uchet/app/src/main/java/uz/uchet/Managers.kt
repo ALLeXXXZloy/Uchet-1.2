@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -699,7 +702,7 @@ fun DebtManagerSheet(
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ RuleManagerSheet — управление правилами самообучения (шаг B: счётчики) ★★★
+// ★★★ RuleManagerSheet — управление правилами самообучения ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -890,5 +893,179 @@ private fun formatLastApplied(ts: Long): String {
         diffMin < 60 * 24 -> "сработало ${diffMin / 60} ч назад"
         diffMin < 60 * 24 * 30 -> "сработало ${diffMin / (60 * 24)} дн назад"
         else -> "сработало ${diffMin / (60 * 24 * 30)} мес назад"
+    }
+}
+
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ CorrectionManagerSheet — просмотр выученных коррекций (шаг C) ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CorrectionManagerSheet(
+    corrections: List<CorrectionEntity>,
+    currentLang: AppLanguage,
+    onDelete: (CorrectionEntity) -> Unit,
+    onClearAll: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val t = { key: String -> Translations.t(key, currentLang) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text(t("correction_clear_all")) },
+            text = { Text(t("delete_confirm_text")) },
+            confirmButton = {
+                TextButton(onClick = { onClearAll(); showClearConfirm = false }) { Text(t("yes"), color = RED) }
+            },
+            dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text(t("no")) } }
+        )
+    }
+
+    // Группируем: merchantHint -> field -> список коррекций
+    val grouped = corrections.groupBy { it.merchantHint }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+            Text(t("learned_corrections"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                t("correction_hint"),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+            Spacer(Modifier.height(16.dp))
+
+            if (corrections.isEmpty()) {
+                Text(
+                    t("correction_empty"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray
+                )
+            } else {
+                Text(
+                    "${t("correction_total")}: ${corrections.size}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(8.dp))
+
+                grouped.forEach { (hint, list) ->
+                    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Store, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (hint.isBlank()) "—" else hint,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            list.sortedByDescending { it.lastSeenAt }.forEach { c ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                fieldLabel(c.field, currentLang),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = Color.Gray
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            if (c.appliedCount >= 3) {
+                                                Text(
+                                                    "● ${t("correction_ready")}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = GREEN,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            } else {
+                                                Text(
+                                                    "×${c.appliedCount}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            "${formatParsedValue(c.field, c.parsedValue)} → ${formatParsedValue(c.field, c.correctedValue)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            relativeTime(c.lastSeenAt),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Gray.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onDelete(c) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, null, tint = RED.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { showClearConfirm = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)
+                ) {
+                    Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(t("correction_clear_all"))
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+private fun fieldLabel(field: String, lang: AppLanguage): String = when (field) {
+    "amount" -> Translations.t("field_amount", lang)
+    "type" -> Translations.t("field_type", lang)
+    "card" -> Translations.t("field_card", lang)
+    "category" -> Translations.t("field_category", lang)
+    "merchant" -> Translations.t("field_merchant", lang)
+    else -> field
+}
+
+private fun formatParsedValue(field: String, value: String): String {
+    return when (field) {
+        "amount" -> {
+            val l = value.toLongOrNull()
+            if (l != null) l.money() else value
+        }
+        "type" -> when (value) {
+            "INCOME" -> "Доход"
+            "EXPENSE" -> "Расход"
+            "TRANSFER" -> "Перевод"
+            "ADJUSTMENT" -> "Корректировка"
+            else -> value
+        }
+        "card" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}"
+        else -> value
+    }
+}
+
+private fun relativeTime(ts: Long): String {
+    val diffMin = (System.currentTimeMillis() - ts) / 60_000L
+    return when {
+        diffMin < 1 -> "только что"
+        diffMin < 60 -> "$diffMin мин назад"
+        diffMin < 60 * 24 -> "${diffMin / 60} ч назад"
+        diffMin < 60 * 24 * 30 -> "${diffMin / (60 * 24)} дн назад"
+        else -> "${diffMin / (60 * 24 * 30)} мес назад"
     }
 }
