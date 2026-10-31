@@ -125,6 +125,7 @@ object Translations {
             "not_spent" to "Не потрачено",
             "pending_forecast" to "регулярных операций ожидают подтверждения",
             "operations" to "Операции",
+            "learned_rules" to "Правила самообучения",
             // --- Долги ---
             "debts" to "Долги",
             "i_owe" to "Я должен",
@@ -259,6 +260,7 @@ object Translations {
             "not_spent" to "Sarflanmadi",
             "pending_forecast" to "muntazam operatsiya tasdiqlashni kutmoqda",
             "operations" to "Operatsiyalar",
+            "learned_rules" to "O'rganilgan qoidalar",
             // --- Qarzlar ---
             "debts" to "Qarzlar",
             "i_owe" to "Men qarzdorman",
@@ -393,6 +395,7 @@ object Translations {
             "not_spent" to "Not spent",
             "pending_forecast" to "recurring operations pending",
             "operations" to "Operations",
+            "learned_rules" to "Learned rules",
             // --- Debts ---
             "debts" to "Debts",
             "i_owe" to "I owe",
@@ -527,6 +530,7 @@ object Translations {
             "not_spent" to "Сарф нашуд",
             "pending_forecast" to "амалиёти мунтазам интизори тасдиқ",
             "operations" to "Амалиётҳо",
+            "learned_rules" to "Қоидаҳои омӯхташуда",
             // --- Қарзҳо ---
             "debts" to "Қарзҳо",
             "i_owe" to "Ман қарздорам",
@@ -661,6 +665,7 @@ object Translations {
             "not_spent" to "Sarplanbadı",
             "pending_forecast" to "muntazam operatsiya tastıyıqlawdı kútpekte",
             "operations" to "Operatsiyalar",
+            "learned_rules" to "Úyrenilgen qaǵıydalar",
             // --- Qarzlar ---
             "debts" to "Qarzlar",
             "i_owe" to "Men qarzdarman",
@@ -795,6 +800,7 @@ object Translations {
             "not_spent" to "Жұмсалмады",
             "pending_forecast" to "тұрақты операция растауды күтуде",
             "operations" to "Операциялар",
+            "learned_rules" to "Үйренген ережелер",
             // --- Қарыздар ---
             "debts" to "Қарыздар",
             "i_owe" to "Мен қарыздармын",
