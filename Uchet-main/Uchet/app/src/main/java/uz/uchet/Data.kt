@@ -58,7 +58,7 @@ data class DebtEntity(
     val dateMillis: Long, val isPaid: Boolean = false, val description: String = "", val currency: String = "UZS"
 )
 
-// ★ #2: добавлены appliedCount, lastAppliedAt, rejectedCount
+// ★ #2: поля счётчиков
 @Entity(tableName = "custom_keyword_rules")
 data class CustomKeywordRule(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -68,6 +68,27 @@ data class CustomKeywordRule(
     val appliedCount: Int = 0,
     val lastAppliedAt: Long? = null,
     val rejectedCount: Int = 0
+)
+
+// ★★ #3: Коррекция — запоминаем любое исправление поля пользователем
+@Entity(
+    tableName = "corrections",
+    indices = [
+        Index(value = ["merchantHint"], name = "index_corrections_merchantHint"),
+        Index(value = ["field"], name = "index_corrections_field"),
+        Index(value = ["merchantHint", "field"], name = "index_corrections_merchant_field")
+    ]
+)
+data class CorrectionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val source: String,              // "SMS" | "IMPORT" | "MANUAL" | "VOICE" | "NOTIF"
+    val merchantHint: String,        // нормализованный merchant (lowercase, trim, первые 30 символов)
+    val field: String,               // "amount" | "type" | "card" | "category" | "merchant"
+    val parsedValue: String,         // что было распознано
+    val correctedValue: String,      // что поставил пользователь
+    val appliedCount: Int = 1,       // сколько раз так исправляли
+    val lastSeenAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "plan_items")
@@ -148,7 +169,6 @@ interface AppDao {
     @Delete suspend fun deleteCustomRule(rule: CustomKeywordRule)
     @Query("DELETE FROM custom_keyword_rules") suspend fun clearCustomRules()
 
-    // ★ #2: инкремент счётчиков
     @Query("UPDATE custom_keyword_rules SET appliedCount = appliedCount + 1, lastAppliedAt = :ts WHERE id = :id")
     suspend fun bumpCustomRuleApplied(id: Long, ts: Long)
 
@@ -157,6 +177,31 @@ interface AppDao {
 
     @Query("DELETE FROM custom_keyword_rules WHERE appliedCount = 0")
     suspend fun deleteUnusedCustomRules()
+
+    // ★★ #3: Corrections
+    @Query("SELECT * FROM corrections ORDER BY lastSeenAt DESC")
+    fun observeCorrections(): Flow<List<CorrectionEntity>>
+
+    @Query("SELECT * FROM corrections ORDER BY lastSeenAt DESC")
+    suspend fun getAllCorrections(): List<CorrectionEntity>
+
+    @Query("SELECT * FROM corrections WHERE merchantHint = :hint AND field = :field AND parsedValue = :parsed LIMIT 1")
+    suspend fun findCorrection(hint: String, field: String, parsed: String): CorrectionEntity?
+
+    @Query("UPDATE corrections SET appliedCount = appliedCount + 1, lastSeenAt = :ts WHERE id = :id")
+    suspend fun bumpCorrection(id: Long, ts: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCorrection(c: CorrectionEntity): Long
+
+    @Delete
+    suspend fun deleteCorrection(c: CorrectionEntity)
+
+    @Query("DELETE FROM corrections")
+    suspend fun clearCorrections()
+
+    @Query("SELECT * FROM corrections WHERE appliedCount >= 3 AND merchantHint = :hint AND field = :field")
+    suspend fun getStrongCorrections(hint: String, field: String): List<CorrectionEntity>
 
     // === Plan / Forecast ===
     @Query("SELECT * FROM plan_items") fun observePlanItems(): Flow<List<PlanItemEntity>>
@@ -194,10 +239,11 @@ interface AppDao {
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
         RecurringConfirmationEntity::class, CategoryEntity::class, SavingsGoalEntity::class,
         ExchangeRateEntity::class, DebtEntity::class, CustomKeywordRule::class,
+        CorrectionEntity::class,   // ★★ #3
         PlanItemEntity::class, ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -233,7 +279,6 @@ abstract class AppDb : RoomDatabase() {
         private val MIGRATION_8_9 = object : Migration(8, 9) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `recurring_confirmations` (`recurringId` INTEGER NOT NULL, `month` TEXT NOT NULL, `status` TEXT NOT NULL, `actualAmountMinor` INTEGER DEFAULT NULL, `lastPostponedDate` TEXT DEFAULT NULL, PRIMARY KEY(`recurringId`, `month`))") } }
         private val MIGRATION_9_10 = object : Migration(9, 10) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `debts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personName` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `type` TEXT NOT NULL, `dateMillis` INTEGER NOT NULL, `isPaid` INTEGER NOT NULL, `description` TEXT NOT NULL, `currency` TEXT NOT NULL)") } }
         private val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `custom_keyword_rules` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `keyword` TEXT NOT NULL, `category` TEXT NOT NULL, `type` TEXT NOT NULL)") } }
-        // ★ #2: миграция 11→12
         private val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN appliedCount INTEGER NOT NULL DEFAULT 0")
@@ -241,11 +286,36 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN rejectedCount INTEGER NOT NULL DEFAULT 0")
             }
         }
+        // ★★ #3: миграция 12→13
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `corrections` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `source` TEXT NOT NULL,
+                        `merchantHint` TEXT NOT NULL,
+                        `field` TEXT NOT NULL,
+                        `parsedValue` TEXT NOT NULL,
+                        `correctedValue` TEXT NOT NULL,
+                        `appliedCount` INTEGER NOT NULL DEFAULT 1,
+                        `lastSeenAt` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_merchantHint` ON `corrections` (`merchantHint`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_field` ON `corrections` (`field`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_merchant_field` ON `corrections` (`merchantHint`, `field`)")
+            }
+        }
 
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(context.applicationContext, AppDb::class.java, "uchet_database")
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(
+                        MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                        MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
+                        MIGRATION_12_13
+                    )
                     .build()
                 INSTANCE = instance
                 instance
