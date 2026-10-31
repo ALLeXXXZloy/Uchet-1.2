@@ -579,4 +579,122 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             Spacer(Modifier.height(32.dp))
         }
     }
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DebtManagerSheet(
+    debts: List<DebtEntity>,
+    currentLang: AppLanguage,
+    onSave: (DebtEntity) -> Unit,
+    onMarkPaid: (DebtEntity) -> Unit,
+    onDelete: (DebtEntity) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var isOwedToMe by remember { mutableStateOf(true) } // true - Мне должны, false - Я должен
+    var personName by remember { mutableStateOf("") }
+    var amountInput by remember { mutableStateOf("") }
+    var desc by remember { mutableStateOf("") }
+    var debtToDelete by remember { mutableStateOf<DebtEntity?>(null) }
+    val t = { key: String -> Translations.t(key, currentLang) }
+
+    if (debtToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { debtToDelete = null },
+            title = { Text(t("delete_confirm_title")) },
+            text = { Text(t("delete_confirm_text")) },
+            confirmButton = { TextButton(onClick = { onDelete(debtToDelete!!); debtToDelete = null }) { Text(t("yes"), color = RED) } },
+            dismissButton = { TextButton(onClick = { debtToDelete = null }) { Text(t("no")) } }
+        )
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+            Text(t("debts"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(16.dp))
+
+            // Сводка по долгам
+            val totalOwedToMe = debts.filter { !it.isPaid && it.type == DebtType.LENT }.sumOf { it.amountMinor }
+            val totalIOwe = debts.filter { !it.isPaid && it.type == DebtType.BORROWED }.sumOf { it.amountMinor }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text(t("owed_to_me"), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text("+${totalOwedToMe.money()} UZS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = GREEN)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(t("i_owe"), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text("-${totalIOwe.money()} UZS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = RED)
+                }
+            }
+            
+            Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+
+            Text("Добавить долг:", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                SegmentedButton(isOwedToMe, { isOwedToMe = true }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("owed_to_me")) }
+                SegmentedButton(!isOwedToMe, { isOwedToMe = false }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("i_owe")) }
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = personName, onValueChange = { personName = it }, label = { Text(t("person_name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = amountInput, onValueChange = { amountInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = {
+                val amountMinor = runCatching { BigDecimal(amountInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
+                if (personName.isNotBlank() && amountMinor != null && amountMinor > 0) {
+                    onSave(DebtEntity(
+                        personName = personName.trim(),
+                        amountMinor = amountMinor,
+                        type = if (isOwedToMe) DebtType.LENT else DebtType.BORROWED,
+                        dateMillis = System.currentTimeMillis(),
+                        description = desc.trim()
+                    ))
+                    personName = ""; amountInput = ""; desc = ""
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Добавить") }
+
+            Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+            Text("Активные долги:", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(8.dp))
+
+            val activeDebts = debts.filter { !it.isPaid }
+            if (activeDebts.isEmpty()) Text(t("no_found"), color = Color.Gray)
+            activeDebts.forEach { d ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (d.type == DebtType.LENT) Icons.Default.CallReceived else Icons.Default.CallMade,
+                            contentDescription = null,
+                            tint = if (d.type == DebtType.LENT) GREEN else RED
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(d.personName, fontWeight = FontWeight.Bold)
+                            if (d.description.isNotBlank()) Text(d.description, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("${if (d.type == DebtType.LENT) "+" else "-"}${d.amountMinor.money()}", color = if (d.type == DebtType.LENT) GREEN else RED, fontWeight = FontWeight.Bold)
+                            TextButton(onClick = { onMarkPaid(d) }) { Text(t("mark_paid")) }
+                        }
+                        IconButton(onClick = { debtToDelete = d }) { Icon(Icons.Default.Delete, null, tint = RED) }
+                    }
+                }
+            }
+
+            if (debts.any { it.isPaid }) {
+                Spacer(Modifier.height(16.dp))
+                Text(t("debt_paid"), style = MaterialTheme.typography.titleSmall, color = Color.Gray)
+                debts.filter { it.isPaid }.forEach { d ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(d.personName, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Text("${d.amountMinor.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        IconButton(onClick = { debtToDelete = d }) { Icon(Icons.Default.Delete, null, tint = Color.Gray) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(32.dp))
+        }
+    }
 }
