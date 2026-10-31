@@ -33,6 +33,7 @@ fun OperationsScreen(
     onShowRecurringManager: () -> Unit,
     onShowCategoryManager: () -> Unit,
     onShowGoalManager: () -> Unit,
+    onShowDebtManager: () -> Unit, // НОВЫЙ КОЛЛБЭК
     onShowBalanceDetails: () -> Unit,
     onQuickTemplateClick: (QuickTemplate) -> Unit
 ) {
@@ -43,6 +44,7 @@ fun OperationsScreen(
     val rates by vm.rates.collectAsState()
     val allTxs by vm.allTxs.collectAsState()
     val pendingRecurring by vm.pendingRecurring.collectAsState()
+    val debts by vm.debts.collectAsState() // Получаем долги для бейджа
 
     val t = { key: String -> Translations.t(key, currentLang) }
 
@@ -52,12 +54,10 @@ fun OperationsScreen(
     val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
     val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
 
-    // --- УМНЫЙ РАСЧЕТ ШАБЛОНОВ ---
     val quickTemplates = remember(txs) {
         val grouped = txs.filter { it.type == TxType.EXPENSE }
             .groupBy { it.category }
             .mapValues { (_, list) -> list.size to list.sumOf { it.amountMinor } / list.size }
-        
         grouped.entries
             .sortedByDescending { it.value.first }
             .take(5)
@@ -142,59 +142,43 @@ fun OperationsScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        // --- БЛОК БЫСТРЫХ ШАБЛОНОВ ---
         if (quickTemplates.isNotEmpty()) {
             item {
-                Text(
-                    "Быстрый ввод", 
-                    style = MaterialTheme.typography.titleSmall, 
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-                ) {
+                Text("Быстрый ввод", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                     items(quickTemplates) { template ->
                         Card(
-                            modifier = Modifier
-                                .width(100.dp)
-                                .clickable { onQuickTemplateClick(template) },
+                            modifier = Modifier.width(100.dp).clickable { onQuickTemplateClick(template) },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    text = Translations.translateCategory(template.category, currentLang).take(10),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1,
-                                    textAlign = TextAlign.Center
-                                )
+                            Column(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(Translations.translateCategory(template.category, currentLang).take(10), style = MaterialTheme.typography.labelMedium, maxLines = 1, textAlign = TextAlign.Center)
                                 Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = template.averageAmountMinor.money(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = RED
-                                )
+                                Text(template.averageAmountMinor.money(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = RED)
                             }
                         }
                     }
                 }
             }
         }
-        // -----------------------------
 
+        // БЛОК БЫСТРЫХ КНОПОК
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowGoalManager() }.padding(8.dp)) { Icon(Icons.Default.Savings, t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowCategoryManager() }.padding(8.dp)) { Icon(Icons.Default.Category, t("categories"), tint = MaterialTheme.colorScheme.primary); Text(t("categories"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowRecurringManager() }.padding(8.dp)) { Icon(Icons.Default.Autorenew, t("recurring"), tint = MaterialTheme.colorScheme.primary); Text(t("recurring"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowBudgetManager() }.padding(8.dp)) { Icon(Icons.Default.AccountBalanceWallet, t("budgets"), tint = MaterialTheme.colorScheme.primary); Text(t("budgets"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowCardManager() }.padding(8.dp)) { Icon(Icons.Default.CreditCard, t("my_accounts"), tint = MaterialTheme.colorScheme.primary); Text(t("my_accounts"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowGoalManager() }.padding(4.dp)) { Icon(Icons.Default.Savings, t("goals"), tint = MaterialTheme.colorScheme.primary); Text(t("goals"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowCategoryManager() }.padding(4.dp)) { Icon(Icons.Default.Category, t("categories"), tint = MaterialTheme.colorScheme.primary); Text(t("categories"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowRecurringManager() }.padding(4.dp)) { Icon(Icons.Default.Autorenew, t("recurring"), tint = MaterialTheme.colorScheme.primary); Text(t("recurring"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowBudgetManager() }.padding(4.dp)) { Icon(Icons.Default.AccountBalanceWallet, t("budgets"), tint = MaterialTheme.colorScheme.primary); Text(t("budgets"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowCardManager() }.padding(4.dp)) { Icon(Icons.Default.CreditCard, t("my_accounts"), tint = MaterialTheme.colorScheme.primary); Text(t("my_accounts"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1) }
+                // Кнопка долгов
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onShowDebtManager() }.padding(4.dp)) {
+                    BadgedBox(badge = {
+                        val activeDebts = debts.count { !it.isPaid }
+                        if (activeDebts > 0) Badge { Text("$activeDebts") }
+                    }) { Icon(Icons.Default.Handshake, t("debts"), tint = MaterialTheme.colorScheme.primary) }
+                    Text(t("debts"), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
+                }
             }
             Spacer(Modifier.height(16.dp))
         }
