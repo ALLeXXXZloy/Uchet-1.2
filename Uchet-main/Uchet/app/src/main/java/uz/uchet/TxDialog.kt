@@ -53,14 +53,16 @@ fun TxDialog(
     customRules: List<CustomKeywordRule>,
     ruleAppliedId: Long? = null,
     ruleAppliedKeyword: String? = null,
+    // ★ D: исходный текст СМС / уведомления из PendingQueue (null — если не из очереди)
+    rawSourceText: String? = null,
     vm: VM,
     onDismiss: () -> Unit,
     onSave: (Tx) -> Unit,
     onSaveRule: (String, String, TxType) -> Unit,
     onRuleApplied: (Long) -> Unit = {},
     onRuleRejected: (Long) -> Unit = {},
-    // ★★ #3: колбэк записи коррекции
-    onRecordCorrection: (merchantHint: String, field: String, parsedValue: String, correctedValue: String) -> Unit = { _, _, _, _ -> },
+    // ★ D: колбэк записи коррекции — теперь с rawText
+    onRecordCorrection: (merchantHint: String, field: String, parsedValue: String, correctedValue: String, rawText: String) -> Unit = { _, _, _, _, _ -> },
     onDelete: (() -> Unit)?
 ) {
     val context = LocalContext.current
@@ -95,6 +97,10 @@ fun TxDialog(
     var appliedRuleKeyword by remember { mutableStateOf(ruleAppliedKeyword) }
     var appliedRuleCategory by remember { mutableStateOf(if (ruleAppliedId != null) category else null) }
 
+    // ★ D: локальные raw-тексты из OCR / голоса для CorrectionEntity
+    var ocrRawText by remember { mutableStateOf<String?>(null) }
+    var voiceRawText by remember { mutableStateOf<String?>(null) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val t = { key: String -> Translations.t(key, currentLang) }
@@ -121,6 +127,8 @@ fun TxDialog(
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
             if (!spoken.isNullOrBlank()) {
+                // ★ D: сохраняем исходную фразу для CorrectionEntity
+                voiceRawText = spoken
                 val parsed = VoiceParser.parseTransaction(spoken, expenseCategories, incomeCategories, customRules)
                 parsed.type?.let { type = it }
                 parsed.amountMinor?.let { amount = BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() }
@@ -167,6 +175,8 @@ fun TxDialog(
         scanner.process(image).addOnSuccessListener { barcodes ->
             if (barcodes.isNotEmpty()) {
                 val rawValue = barcodes[0].rawValue ?: ""
+                // ★ D: QR-текст тоже сохраняем как rawText
+                ocrRawText = rawValue
                 val qrData = QrReceiptParser.parse(rawValue)
                 if (qrData != null && qrData.amountMinor != null) {
                     amount = BigDecimal(qrData.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
@@ -196,6 +206,8 @@ fun TxDialog(
             var qrAmount: Long? = null
             if (barcodes.isNotEmpty()) {
                 val rawValue = barcodes[0].rawValue ?: ""
+                // ★ D: если в QR есть данные — сохраняем их, приоритет QR (более точный)
+                ocrRawText = rawValue
                 val qrData = QrReceiptParser.parse(rawValue)
                 if (qrData != null && qrData.amountMinor != null) {
                     qrAmount = qrData.amountMinor
@@ -220,6 +232,8 @@ fun TxDialog(
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
             recognizer.process(image).addOnSuccessListener { visionText ->
                 val rawText = visionText.text
+                // ★ D: сохраняем полный OCR-текст — это контекст для CorrectionEntity
+                ocrRawText = rawText
                 var ocrAmount: Long? = null
                 val receipt = ReceiptParser.parse(rawText)
                 if (receipt.amountMinor != null) {
@@ -443,25 +457,40 @@ fun TxDialog(
                             appliedRuleId?.let { onRuleApplied(it) }
 
                             val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
+
+                            // ★ D: rawText нового Tx — из СМС, OCR или голоса (в порядке приоритета).
+                            // Для существующей транзакции — сохраняем её исходный rawText.
+                            val finalRawText = initial?.rawText
+                                ?: rawSourceText
+                                ?: ocrRawText
+                                ?: voiceRawText
+
                             val finalTx = Tx(
                                 id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, toCardId = toCardId, toAmountMinor = toAmountMinor,
                                 description = desc.trim(), category = category, timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(),
-                                source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath
+                                source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath,
+                                rawText = finalRawText
                             )
 
-                            // ★★ #3: записываем коррекции (только при редактировании существующей)
+                            // ★ D: записываем коррекции (только при редактировании существующей).
+                            // rawText для CorrectionEntity — исходный текст именно этой операции.
                             if (initial != null) {
                                 val hint = initial.description.ifBlank { desc.trim() }
+                                val ctxRaw = initial.rawText
+                                    ?: rawSourceText
+                                    ?: ocrRawText
+                                    ?: voiceRawText
+                                    ?: ""
                                 if (initial.amountMinor != finalTx.amountMinor)
-                                    onRecordCorrection(hint, "amount", initial.amountMinor.toString(), finalTx.amountMinor.toString())
+                                    onRecordCorrection(hint, "amount", initial.amountMinor.toString(), finalTx.amountMinor.toString(), ctxRaw)
                                 if (initial.type != finalTx.type)
-                                    onRecordCorrection(hint, "type", initial.type.name, finalTx.type.name)
+                                    onRecordCorrection(hint, "type", initial.type.name, finalTx.type.name, ctxRaw)
                                 if (initial.cardId != finalTx.cardId)
-                                    onRecordCorrection(hint, "card", initial.cardId ?: "null", finalTx.cardId ?: "null")
+                                    onRecordCorrection(hint, "card", initial.cardId ?: "null", finalTx.cardId ?: "null", ctxRaw)
                                 if (initial.category != finalTx.category)
-                                    onRecordCorrection(hint, "category", initial.category, finalTx.category)
+                                    onRecordCorrection(hint, "category", initial.category, finalTx.category, ctxRaw)
                                 if (initial.description.trim().isNotBlank() && initial.description.trim() != finalTx.description.trim())
-                                    onRecordCorrection(hint, "merchant", initial.description.trim(), finalTx.description.trim())
+                                    onRecordCorrection(hint, "merchant", initial.description.trim(), finalTx.description.trim(), ctxRaw)
                             }
 
                             onSave(finalTx)
