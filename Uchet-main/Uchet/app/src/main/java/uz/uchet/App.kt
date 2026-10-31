@@ -119,7 +119,6 @@ fun App(
     val scope = rememberCoroutineScope()
     val t = { key: String -> Translations.t(key, currentLang.value) }
 
-    // --- ОБРАБОТКА КЛИКА ИЗ ВИДЖЕТА ---
     val widgetTrigger = widgetActionTrigger?.value ?: 0
     LaunchedEffect(widgetTrigger) {
         val actionCategory = intent?.getStringExtra("QUICK_ACTION_CATEGORY")
@@ -131,7 +130,6 @@ fun App(
             intent.removeExtra("QUICK_ACTION_CATEGORY")
         }
     }
-    // ----------------------------------
 
     LaunchedEffect(cards) {
         if (cards.none { it.id == "CASH" }) {
@@ -284,7 +282,19 @@ fun App(
         when (currentTab) {
             0 -> OperationsScreen(
                 vm = vm, paddingValues = pad, currentLang = currentLang.value,
-                onEditTx = { editing = it }, onSwitchTab = { currentTab = it },
+                onEditTx = { editing = it }, 
+                onDeleteTx = { tx -> 
+                    vm.delete(tx)
+                    scope.launch {
+                        val result = snackbarHostState.showSnackbar(
+                            message = t("deleted"), 
+                            actionLabel = t("undo"), 
+                            duration = SnackbarDuration.Short
+                        )
+                        if (result == SnackbarResult.ActionPerformed) vm.save(tx)
+                    }
+                },
+                onSwitchTab = { currentTab = it },
                 onShowCardManager = { showCardManager = true }, onShowBudgetManager = { showBudgetManager = true },
                 onShowRecurringManager = { showRecurringManager = true }, onShowCategoryManager = { showCategoryManager = true },
                 onShowGoalManager = { showGoalManager = true }, onShowDebtManager = { showDebtManager = true },
