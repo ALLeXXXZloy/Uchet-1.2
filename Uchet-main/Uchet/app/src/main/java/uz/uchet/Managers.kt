@@ -1,6 +1,7 @@
 package uz.uchet
 
 import android.content.Intent
+import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,11 +18,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.SimpleDateFormat
@@ -897,7 +901,7 @@ private fun formatLastApplied(ts: Long): String {
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ CorrectionManagerSheet — просмотр выученных коррекций (шаг C) ★★★
+// ★★★ CorrectionManagerSheet — просмотр + экспорт коррекций (шаг D-подготовка) ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -909,7 +913,34 @@ fun CorrectionManagerSheet(
     onDismiss: () -> Unit
 ) {
     val t = { key: String -> Translations.t(key, currentLang) }
+    val context = LocalContext.current
     var showClearConfirm by remember { mutableStateOf(false) }
+
+    // ★ Экспорт CSV
+    val csvExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.openOutputStream(it)?.use { os ->
+                    os.write(serializeCorrectionsCsv(corrections).toByteArray(Charsets.UTF_8))
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    // ★ Экспорт JSON
+    val jsonExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.openOutputStream(it)?.use { os ->
+                    os.write(serializeCorrectionsJson(corrections).toByteArray(Charsets.UTF_8))
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
 
     if (showClearConfirm) {
         AlertDialog(
@@ -923,7 +954,6 @@ fun CorrectionManagerSheet(
         )
     }
 
-    // Группируем: merchantHint -> field -> список коррекций
     val grouped = corrections.groupBy { it.merchantHint }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -997,6 +1027,14 @@ fun CorrectionManagerSheet(
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
+                                        if (c.rawText.isNotBlank()) {
+                                            Text(
+                                                c.rawText.take(80).replace("\n", " ") + if (c.rawText.length > 80) "…" else "",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.Gray.copy(alpha = 0.6f),
+                                                maxLines = 1
+                                            )
+                                        }
                                         Text(
                                             relativeTime(c.lastSeenAt),
                                             style = MaterialTheme.typography.labelSmall,
@@ -1012,6 +1050,35 @@ fun CorrectionManagerSheet(
                                 }
                             }
                         }
+                    }
+                }
+
+                // ★ Экспорт
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    t("correction_export_hint"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { csvExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.csv") },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(t("correction_export_csv"))
+                    }
+                    OutlinedButton(
+                        onClick = { jsonExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.json") },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Save, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("JSON")
                     }
                 }
 
@@ -1068,4 +1135,55 @@ private fun relativeTime(ts: Long): String {
         diffMin < 60 * 24 * 30 -> "${diffMin / (60 * 24)} дн назад"
         else -> "${diffMin / (60 * 24 * 30)} мес назад"
     }
+}
+
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ Сериализаторы CSV/JSON для экспорта коррекций ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+/**
+ * Формат CSV (RFC 4180):
+ * source,merchantHint,field,parsedValue,correctedValue,appliedCount,lastSeenAt,rawText
+ *
+ * Все поля в кавычках, `"` внутри поля экранируется как `""`.
+ * Открывается в Excel / Google Sheets / Numbers.
+ */
+private fun serializeCorrectionsCsv(list: List<CorrectionEntity>): String {
+    val sb = StringBuilder()
+    sb.append("source,merchantHint,field,parsedValue,correctedValue,appliedCount,lastSeenAt,rawText\n")
+    val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    fun esc(s: String): String = "\"" + s.replace("\"", "\"\"") + "\""
+    list.forEach { c ->
+        sb.append(esc(c.source)).append(',')
+        sb.append(esc(c.merchantHint)).append(',')
+        sb.append(esc(c.field)).append(',')
+        sb.append(esc(c.parsedValue)).append(',')
+        sb.append(esc(c.correctedValue)).append(',')
+        sb.append(esc(c.appliedCount.toString())).append(',')
+        sb.append(esc(fmt.format(Date(c.lastSeenAt)))).append(',')
+        sb.append(esc(c.rawText)).append('\n')
+    }
+    return sb.toString()
+}
+
+/**
+ * Формат JSON: массив объектов. Для случаев когда rawText содержит длинные
+ * многострочные OCR-чеки — JSON их сохраняет без потерь.
+ */
+private fun serializeCorrectionsJson(list: List<CorrectionEntity>): String {
+    val arr = JSONArray()
+    list.forEach { c ->
+        arr.put(JSONObject().apply {
+            put("source", c.source)
+            put("merchantHint", c.merchantHint)
+            put("field", c.field)
+            put("parsedValue", c.parsedValue)
+            put("correctedValue", c.correctedValue)
+            put("appliedCount", c.appliedCount)
+            put("lastSeenAt", c.lastSeenAt)
+            put("createdAt", c.createdAt)
+            put("rawText", c.rawText)
+        })
+    }
+    return arr.toString(2)
 }
