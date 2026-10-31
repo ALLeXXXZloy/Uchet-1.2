@@ -446,6 +446,10 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
     
     var oldPin by remember { mutableStateOf("") }; var newPin by remember { mutableStateOf("") }; var confirmPin by remember { mutableStateOf("") }; var useBiometric by remember { mutableStateOf(prefs.getBoolean("use_biometric", true)) }
     var smsDebug by remember { mutableStateOf(settingsPrefs.getBoolean("sms_debug_mode", false)) }
+    
+    // НОВОЕ СОСТОЯНИЕ ДЛЯ УВЕДОМЛЕНИЙ
+    var dailyReminder by remember { mutableStateOf(settingsPrefs.getBoolean("daily_reminder", false)) }
+    
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val t = { key: String -> Translations.t(key, currentLang.value) }
     
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -500,6 +504,27 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
                 Text(t("biometric"), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Switch(checked = useBiometric, onCheckedChange = { useBiometric = it; prefs.edit().putBoolean("use_biometric", it).apply() }) 
+            }
+
+            // НОВЫЙ БЛОК: ЕЖЕДНЕВНЫЕ УВЕДОМЛЕНИЯ
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+                Column(Modifier.weight(1f)) {
+                    Text("Ежедневные напоминания", style = MaterialTheme.typography.titleSmall)
+                    Text("Каждый день в 21:00", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+                Switch(
+                    checked = dailyReminder, 
+                    onCheckedChange = { isChecked ->
+                        dailyReminder = isChecked
+                        settingsPrefs.edit().putBoolean("daily_reminder", isChecked).apply()
+                        if (isChecked) {
+                            NotificationHelper.scheduleDailyReminder(context)
+                        } else {
+                            NotificationHelper.cancelDailyReminder(context)
+                        }
+                    }
+                ) 
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
