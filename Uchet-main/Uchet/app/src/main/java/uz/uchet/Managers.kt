@@ -448,7 +448,6 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
     var oldPin by remember { mutableStateOf("") }; var newPin by remember { mutableStateOf("") }; var confirmPin by remember { mutableStateOf("") }; var useBiometric by remember { mutableStateOf(prefs.getBoolean("use_biometric", true)) }
     var smsDebug by remember { mutableStateOf(settingsPrefs.getBoolean("sms_debug_mode", false)) }
     
-    // СОСТОЯНИЯ ДЛЯ УВЕДОМЛЕНИЙ
     var dailyReminder by remember { mutableStateOf(settingsPrefs.getBoolean("daily_reminder", false)) }
     var reminderHour by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_hour", 21)) }
     var reminderMinute by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_minute", 0)) }
@@ -545,7 +544,6 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
                 Switch(checked = useBiometric, onCheckedChange = { useBiometric = it; prefs.edit().putBoolean("use_biometric", it).apply() }) 
             }
 
-            // БЛОК УВЕДОМЛЕНИЙ
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
                 Column(Modifier.weight(1f)) {
@@ -579,6 +577,8 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             Spacer(Modifier.height(32.dp))
         }
     }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebtManagerSheet(
