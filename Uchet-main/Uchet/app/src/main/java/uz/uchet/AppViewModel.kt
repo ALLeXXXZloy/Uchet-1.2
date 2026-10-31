@@ -34,9 +34,10 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     val confirmations = dao.observeConfirmations().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<RecurringConfirmationEntity>())
     val planItems = dao.observePlanItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<PlanItemEntity>())
     val forecasts = dao.observeForecasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ForecastPlanEntity>())
+    val debts = dao.observeDebts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<DebtEntity>())
     
     // НОВЫЙ ПОТОК
-    val debts = dao.observeDebts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<DebtEntity>())
+    val customRules = dao.observeCustomRules().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CustomKeywordRule>())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val pendingRecurring: StateFlow<List<RecurringEntity>> = combine(recurring, confirmations) { recs, confs ->
@@ -109,7 +110,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    // --- СТАНДАРТНЫЕ МЕТОДЫ ---
     fun save(t: Tx) { viewModelScope.launch { dao.upsert(t) } }
     fun bulkSave(txs: List<Tx>) { viewModelScope.launch { dao.insertAll(txs) } }
     fun delete(t: Tx) { viewModelScope.launch { dao.delete(t) } }
@@ -183,11 +183,9 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    // --- МЕТОДЫ ДЛЯ ДОЛГОВ ---
     fun saveDebt(debt: DebtEntity) {
         viewModelScope.launch {
             dao.upsertDebt(debt)
-            // Если долг новый, создаем транзакцию, чтобы баланс сошелся
             if (debt.id == 0L) {
                 val txType = if (debt.type == DebtType.BORROWED) TxType.INCOME else TxType.EXPENSE
                 val txDesc = if (debt.type == DebtType.BORROWED) "Взял в долг: ${debt.personName}" else "Дал в долг: ${debt.personName}"
@@ -200,7 +198,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     fun markDebtPaid(debt: DebtEntity) {
         viewModelScope.launch {
             dao.upsertDebt(debt.copy(isPaid = true))
-            // Создаем обратную транзакцию при возврате
             val txType = if (debt.type == DebtType.BORROWED) TxType.EXPENSE else TxType.INCOME
             val txDesc = if (debt.type == DebtType.BORROWED) "Вернул долг: ${debt.personName}" else "Мне вернули долг: ${debt.personName}"
             val tx = Tx(amountMinor = debt.amountMinor, type = txType, description = txDesc, category = "🤝 Долги", timestamp = System.currentTimeMillis(), source = "DEBT")
@@ -211,7 +208,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     fun deleteDebt(debt: DebtEntity) {
         viewModelScope.launch {
             dao.deleteDebt(debt)
-            // Если удаляем неоплаченный долг, удаляем и созданную транзакцию
             if (!debt.isPaid) {
                 val all = dao.getAllTxs()
                 val relatedTx = all.find { it.source == "DEBT" && it.amountMinor == debt.amountMinor && it.timestamp == debt.dateMillis }
@@ -219,7 +215,15 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             }
         }
     }
-    // -------------------------
+
+    // НОВЫЕ МЕТОДЫ ДЛЯ ПРАВИЛ
+    fun saveCustomRule(keyword: String, category: String, type: TxType) {
+        if (keyword.isBlank()) return
+        viewModelScope.launch {
+            dao.upsertCustomRule(CustomKeywordRule(keyword = keyword.trim().lowercase(), category = category, type = type))
+        }
+    }
+    fun deleteCustomRule(rule: CustomKeywordRule) { viewModelScope.launch { dao.deleteCustomRule(rule) } }
 
     private suspend fun buildBackupJson(): String {
         val allTx = allTxs.first()
@@ -235,25 +239,21 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         val allDepositOps = dao.getAllDepositOps()
         val allConfirmations = dao.getAllConfirmations()
         val allDebts = dao.getAllDebts()
+        val allRules = dao.getAllCustomRules()
 
         val root = JSONObject()
 
         val txsArray = JSONArray()
-        allTx.forEach { t -> txsArray.put(JSONObject().apply {
-            put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name)
-            put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL); put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL)
-            put("description", t.description); put("category", t.category); put("timestamp", t.timestamp)
-            put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL)
-        }) }
+        allTx.forEach { t -> txsArray.put(JSONObject().apply { put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name); put("cardId", t.cardId ?: JSONObject.NULL); put("toCardId", t.toCardId ?: JSONObject.NULL); put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL); put("description", t.description); put("category", t.category); put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency); put("photoPath", t.photoPath ?: JSONObject.NULL) }) }
         root.put("txs", txsArray)
 
         val debtsArray = JSONArray()
-        allDebts.forEach { d -> debtsArray.put(JSONObject().apply {
-            put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor)
-            put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid)
-            put("description", d.description); put("currency", d.currency)
-        }) }
+        allDebts.forEach { d -> debtsArray.put(JSONObject().apply { put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency) }) }
         root.put("debts", debtsArray)
+
+        val rulesArray = JSONArray()
+        allRules.forEach { r -> rulesArray.put(JSONObject().apply { put("id", r.id); put("keyword", r.keyword); put("category", r.category); put("type", r.type.name) }) }
+        root.put("custom_rules", rulesArray)
 
         val cardsArray = JSONArray()
         allCards.forEach { c -> cardsArray.put(JSONObject().apply { put("id", c.id); put("last4", c.last4); put("name", c.name); put("currency", c.currency); put("initialBalanceMinor", c.initialBalanceMinor) }) }
@@ -328,9 +328,15 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         root.optJSONArray("debts")?.let { debtsArray ->
             for (i in 0 until debtsArray.length()) {
                 val o = debtsArray.getJSONObject(i)
-                debtsList.add(DebtEntity(o.optLong("id"), o.getString("personName"), o.getLong("amountMinor"),
-                    DebtType.valueOf(o.getString("type")), o.getLong("dateMillis"), o.optBoolean("isPaid"),
-                    o.optString("description"), o.optString("currency", "UZS")))
+                debtsList.add(DebtEntity(o.optLong("id"), o.getString("personName"), o.getLong("amountMinor"), DebtType.valueOf(o.getString("type")), o.getLong("dateMillis"), o.optBoolean("isPaid"), o.optString("description"), o.optString("currency", "UZS")))
+            }
+        }
+
+        val rulesList = mutableListOf<CustomKeywordRule>()
+        root.optJSONArray("custom_rules")?.let { rulesArray ->
+            for (i in 0 until rulesArray.length()) {
+                val o = rulesArray.getJSONObject(i)
+                rulesList.add(CustomKeywordRule(o.optLong("id"), o.getString("keyword"), o.getString("category"), TxType.valueOf(o.getString("type"))))
             }
         }
 
@@ -354,9 +360,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         root.optJSONArray("recurring")?.let { recurringArray ->
             for (i in 0 until recurringArray.length()) {
                 val o = recurringArray.getJSONObject(i)
-                recurringList.add(RecurringEntity(o.optLong("id"), o.getLong("amountMinor"), TxType.valueOf(o.getString("type")),
-                    if (o.isNull("cardId")) null else o.getString("cardId"), o.optString("description"), o.optString("category"),
-                    o.getInt("dayOfMonth"), o.optString("lastExecutedMonth")))
+                recurringList.add(RecurringEntity(o.optLong("id"), o.getLong("amountMinor"), TxType.valueOf(o.getString("type")), if (o.isNull("cardId")) null else o.getString("cardId"), o.optString("description"), o.optString("category"), o.getInt("dayOfMonth"), o.optString("lastExecutedMonth")))
             }
         }
 
@@ -364,9 +368,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         root.optJSONArray("recurring_confirmations")?.let { confirmationsArray ->
             for (i in 0 until confirmationsArray.length()) {
                 val o = confirmationsArray.getJSONObject(i)
-                confirmationsList.add(RecurringConfirmationEntity(o.getLong("recurringId"), o.getString("month"), o.getString("status"),
-                    if (o.isNull("actualAmountMinor")) null else o.optLong("actualAmountMinor"),
-                    if (o.isNull("lastPostponedDate")) null else o.optString("lastPostponedDate")))
+                confirmationsList.add(RecurringConfirmationEntity(o.getLong("recurringId"), o.getString("month"), o.getString("status"), if (o.isNull("actualAmountMinor")) null else o.optLong("actualAmountMinor"), if (o.isNull("lastPostponedDate")) null else o.optString("lastPostponedDate")))
             }
         }
 
@@ -406,9 +408,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         root.optJSONArray("forecast_items")?.let { fiArray ->
             for (i in 0 until fiArray.length()) {
                 val o = fiArray.getJSONObject(i)
-                fiList.add(ForecastItemEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), TxType.valueOf(o.getString("type")),
-                    o.getLong("amountMinor"), o.optString("currency", "UZS"), if (o.isNull("originalAmountMinor")) null else o.optLong("originalAmountMinor"),
-                    o.getString("startMonth"), o.getString("endMonth"), o.optBoolean("isFixed", true)))
+                fiList.add(ForecastItemEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), TxType.valueOf(o.getString("type")), o.getLong("amountMinor"), o.optString("currency", "UZS"), if (o.isNull("originalAmountMinor")) null else o.optLong("originalAmountMinor"), o.getString("startMonth"), o.getString("endMonth"), o.optBoolean("isFixed", true)))
             }
         }
 
@@ -417,10 +417,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             for (i in 0 until fdArray.length()) {
                 val o = fdArray.getJSONObject(i)
                 val cap = try { CapitalizationType.valueOf(o.optString("capitalization", "MONTHLY")) } catch (e: Exception) { CapitalizationType.MONTHLY }
-                fdList.add(ForecastDepositEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), o.getLong("initialAmountMinor"),
-                    o.optString("currency", "UZS"), if (o.isNull("originalInitialAmountMinor")) null else o.optLong("originalInitialAmountMinor"),
-                    o.getDouble("annualRatePercent"), o.getString("startMonth"), o.getString("endMonth"),
-                    o.optLong("monthlyContributionMinor", 0L), o.optLong("monthlyWithdrawalMinor", 0L), cap))
+                fdList.add(ForecastDepositEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), o.getLong("initialAmountMinor"), o.optString("currency", "UZS"), if (o.isNull("originalInitialAmountMinor")) null else o.optLong("originalInitialAmountMinor"), o.getDouble("annualRatePercent"), o.getString("startMonth"), o.getString("endMonth"), o.optLong("monthlyContributionMinor", 0L), o.optLong("monthlyWithdrawalMinor", 0L), cap))
             }
         }
 
@@ -433,11 +430,12 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
 
         db.withTransaction {
-            dao.clearTxs(); dao.clearDebts(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
+            dao.clearTxs(); dao.clearDebts(); dao.clearCustomRules(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
             dao.clearConfirmations(); dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems(); dao.clearForecasts()
 
             dao.insertAll(txsList)
             debtsList.forEach { dao.upsertDebt(it) }
+            rulesList.forEach { dao.upsertCustomRule(it) }
             cardsList.forEach { dao.upsertCard(it) }
             budgetsList.forEach { dao.upsertBudget(it) }
             recurringList.forEach { dao.upsertRecurring(it) }
