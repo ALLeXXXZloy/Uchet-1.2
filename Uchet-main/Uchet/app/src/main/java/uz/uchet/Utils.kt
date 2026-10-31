@@ -16,8 +16,14 @@ import java.time.format.DateTimeFormatter
 
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
-fun scanInboxSms(context: Context, existingTxs: List<Tx>, onFound: (List<Tx>) -> Unit) {
-    onFound(SmsParser.scanInbox(context, existingTxs))
+// ★ ИСПРАВЛЕНО: добавлен параметр customRules
+fun scanInboxSms(
+    context: Context,
+    existingTxs: List<Tx>,
+    customRules: List<CustomKeywordRule> = emptyList(),
+    onFound: (List<Tx>) -> Unit
+) {
+    onFound(SmsParser.scanInbox(context, existingTxs, customRules))
 }
 
 fun parseSmsText(text: String): ParsedSms? = SmsParser.parseForOcr(text)
