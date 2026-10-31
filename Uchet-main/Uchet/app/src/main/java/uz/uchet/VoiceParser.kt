@@ -19,7 +19,8 @@ object VoiceParser {
         val cardLast4 = Regex("""(?:карт[а-яё]*|karta[s]?)\s+(\d{4})""").find(lower)?.groupValues?.get(1)
         val amountMinor = parseAmount(lower)
         val categoryList = if (type == TxType.INCOME) incomeCategories else expenseCategories
-        val categoryName = findCategory(lower, categoryList, customRules)
+        // ★ #1 + #7: передаём тип (если определён)
+        val categoryName = findCategory(lower, categoryList, customRules, type)
         return VoiceTxResult(amountMinor, type, cardLast4, isCash, categoryName, text.trim())
     }
 
@@ -61,13 +62,20 @@ object VoiceParser {
         return null
     }
 
-    private fun findCategory(text: String, categories: List<String>, customRules: List<CustomKeywordRule>): String? {
-        // 1. ПРОВЕРЯЕМ КАСТОМНЫЕ ПРАВИЛА
-        for (rule in customRules) {
-            if (text.contains(rule.keyword)) return rule.category
-        }
-        
-        // 2. СТАНДАРТНЫЕ ПРАВИЛА
+    // ★ #1 + #7: фильтр по типу (если задан) + самое длинное ключевое слово
+    private fun findCategory(
+        text: String,
+        categories: List<String>,
+        customRules: List<CustomKeywordRule>,
+        expectedType: TxType? = null
+    ): String? {
+        // 1. Пользовательские правила
+        val matched = customRules
+            .filter { (expectedType == null || it.type == expectedType) && text.contains(it.keyword) }
+            .maxByOrNull { it.keyword.length }
+        if (matched != null) return matched.category
+
+        // 2. Стандартные правила
         val map = mapOf(
             "🍔 Еда" to listOf("еда", "еду", "обед", "ужин", "завтрак", "кафе", "ресторан", "кофе", "перекус", "ovqat", "tushlik", "nonushta", "kafe", "restoran", "kofe"),
             "🚕 Транспорт" to listOf("такси", "транспорт", "автобус", "метро", "бензин", "бензина", "проезд", "taksi", "transport", "avtobus", "metro", "benzin"),
