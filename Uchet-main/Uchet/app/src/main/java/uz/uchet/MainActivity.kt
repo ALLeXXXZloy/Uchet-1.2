@@ -30,7 +30,8 @@ class MainActivity : FragmentActivity() {
         NotificationHelper.createNotificationChannel(this)
         
         startKoin {
-            androidContext(this@MainActivity)
+            // ИСПРАВЛЕНО: передаем контекст приложения, а не Activity
+            androidContext(applicationContext) 
             modules(appModule)
         }
 
