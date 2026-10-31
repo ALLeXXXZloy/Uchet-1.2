@@ -50,11 +50,11 @@ fun TxDialog(
     isPendingSms: Boolean = false,
     autoStartVoice: Boolean = false,
     rates: List<ExchangeRateEntity>,
-    customRules: List<CustomKeywordRule>, // НОВЫЙ ПАРАМЕТР
+    customRules: List<CustomKeywordRule>,
     vm: VM,
     onDismiss: () -> Unit,
     onSave: (Tx) -> Unit,
-    onSaveRule: (String, String, TxType) -> Unit, // НОВЫЙ КОЛЛБЭК
+    onSaveRule: (String, String, TxType) -> Unit,
     onDelete: (() -> Unit)?
 ) {
     val context = LocalContext.current
@@ -82,10 +82,8 @@ fun TxDialog(
     var error by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     
-    // СОСТОЯНИЯ ДЛЯ САМООБУЧЕНИЯ
     var showRuleInput by remember { mutableStateOf(false) }
     var ruleKeyword by remember { mutableStateOf(initial?.description ?: "") }
-    // -------------------------
     
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -161,7 +159,8 @@ fun TxDialog(
                     if (!qrData.merchant.isNullOrBlank()) {
                         desc = qrData.merchant
                         if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        MerchantCategorizer.getCategory(desc, expenseCategories)?.let { category = it }
+                        // ★ ИСПРАВЛЕНО: передаём customRules
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules)?.let { category = it }
                     }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
                     scope.launch { snackbarHostState.showSnackbar("✅ Сумма и дата извлечены из QR-кода") }
@@ -187,7 +186,8 @@ fun TxDialog(
                     if (!qrData.merchant.isNullOrBlank()) {
                         desc = qrData.merchant
                         if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        MerchantCategorizer.getCategory(desc, expenseCategories)?.let { category = it }
+                        // ★ ИСПРАВЛЕНО: передаём customRules
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules)?.let { category = it }
                     }
                     if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
                 }
@@ -205,7 +205,12 @@ fun TxDialog(
                 val receipt = ReceiptParser.parse(rawText)
                 if (receipt.amountMinor != null) {
                     ocrAmount = receipt.amountMinor
-                    receipt.sellerName?.let { desc = it; if (ruleKeyword.isBlank()) ruleKeyword = it; MerchantCategorizer.getCategory(desc, expenseCategories)?.let { cat -> category = cat } }
+                    receipt.sellerName?.let { 
+                        desc = it
+                        if (ruleKeyword.isBlank()) ruleKeyword = it
+                        // ★ ИСПРАВЛЕНО: передаём customRules
+                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules)?.let { cat -> category = cat } 
+                    }
                     receipt.dateMillis?.let { date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT) }
                 }
                 if (ocrAmount == null) {
@@ -334,7 +339,6 @@ fun TxDialog(
                 OutlinedTextField(desc, { desc = it; if (ruleKeyword.isBlank()) ruleKeyword = it }, label = { Text(t("desc")) })
                 OutlinedTextField(date, { date = it }, label = { Text(t("date")) }, singleLine = true)
 
-                // БЛОК САМООБУЧЕНИЯ
                 if (isPendingSms || initial?.source == "SMS" || desc.isNotBlank()) {
                     HorizontalDivider(Modifier.padding(vertical = 4.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -356,7 +360,6 @@ fun TxDialog(
                         Text("При встрече слова «$ruleKeyword» будет выбрана категория: $category", style = MaterialTheme.typography.labelSmall, color = BLUE)
                     }
                 }
-                // ------------------
 
                 error?.let { Text(it, color = RED) }
             }
@@ -379,7 +382,6 @@ fun TxDialog(
                         d == null -> error = t("error")
                         type == TxType.TRANSFER && toCardId == null -> error = t("error")
                         else -> {
-                            // СОХРАНЯЕМ ПРАВИЛО, ЕСЛИ ГАЛОЧКА СТОИТ
                             if (showRuleInput && ruleKeyword.isNotBlank()) {
                                 onSaveRule(ruleKeyword, category, type)
                             }
