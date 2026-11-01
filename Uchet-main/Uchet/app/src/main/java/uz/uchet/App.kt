@@ -114,7 +114,6 @@ fun App(
 
     var pendingRuleAppliedId by remember { mutableStateOf<Long?>(null) }
     var pendingRuleAppliedKeyword by remember { mutableStateOf<String?>(null) }
-    // ★ D: исходный текст из очереди
     var pendingRawText by remember { mutableStateOf<String?>(null) }
 
     var showRestoreConfirm by remember { mutableStateOf(false) }
@@ -122,13 +121,14 @@ fun App(
     var showPasswordDialogRestore by remember { mutableStateOf(false) }
     var pendingBackupPassword by remember { mutableStateOf<String?>(null) }
     var pendingRestoreBytes by remember { mutableStateOf<ByteArray?>(null) }
-    var importedTxs by remember { mutableStateOf<List<Tx>?>(null) }
-    var showImportConfirm by remember { mutableStateOf(false) }
+    
+    // ★ FB-05: Экран проверки импортированных операций
+    var reviewTxs by remember { mutableStateOf<List<Tx>?>(null) }
+    
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }
     var showCardImportConfirm by remember { mutableStateOf(false) }
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
 
-    // ★ D: bulk-импорт чеков
     var bulkTotal by remember { mutableIntStateOf(0) }
     var bulkProcessed by remember { mutableIntStateOf(0) }
     var bulkInProgress by remember { mutableStateOf(false) }
@@ -201,7 +201,6 @@ fun App(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ★ D: suspend-обёртка над ML Kit OCR
     suspend fun recognizeText(bitmap: Bitmap): String = suspendCancellableCoroutine { cont ->
         try {
             val image = InputImage.fromBitmap(bitmap, 0)
@@ -212,7 +211,6 @@ fun App(
         } catch (e: Exception) { cont.resume("") }
     }
 
-    // ★ D: bulk-импорт чеков
     val bulkReceiptsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
@@ -235,7 +233,6 @@ fun App(
                     if (amount == null || amount <= 0) continue
                     val seller = receipt.sellerName ?: ""
                     val cat = MerchantCategorizer.getCategory(seller, expenseCats, customRules, TxType.EXPENSE)?.category ?: "📦 Другое"
-                    // Сохраняем фото чека
                     val photoFile = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
                     photoFile.parentFile?.mkdirs()
                     withContext(Dispatchers.IO) { photoFile.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) } }
@@ -245,13 +242,18 @@ fun App(
                         timestamp = receipt.dateMillis ?: System.currentTimeMillis(),
                         source = "OCR", photoPath = photoFile.absolutePath, rawText = rawText
                     ))
-                } catch (e: Exception) { /* пропускаем битый файл */ }
+                } catch (e: Exception) { }
             }
             bulkProcessed = uris.size
-            if (imported.isNotEmpty()) vm.bulkSave(imported)
-            bulkResultCount = imported.size
             bulkInProgress = false
-            showBulkResult = true
+            
+            // ★ FB-05: Вместо прямого сохранения, отправляем на экран проверки
+            if (imported.isNotEmpty()) {
+                reviewTxs = imported
+            } else {
+                bulkResultCount = 0
+                showBulkResult = true
+            }
         }
     }
 
@@ -284,7 +286,8 @@ fun App(
                 val mimeType = context.contentResolver.getType(it) ?: ""
                 val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
                 val parsedTxs = withContext(Dispatchers.IO) { SmsParser.parseImportedFile(text, allTxs, customRules) }
-                if (parsedTxs.isNotEmpty()) { importedTxs = parsedTxs; showImportConfirm = true } else snackbarHostState.showSnackbar(t("no_tx_found"))
+                // ★ FB-05: Отправляем на проверку
+                if (parsedTxs.isNotEmpty()) { reviewTxs = parsedTxs } else snackbarHostState.showSnackbar(t("no_tx_found"))
             } catch (e: Exception) { snackbarHostState.showSnackbar(t("file_read_error")) }
         } }
     }
@@ -316,6 +319,28 @@ fun App(
         }
     }
 
+    // ★ FB-05: Экран проверки импортированных пачек
+    if (reviewTxs != null) {
+        BackHandler { reviewTxs = null }
+        ReviewScreen(
+            initialTxs = reviewTxs!!,
+            cards = cards,
+            expenseCategories = expenseCategories,
+            incomeCategories = incomeCategories,
+            currentLang = currentLang.value,
+            rates = rates,
+            customRules = customRules,
+            vm = vm,
+            onSave = { finalTxs ->
+                vm.bulkSave(finalTxs)
+                scope.launch { snackbarHostState.showSnackbar("Импортировано: ${finalTxs.size}") }
+                reviewTxs = null
+            },
+            onCancel = { reviewTxs = null }
+        )
+        return
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
@@ -345,38 +370,21 @@ fun App(
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text(t("scan_sms")) },
-                                    leadingIcon = { Icon(Icons.Default.Message, null) },
-                                    onClick = {
-                                        showMenu = false
-                                        scope.launch {
-                                            val found = withContext(Dispatchers.IO) { SmsParser.scanInbox(context, allTxs, customRules) }
-                                            if (found.isNotEmpty()) { importedTxs = found; showImportConfirm = true }
-                                            else snackbarHostState.showSnackbar(t("new_sms_not_found"))
-                                        }
+                                DropdownMenuItem(text = { Text(t("scan_sms")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
+                                    showMenu = false
+                                    scope.launch {
+                                        val found = withContext(Dispatchers.IO) { SmsParser.scanInbox(context, allTxs, customRules) }
+                                        if (found.isNotEmpty()) { reviewTxs = found } // ★ FB-05
+                                        else snackbarHostState.showSnackbar(t("new_sms_not_found"))
                                     }
-                                )
+                                })
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
-                                // ★ D: bulk-импорт чеков
-                                DropdownMenuItem(
-                                    text = { Text(t("import_receipts_bulk")) },
-                                    leadingIcon = { Icon(Icons.Default.Collections, null) },
-                                    onClick = { showMenu = false; bulkReceiptsLauncher.launch(arrayOf("image/*")) }
-                                )
+                                DropdownMenuItem(text = { Text(t("import_receipts_bulk")) }, leadingIcon = { Icon(Icons.Default.Collections, null) }, onClick = { showMenu = false; bulkReceiptsLauncher.launch(arrayOf("image/*")) })
                                 DropdownMenuItem(text = { Text(t("import_cards")) }, leadingIcon = { Icon(Icons.Default.AddCard, null) }, onClick = { showMenu = false; cardImagePicker.launch("image/*") })
                                 HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text(t("learned_rules")) },
-                                    leadingIcon = { Icon(Icons.Default.School, null) },
-                                    onClick = { showMenu = false; showRuleManager = true }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(t("learned_corrections")) },
-                                    leadingIcon = { Icon(Icons.Default.EditNote, null) },
-                                    onClick = { showMenu = false; showCorrectionManager = true }
-                                )
+                                DropdownMenuItem(text = { Text(t("learned_rules")) }, leadingIcon = { Icon(Icons.Default.School, null) }, onClick = { showMenu = false; showRuleManager = true })
+                                DropdownMenuItem(text = { Text(t("learned_corrections")) }, leadingIcon = { Icon(Icons.Default.EditNote, null) }, onClick = { showMenu = false; showCorrectionManager = true })
                                 HorizontalDivider()
                                 DropdownMenuItem(text = { Text(t("export_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; pdfExportLauncher.launch("uchet_report_${month}.pdf") })
                                 DropdownMenuItem(text = { Text(t("export")) }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { showMenu = false; csvExportLauncher.launch("uchet_export.csv") })
@@ -403,11 +411,7 @@ fun App(
                 onDeleteTx = { tx ->
                     vm.delete(tx)
                     scope.launch {
-                        val result = snackbarHostState.showSnackbar(
-                            message = t("deleted"),
-                            actionLabel = t("undo"),
-                            duration = SnackbarDuration.Short
-                        )
+                        val result = snackbarHostState.showSnackbar(message = t("deleted"), actionLabel = t("undo"), duration = SnackbarDuration.Short)
                         if (result == SnackbarResult.ActionPerformed) vm.save(tx)
                     }
                 },
@@ -429,14 +433,15 @@ fun App(
     if (showCardManager) CardManagerSheet(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
-    if (showDebtManager) DebtManagerSheet(debts, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false })
+    
+    // ★ FB-10: Передаем cards в DebtManagerSheet
+    if (showDebtManager) DebtManagerSheet(debts, cards, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false })
 
     if (showRuleManager) RuleManagerSheet(
         rules = customRules,
         currentLang = currentLang.value,
         expenseCategories = expenseCategories,
         incomeCategories = incomeCategories,
-        // ★ FB-17: добавлен isIgnored в коллбэк
         onSave = { kw, cat, type, isIgnored -> vm.saveCustomRule(kw, cat, type, isIgnored) },
         onDelete = { rule -> vm.deleteCustomRule(rule) },
         onDeleteUnused = { vm.deleteUnusedRules() },
@@ -460,7 +465,7 @@ fun App(
             customRules = customRules,
             ruleAppliedId = pendingRuleAppliedId,
             ruleAppliedKeyword = pendingRuleAppliedKeyword,
-            rawSourceText = pendingRawText,   // ★ D
+            rawSourceText = pendingRawText,
             vm = vm,
             onDismiss = {
                 if (isPendingSms) { PendingQueue.pop(context); isPendingSms = false }
@@ -476,7 +481,6 @@ fun App(
             onSaveRule = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
             onRuleApplied = { id -> vm.bumpRuleApplied(id) },
             onRuleRejected = { id -> vm.bumpRuleRejected(id) },
-            // ★ D: теперь 5 параметров, включая rawText
             onRecordCorrection = { hint, field, parsed, corrected, rawText ->
                 vm.recordCorrection(
                     source = editing?.source ?: (if (isPendingSms) "SMS" else "MANUAL"),
@@ -491,12 +495,6 @@ fun App(
         )
     }
 
-    if (showImportConfirm && importedTxs != null) {
-        val txsToImport = importedTxs!!
-        AlertDialog(onDismissRequest = { showImportConfirm = false; importedTxs = null }, title = { Text(t("import_data")) }, text = { Text("${t("import_confirm")} ${txsToImport.size}") },
-            confirmButton = { TextButton(onClick = { val existing = cards.map { it.id }.toSet(); txsToImport.mapNotNull { it.cardId }.distinct().forEach { cardId -> if (!existing.contains(cardId)) { val last4 = cardId.split("_").firstOrNull() ?: "0000"; val currency = cardId.split("_").getOrNull(1) ?: "UZS"; vm.saveCard(CardEntity(id = cardId, last4 = last4, name = "${t("import_prefix")} *$last4", currency = currency, initialBalanceMinor = 0)) } }; vm.bulkSave(txsToImport); scope.launch { snackbarHostState.showSnackbar("${t("import_confirm")} ${txsToImport.size}") }; showImportConfirm = false; importedTxs = null }) { Text(t("confirm"), color = GREEN) } },
-            dismissButton = { TextButton(onClick = { showImportConfirm = false; importedTxs = null }) { Text(t("cancel")) } })
-    }
     if (showCardImportConfirm && importedCards != null) {
         val cardsToImport = importedCards!!
         AlertDialog(onDismissRequest = { showCardImportConfirm = false; importedCards = null }, title = { Text(t("import_cards")) }, text = { Text("${t("found_cards")} ${cardsToImport.size}") },
@@ -504,17 +502,13 @@ fun App(
             dismissButton = { TextButton(onClick = { showCardImportConfirm = false; importedCards = null }) { Text(t("cancel")) } })
     }
 
-    // ★ D: прогресс bulk-импорта чеков
     if (bulkInProgress) {
         AlertDialog(
-            onDismissRequest = { /* запрещаем закрывать до завершения */ },
+            onDismissRequest = { },
             title = { Text(t("import_receipts_bulk")) },
             text = {
                 Column {
-                    LinearProgressIndicator(
-                        progress = { if (bulkTotal > 0) bulkProcessed.toFloat() / bulkTotal.toFloat() else 0f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    LinearProgressIndicator(progress = { if (bulkTotal > 0) bulkProcessed.toFloat() / bulkTotal.toFloat() else 0f }, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
                     Text("$bulkProcessed / $bulkTotal")
                 }
@@ -523,18 +517,12 @@ fun App(
         )
     }
 
-    // ★ D: результат bulk-импорта
     if (showBulkResult) {
         AlertDialog(
             onDismissRequest = { showBulkResult = false },
             title = { Text(t("import_receipts_bulk")) },
             text = { Text("${t("bulk_import_done")} $bulkResultCount ${t("bulk_import_suffix")}") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showBulkResult = false
-                    currentTab = 0
-                }) { Text(t("open_for_review"), color = GREEN) }
-            },
+            confirmButton = { TextButton(onClick = { showBulkResult = false; currentTab = 0 }) { Text(t("open_for_review"), color = GREEN) } },
             dismissButton = { TextButton(onClick = { showBulkResult = false }) { Text(t("close")) } }
         )
     }
