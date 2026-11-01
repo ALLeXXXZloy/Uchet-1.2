@@ -30,7 +30,7 @@ fun OperationsScreen(
     paddingValues: PaddingValues,
     currentLang: AppLanguage,
     onEditTx: (Tx) -> Unit,
-    onDeleteTx: (Tx) -> Unit, // НОВЫЙ КОЛЛБЭК ДЛЯ УДАЛЕНИЯ
+    onDeleteTx: (Tx) -> Unit,
     onSwitchTab: (Int) -> Unit,
     onShowCardManager: () -> Unit,
     onShowBudgetManager: () -> Unit,
@@ -54,12 +54,14 @@ fun OperationsScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var filterType by remember { mutableStateOf<TxType?>(null) }
+    var filterImportedOnly by remember { mutableStateOf(false) } // ★ FB-06
 
-    val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-    val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
+    // ★ FB-09: Исключаем долги из подсчета доходов и расходов
+    val income = txs.filter { it.type == TxType.INCOME && it.source != "DEBT" }.sumOf { it.amountMinor }
+    val expense = txs.filter { it.type == TxType.EXPENSE && it.source != "DEBT" }.sumOf { it.amountMinor }
 
     val quickTemplates = remember(txs) {
-        val grouped = txs.filter { it.type == TxType.EXPENSE }
+        val grouped = txs.filter { it.type == TxType.EXPENSE && it.source != "DEBT" }
             .groupBy { it.category }
             .mapValues { (_, list) -> list.size to list.sumOf { it.amountMinor } / list.size }
         grouped.entries
@@ -68,7 +70,7 @@ fun OperationsScreen(
             .map { QuickTemplate(it.key, it.value.second, TxType.EXPENSE) }
     }
 
-    val filteredTxs by remember(txs, searchQuery, filterType, currentLang) {
+    val filteredTxs by remember(txs, searchQuery, filterType, filterImportedOnly, currentLang) {
         derivedStateOf {
             val queryNumbers = searchQuery.filter { it.isDigit() }
             val hasNumbers = queryNumbers.isNotEmpty()
@@ -77,7 +79,15 @@ fun OperationsScreen(
                         tx.description.contains(searchQuery, true) ||
                         Translations.translateCategory(tx.category, currentLang).contains(searchQuery, true) ||
                         (hasNumbers && tx.amountMinor.toString().contains(queryNumbers))
-                matches && (filterType == null || tx.type == filterType)
+                
+                val matchesType = filterType == null || tx.type == filterType
+                
+                // ★ FB-06: Фильтр по источнику
+                val matchesImport = if (filterImportedOnly) {
+                    tx.source in listOf("SMS", "IMPORT", "OCR", "NOTIF")
+                } else true
+
+                matches && matchesType && matchesImport
             }
         }
     }
@@ -99,6 +109,10 @@ fun OperationsScreen(
         }
     }
     val totalLiquidBalanceUzs = cardBalancesInUzs.values.sum()
+
+    // ★ FB-09: Расчеты по долгам для сводки
+    val totalOwedToMe = debts.filter { !it.isPaid && it.type == DebtType.LENT }.sumOf { it.amountMinor }
+    val totalIOwe = debts.filter { !it.isPaid && it.type == DebtType.BORROWED }.sumOf { it.amountMinor }
 
     LazyColumn(
         Modifier.padding(paddingValues).fillMaxSize(),
@@ -138,15 +152,25 @@ fun OperationsScreen(
                 }
             )
             Spacer(Modifier.height(8.dp))
+            
+            // ★ Чипы фильтров
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text(t("all")) })
-                FilterChip(selected = filterType == TxType.INCOME, onClick = { filterType = TxType.INCOME }, label = { Text(t("income")) })
-                FilterChip(selected = filterType == TxType.EXPENSE, onClick = { filterType = TxType.EXPENSE }, label = { Text(t("expense")) })
+                FilterChip(selected = filterType == null && !filterImportedOnly, onClick = { filterType = null; filterImportedOnly = false }, label = { Text(t("all")) })
+                FilterChip(selected = filterType == TxType.INCOME, onClick = { filterType = TxType.INCOME; filterImportedOnly = false }, label = { Text(t("income")) })
+                FilterChip(selected = filterType == TxType.EXPENSE, onClick = { filterType = TxType.EXPENSE; filterImportedOnly = false }, label = { Text(t("expense")) })
+                
+                // ★ FB-06: Фильтр импортированных
+                FilterChip(
+                    selected = filterImportedOnly, 
+                    onClick = { filterImportedOnly = !filterImportedOnly; filterType = null }, 
+                    label = { Text("Только импортированные") },
+                    leadingIcon = { if (filterImportedOnly) Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp)) else Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp)) }
+                )
             }
             Spacer(Modifier.height(12.dp))
         }
 
-        if (quickTemplates.isNotEmpty()) {
+        if (quickTemplates.isNotEmpty() && !filterImportedOnly) {
             item {
                 Text("Быстрый ввод", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
@@ -193,6 +217,28 @@ fun OperationsScreen(
             Spacer(Modifier.height(16.dp))
         }
 
+        // ★ FB-09: Отдельный блок «Текущая задолженность»
+        if (totalOwedToMe > 0 || totalIOwe > 0) {
+            item {
+                Card(
+                    Modifier.fillMaxWidth().clickable { onShowDebtManager() },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(t("owed_to_me"), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                            Text("+${totalOwedToMe.money()} UZS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = GREEN)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(t("i_owe"), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                            Text("-${totalIOwe.money()} UZS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = RED)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+
         if (goals.isNotEmpty()) {
             item {
                 Card(Modifier.fillMaxWidth().clickable { onShowGoalManager() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
@@ -235,6 +281,7 @@ fun OperationsScreen(
             }
         }
 
+        // ★ Сводка по доходам и расходам (без долгов)
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
@@ -250,12 +297,16 @@ fun OperationsScreen(
                 Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Inbox, null, modifier = Modifier.size(64.dp), tint = Color.Gray.copy(alpha = 0.5f))
                     Spacer(Modifier.height(16.dp))
-                    Text(if (searchQuery.isEmpty()) t("empty_tx") else t("no_found"), style = MaterialTheme.typography.bodyLarge, color = Color.Gray, textAlign = TextAlign.Center)
+                    Text(
+                        if (filterImportedOnly) "Импортированных операций нет" 
+                        else if (searchQuery.isEmpty()) t("empty_tx") 
+                        else t("no_found"), 
+                        style = MaterialTheme.typography.bodyLarge, color = Color.Gray, textAlign = TextAlign.Center
+                    )
                 }
             }
         }
 
-        // --- ОБНОВЛЕННЫЙ СПИСОК С ПОДДЕРЖКОЙ СВАЙПОВ ---
         byDay.forEach { (day, list) ->
             item { Text(day.format(DATE_FMT), Modifier.padding(top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = Color.Gray) }
             items(list, key = { it.id }) { tx ->
@@ -263,7 +314,7 @@ fun OperationsScreen(
                     confirmValueChange = {
                         when (it) {
                             SwipeToDismissBoxValue.EndToStart -> { onDeleteTx(tx); true }
-                            SwipeToDismissBoxValue.StartToEnd -> { onEditTx(tx); false } // false, чтобы не удалять элемент визуально
+                            SwipeToDismissBoxValue.StartToEnd -> { onEditTx(tx); false }
                             else -> false
                         }
                     }
@@ -300,7 +351,6 @@ fun OperationsScreen(
                         }
                     },
                     content = {
-                        // Оборачиваем в Box, чтобы добавить фон и скругления
                         Box(Modifier.background(MaterialTheme.colorScheme.surface)) {
                             TxRow(tx, currentLang) { onEditTx(tx) }
                         }
@@ -308,6 +358,5 @@ fun OperationsScreen(
                 )
             }
         }
-        // ------------------------------------------------
     }
 }
