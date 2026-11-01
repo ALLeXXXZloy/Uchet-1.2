@@ -24,8 +24,6 @@ data class Tx(
     val cardId: String? = null, val toCardId: String? = null, val toAmountMinor: Long? = null,
     val description: String = "", val category: String = "", val timestamp: Long,
     val source: String = "MANUAL", val currency: String = "UZS", val photoPath: String? = null,
-    // ★ D: исходный текст (СМС / OCR-чек / голосовая фраза), из которого распознана операция.
-    // Используется при записи CorrectionEntity, чтобы этап D видел контекст ошибки парсера.
     val rawText: String? = null
 )
 
@@ -54,14 +52,15 @@ data class SavingsGoalEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, 
 @Entity(tableName = "rates")
 data class ExchangeRateEntity(@PrimaryKey val currency: String, val rateToUzs: Double)
 
+// ★ FB-10: добавлено поле cardId для привязки долга к счету
 @Entity(tableName = "debts")
 data class DebtEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val personName: String, val amountMinor: Long, val type: DebtType,
-    val dateMillis: Long, val isPaid: Boolean = false, val description: String = "", val currency: String = "UZS"
+    val dateMillis: Long, val isPaid: Boolean = false, val description: String = "", val currency: String = "UZS",
+    val cardId: String? = null 
 )
 
-// ★ #2: поля счётчиков
 @Entity(tableName = "custom_keyword_rules")
 data class CustomKeywordRule(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -71,11 +70,9 @@ data class CustomKeywordRule(
     val appliedCount: Int = 0,
     val lastAppliedAt: Long? = null,
     val rejectedCount: Int = 0,
-    // ★ FB-17: флаг игнорирования (реклама, спам, ОТП)
-    val isIgnored: Boolean = false
+    val isIgnored: Boolean = false // ★ FB-17
 )
 
-// ★★ #3 + D: Коррекция — запоминаем любое исправление поля пользователем + контекст
 @Entity(
     tableName = "corrections",
     indices = [
@@ -86,15 +83,14 @@ data class CustomKeywordRule(
 )
 data class CorrectionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val source: String,              // "SMS" | "IMPORT" | "MANUAL" | "VOICE" | "NOTIF" | "OCR"
-    val merchantHint: String,        // нормализованный merchant (lowercase, trim, первые 30 символов)
-    val field: String,               // "amount" | "type" | "card" | "category" | "merchant"
-    val parsedValue: String,         // что было распознано
-    val correctedValue: String,      // что поставил пользователь
-    val appliedCount: Int = 1,       // сколько раз так исправляли
+    val source: String,
+    val merchantHint: String,
+    val field: String,
+    val parsedValue: String,
+    val correctedValue: String,
+    val appliedCount: Int = 1,
     val lastSeenAt: Long = System.currentTimeMillis(),
     val createdAt: Long = System.currentTimeMillis(),
-    // ★ D: исходный текст (СМС / OCR-чек / голос), из которого парсер вытащил parsedValue.
     val rawText: String = ""
 )
 
@@ -250,7 +246,7 @@ interface AppDao {
         PlanItemEntity::class, ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 15, // ★ FB-17: Версия БД увеличена до 15
+    version = 16, // ★ Обновлено до 16
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -313,17 +309,21 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_merchant_field` ON `corrections` (`merchantHint`, `field`)")
             }
         }
-        // ★ D: миграция 13→14 — добавляем rawText в txs и corrections
         private val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE txs ADD COLUMN rawText TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE corrections ADD COLUMN rawText TEXT NOT NULL DEFAULT ''")
             }
         }
-        // ★ FB-17: миграция 14→15 — добавляем isIgnored в custom_keyword_rules
         private val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN isIgnored INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        // ★ FB-10: миграция 15→16 — добавляем cardId в debts
+        private val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE debts ADD COLUMN cardId TEXT DEFAULT NULL")
             }
         }
 
@@ -333,7 +333,7 @@ abstract class AppDb : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                         MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
-                        MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15 // ★ FB-17
+                        MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16
                     )
                     .build()
                 INSTANCE = instance
