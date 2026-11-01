@@ -216,10 +216,16 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     }
 
     // === Custom rules ===
-    fun saveCustomRule(keyword: String, category: String, type: TxType) {
+    // ★ FB-17: добавлен параметр isIgnored
+    fun saveCustomRule(keyword: String, category: String, type: TxType, isIgnored: Boolean = false) {
         if (keyword.isBlank()) return
         viewModelScope.launch {
-            dao.upsertCustomRule(CustomKeywordRule(keyword = keyword.trim().lowercase(), category = category, type = type))
+            dao.upsertCustomRule(CustomKeywordRule(
+                keyword = keyword.trim().lowercase(),
+                category = if (isIgnored) "IGNORE" else category,
+                type = type,
+                isIgnored = isIgnored
+            ))
         }
     }
     fun deleteCustomRule(rule: CustomKeywordRule) { viewModelScope.launch { dao.deleteCustomRule(rule) } }
@@ -237,12 +243,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             .take(30)
     }
 
-    /**
-     * Записывает коррекцию пользователя. Если для (merchantHint, field, parsedValue) уже есть —
-     * инкрементит appliedCount. Иначе — вставляет новую запись.
-     *
-     * @param rawText полный исходный текст (СМС / OCR-чек / голос), для этапа D
-     */
     fun recordCorrection(
         source: String,
         merchantHint: String,
@@ -260,7 +260,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             try {
                 val existing = dao.findCorrection(hint, field, parsedValue)
                 if (existing != null) {
-                    // Обновляем счётчик и дополняем rawText, если раньше был пустой
                     if (existing.rawText.isBlank() && rawText.isNotBlank()) {
                         dao.upsertCorrection(existing.copy(rawText = rawText, appliedCount = existing.appliedCount + 1, lastSeenAt = System.currentTimeMillis()))
                     } else {
@@ -302,7 +301,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
 
         val root = JSONObject()
 
-        // ★ D: сохраняем rawText в txs
         val txsArray = JSONArray()
         allTx.forEach { t -> txsArray.put(JSONObject().apply {
             put("id", t.id); put("amountMinor", t.amountMinor); put("type", t.type.name)
@@ -323,10 +321,10 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         allRules.forEach { r -> rulesArray.put(JSONObject().apply {
             put("id", r.id); put("keyword", r.keyword); put("category", r.category); put("type", r.type.name)
             put("appliedCount", r.appliedCount); put("lastAppliedAt", r.lastAppliedAt ?: JSONObject.NULL); put("rejectedCount", r.rejectedCount)
+            put("isIgnored", r.isIgnored) // ★ FB-17: сохраняем флаг
         }) }
         root.put("custom_rules", rulesArray)
 
-        // ★ D: сохраняем rawText в corrections
         val corrArray = JSONArray()
         allCorrections.forEach { c -> corrArray.put(JSONObject().apply {
             put("id", c.id); put("source", c.source); put("merchantHint", c.merchantHint)
@@ -411,7 +409,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                     source = o.optString("source"),
                     currency = o.optString("currency", "UZS"),
                     photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"),
-                    // ★ D: rawText может отсутствовать в старых бэкапах
                     rawText = if (o.isNull("rawText")) null else o.optString("rawText").takeIf { it.isNotBlank() }
                 ))
             }
@@ -436,7 +433,8 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                     type = TxType.valueOf(o.getString("type")),
                     appliedCount = o.optInt("appliedCount", 0),
                     lastAppliedAt = if (o.isNull("lastAppliedAt")) null else o.optLong("lastAppliedAt"),
-                    rejectedCount = o.optInt("rejectedCount", 0)
+                    rejectedCount = o.optInt("rejectedCount", 0),
+                    isIgnored = o.optBoolean("isIgnored", false) // ★ FB-17: восстанавливаем флаг
                 ))
             }
         }
@@ -455,7 +453,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                     appliedCount = o.optInt("appliedCount", 1),
                     lastSeenAt = o.optLong("lastSeenAt", System.currentTimeMillis()),
                     createdAt = o.optLong("createdAt", System.currentTimeMillis()),
-                    // ★ D: rawText может отсутствовать в старых бэкапах
                     rawText = o.optString("rawText", "")
                 ))
             }
