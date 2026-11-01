@@ -36,7 +36,6 @@ object SmsParser {
     fun classify(sender: String, body: String, timestamp: Long, customRules: List<CustomKeywordRule> = emptyList()): Pair<SmsCategory, BankTx?> {
         val lower = body.lowercase()
         
-        // ★ FB-17: Проверяем правила-игноры в самом начале (реклама, спам, ОТП)
         val ignoredByRule = customRules.any { it.isIgnored && lower.contains(it.keyword) }
         if (ignoredByRule) return SmsCategory.ADVERTISING to null
 
@@ -75,7 +74,6 @@ object SmsParser {
     fun parseImportedFile(text: String, existing: List<Tx> = emptyList(), customRules: List<CustomKeywordRule> = emptyList()): List<Tx> {
         val clean = text.removePrefix("\uFEFF")
         
-        // ★ FB-15: Проверяем, является ли файл выпиской от банка Tez
         val isTez = clean.contains("ВЫПИСКА ПО КАРТЕ") && clean.contains("Номер карты клиента:")
         
         val parsed = if (isTez) {
@@ -148,18 +146,17 @@ object SmsParser {
         return records.filter { it.isNotEmpty() }
     }
 
-    // ★ FB-15: Специфический парсер выписок от банка Tez
+    // ★ ИСПРАВЛЕННЫЙ ПАРСЕР TEZ
     private fun parseTezStatement(text: String, customRules: List<CustomKeywordRule>): List<Tx> {
         val result = mutableListOf<Tx>()
         
-        // Ищем номер карты (например: 441359****3290)
         val cardRegex = Regex("""Номер карты клиента:\s*\d{6}\*+(\d{4})""")
         val cardLast4 = cardRegex.find(text)?.groupValues?.get(1) ?: "0000"
         val cardId = "${cardLast4}_UZS"
 
-        // Ищем транзакции
-        // Пример: 06-06-2026 14:25:06WBTAXI NONE3DS-41 000,00-41 000,00UZS-259 000,00
-        val txRegex = Regex("""(?<date>\d{2}-\d{2}-\d{4})\s+(?<time>\d{2}:\d{2}:\d{2})(?<desc>.*?)(?<sign>[+-])(?<amount>\d{1,3}(?:\s\d{3})*,\d{2})""")
+        // Ищем транзакции. 
+        // Изменено: \s* вместо \s+ после времени. Добавлена поддержка запятой или точки в копейках.
+        val txRegex = Regex("""(?<date>\d{2}-\d{2}-\d{4})\s+(?<time>\d{2}:\d{2}:\d{2})\s*(?<desc>.*?)(?<sign>[+-])(?<amount>\d{1,3}(?:\s\d{3})*[,.]\d{2})""")
 
         for (match in txRegex.findAll(text)) {
             val dateStr = match.groups["date"]?.value ?: continue
@@ -168,8 +165,8 @@ object SmsParser {
             val sign = match.groups["sign"]?.value ?: ""
             val amountStr = match.groups["amount"]?.value ?: continue
 
-            // Фильтрация переводов в Копилку и из Копилки
             val lowerDesc = desc.lowercase()
+            // Фильтрация служебных операций (Копилка, округления, проценты)
             if (lowerDesc.contains("копилк") || 
                 lowerDesc.contains("popolnenie kopilka") || 
                 lowerDesc.contains("rasxod popolnenie kopilka") || 
@@ -179,12 +176,11 @@ object SmsParser {
                 continue
             }
 
-            val amountDouble = amountStr.replace(" ", "").replace(",", ".").toDoubleOrNull() ?: continue
-            val amountMinor = (amountDouble * 100).toLong()
+            val cleanAmount = amountStr.replace(" ", "").replace(",", ".")
+            val amountMinor = (cleanAmount.toDoubleOrNull() ?: continue) . times(100) . toLong()
             
             val type = if (sign == "+") TxType.INCOME else TxType.EXPENSE
             
-            // Парсинг даты: dd-MM-yyyy HH:mm:ss
             val formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")
             val ts = try {
                 LocalDateTime.parse("$dateStr $timeStr", formatter).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -202,7 +198,7 @@ object SmsParser {
                 category = category,
                 timestamp = ts,
                 source = "IMPORT",
-                rawText = match.value // Сохраняем оригинальную строку для самообучения
+                rawText = match.value
             ))
         }
         return result
