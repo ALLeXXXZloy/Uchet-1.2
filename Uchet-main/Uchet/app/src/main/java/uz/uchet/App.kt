@@ -37,6 +37,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.tom_roush.pdfbox.pdmodel.PDDocument
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -122,7 +123,6 @@ fun App(
     var pendingBackupPassword by remember { mutableStateOf<String?>(null) }
     var pendingRestoreBytes by remember { mutableStateOf<ByteArray?>(null) }
     
-    // ★ FB-05: Экран проверки импортированных операций
     var reviewTxs by remember { mutableStateOf<List<Tx>?>(null) }
     
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }
@@ -247,7 +247,6 @@ fun App(
             bulkProcessed = uris.size
             bulkInProgress = false
             
-            // ★ FB-05: Вместо прямого сохранения, отправляем на экран проверки
             if (imported.isNotEmpty()) {
                 reviewTxs = imported
             } else {
@@ -280,17 +279,76 @@ fun App(
             } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } }
         }
     }
+    
+    // ★ ИМПОРТ PDF С ТОЧНЫМ ВЫРЕЗАНИЕМ СТРОК
     val fileImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { scope.launch {
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
-                val text = if (mimeType == "application/pdf") extractTextFromPdf(context, it) else context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
-                val parsedTxs = withContext(Dispatchers.IO) { SmsParser.parseImportedFile(text, allTxs, customRules) }
-                // ★ FB-05: Отправляем на проверку
-                if (parsedTxs.isNotEmpty()) { reviewTxs = parsedTxs } else snackbarHostState.showSnackbar(t("no_tx_found"))
-            } catch (e: Exception) { snackbarHostState.showSnackbar(t("file_read_error")) }
+                
+                if (mimeType == "application/pdf") {
+                    bulkInProgress = true // показываем прогрессбар
+                    val parsedTxs = withContext(Dispatchers.IO) {
+                        val inputStream = context.contentResolver.openInputStream(it)
+                        val doc = PDDocument.load(inputStream)
+                        
+                        // 1. Извлекаем строки с координатами
+                        val stripper = CoordinateTextStripper()
+                        stripper.getText(doc) // заполняет stripper.lines
+                        val pdfLines = stripper.lines
+                        
+                        // 2. Парсим операции
+                        val parsedPairs = SmsParser.parsePdfLines(pdfLines, allTxs, customRules)
+                        
+                        // 3. Рендерим страницы и вырезаем нужные строки
+                        val pageBitmaps = mutableMapOf<Int, Bitmap>()
+                        val resultList = mutableListOf<Tx>()
+                        
+                        for ((tx, pdfLine) in parsedPairs) {
+                            // Рендерим страницу 1 раз (в PDFBox страницы начинаются с 1, но renderImageWithDPI ждет 0-based index)
+                            val pageIdx = (pdfLine.page - 1).coerceAtLeast(0)
+                            val pageBitmap = pageBitmaps.getOrPut(pageIdx) {
+                                val renderer = com.tom_roush.pdfbox.rendering.PDFRenderer(doc)
+                                renderer.renderImageWithDPI(pageIdx, 200f)
+                            }
+                            
+                            // Вырезаем строку
+                            val croppedBitmap = cropBitmapByLine(pageBitmap, pdfLine, padding = 15)
+                            
+                            // Сохраняем как файл
+                            val photoFile = File(context.filesDir, "images/pdf_crop_${UUID.randomUUID()}.jpg")
+                            photoFile.parentFile?.mkdirs()
+                            photoFile.outputStream().use { out ->
+                                croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                            }
+                            
+                            resultList.add(tx.copy(photoPath = photoFile.absolutePath))
+                        }
+                        doc.close()
+                        resultList
+                    }
+
+                    bulkInProgress = false
+                    if (parsedTxs.isNotEmpty()) {
+                        reviewTxs = parsedTxs
+                    } else {
+                        snackbarHostState.showSnackbar(t("no_tx_found"))
+                    }
+                    
+                } else {
+                    // Обычный импорт CSV или текста
+                    val text = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
+                    val parsedTxs = withContext(Dispatchers.IO) { SmsParser.parseImportedFile(text, allTxs, customRules) }
+                    if (parsedTxs.isNotEmpty()) { reviewTxs = parsedTxs } else snackbarHostState.showSnackbar(t("no_tx_found"))
+                }
+            } catch (e: Exception) { 
+                e.printStackTrace()
+                bulkInProgress = false
+                snackbarHostState.showSnackbar(t("file_read_error")) 
+            }
         } }
     }
+    
     val cardImagePicker = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { scope.launch {
             val bitmap = uriToBitmap(context, it)
@@ -319,7 +377,6 @@ fun App(
         }
     }
 
-    // ★ FB-05: Экран проверки импортированных пачек
     if (reviewTxs != null) {
         BackHandler { reviewTxs = null }
         ReviewScreen(
@@ -374,7 +431,7 @@ fun App(
                                     showMenu = false
                                     scope.launch {
                                         val found = withContext(Dispatchers.IO) { SmsParser.scanInbox(context, allTxs, customRules) }
-                                        if (found.isNotEmpty()) { reviewTxs = found } // ★ FB-05
+                                        if (found.isNotEmpty()) { reviewTxs = found }
                                         else snackbarHostState.showSnackbar(t("new_sms_not_found"))
                                     }
                                 })
@@ -433,8 +490,6 @@ fun App(
     if (showCardManager) CardManagerSheet(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
-    
-    // ★ FB-10: Передаем cards в DebtManagerSheet
     if (showDebtManager) DebtManagerSheet(debts, cards, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false })
 
     if (showRuleManager) RuleManagerSheet(
