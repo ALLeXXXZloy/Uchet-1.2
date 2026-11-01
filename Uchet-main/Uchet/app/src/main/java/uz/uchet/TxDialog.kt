@@ -83,6 +83,10 @@ fun TxDialog(
     var showRawTextDialog by remember { mutableStateOf(false) }
     val finalRawText = initial?.rawText ?: rawSourceText
 
+    // ★ FB-17: Состояния для режима "Это спам"
+    var showSpamDialog by remember { mutableStateOf(false) }
+    var spamKeyword by remember { mutableStateOf(description.take(15).trim().ifBlank { category }) }
+
     // Голосовой ввод
     val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -255,59 +259,71 @@ fun TxDialog(
                 Spacer(Modifier.height(16.dp))
 
                 // Кнопки
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    if (onDelete != null) {
-                        TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
-                            Text(t("delete"))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    // Левая часть: Удалить и "Это спам"
+                    Row {
+                        if (onDelete != null) {
+                            TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
+                                Text(t("delete"))
+                            }
+                        }
+                        // ★ FB-17: Кнопка "Это спам"
+                        TextButton(onClick = { showSpamDialog = true }, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
+                            Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Это спам", fontSize = 12.sp)
                         }
                     }
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { Text(t("cancel")) }
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        val parsedAmount = amountStr.replace(",", ".").toBigDecimalOrNull()
-                        if (parsedAmount == null) {
-                            Toast.makeText(context, t("error"), Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        val finalAmountMinor = parsedAmount.movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                        
-                        val newTx = Tx(
-                            id = initial?.id ?: 0,
-                            amountMinor = finalAmountMinor,
-                            type = type,
-                            cardId = if (cardId == "CASH") null else cardId,
-                            description = description,
-                            category = category,
-                            timestamp = dateMillis,
-                            source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL",
-                            currency = currency,
-                            rawText = finalRawText
-                        )
+                    
+                    // Правая часть: Отмена, Сохранить
+                    Row {
+                        TextButton(onClick = onDismiss) { Text(t("cancel")) }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = {
+                            val parsedAmount = amountStr.replace(",", ".").toBigDecimalOrNull()
+                            if (parsedAmount == null) {
+                                Toast.makeText(context, t("error"), Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val finalAmountMinor = parsedAmount.movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
+                            
+                            val newTx = Tx(
+                                id = initial?.id ?: 0,
+                                amountMinor = finalAmountMinor,
+                                type = type,
+                                cardId = if (cardId == "CASH") null else cardId,
+                                description = description,
+                                category = category,
+                                timestamp = dateMillis,
+                                source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL",
+                                currency = currency,
+                                rawText = finalRawText
+                            )
 
-                        // Запись коррекций (если это редактирование)
-                        if (initial != null) {
-                            val merchantHint = initial.description.take(30)
-                            if (initial.amountMinor != newTx.amountMinor) onRecordCorrection(merchantHint, "amount", initial.amountMinor.toString(), newTx.amountMinor.toString(), finalRawText ?: "")
-                            if (initial.type != newTx.type) onRecordCorrection(merchantHint, "type", initial.type.name, newTx.type.name, finalRawText ?: "")
-                            if (initial.cardId != newTx.cardId) onRecordCorrection(merchantHint, "card", initial.cardId ?: "null", newTx.cardId ?: "null", finalRawText ?: "")
-                            if (initial.category != newTx.category) onRecordCorrection(merchantHint, "category", initial.category, newTx.category, finalRawText ?: "")
-                            if (initial.description != newTx.description) onRecordCorrection(merchantHint, "merchant", initial.description, newTx.description, finalRawText ?: "")
-                        }
+                            // Запись коррекций (если это редактирование)
+                            if (initial != null) {
+                                val merchantHint = initial.description.take(30)
+                                if (initial.amountMinor != newTx.amountMinor) onRecordCorrection(merchantHint, "amount", initial.amountMinor.toString(), newTx.amountMinor.toString(), finalRawText ?: "")
+                                if (initial.type != newTx.type) onRecordCorrection(merchantHint, "type", initial.type.name, newTx.type.name, finalRawText ?: "")
+                                if (initial.cardId != newTx.cardId) onRecordCorrection(merchantHint, "card", initial.cardId ?: "null", newTx.cardId ?: "null", finalRawText ?: "")
+                                if (initial.category != newTx.category) onRecordCorrection(merchantHint, "category", initial.category, newTx.category, finalRawText ?: "")
+                                if (initial.description != newTx.description) onRecordCorrection(merchantHint, "merchant", initial.description, newTx.description, finalRawText ?: "")
+                            }
 
-                        // Сохранение правила
-                        if (saveRule && ruleKeyword.isNotBlank()) {
-                            onSaveRule(ruleKeyword.trim(), category, type)
-                        }
+                            // Сохранение правила
+                            if (saveRule && ruleKeyword.isNotBlank()) {
+                                onSaveRule(ruleKeyword.trim(), category, type)
+                            }
 
-                        // Увеличение счетчика примененного правила
-                        if (appliedRuleId != null && appliedRuleId != 0L) {
-                            onRuleApplied(appliedRuleId!!)
-                        }
+                            // Увеличение счетчика примененного правила
+                            if (appliedRuleId != null && appliedRuleId != 0L) {
+                                onRuleApplied(appliedRuleId!!)
+                            }
 
-                        onSave(newTx)
-                    }) {
-                        Text(t("save"))
+                            onSave(newTx)
+                        }) {
+                            Text(t("save"))
+                        }
                     }
                 }
             }
@@ -332,6 +348,44 @@ fun TxDialog(
                     clipboardManager.setText(AnnotatedString(finalRawText))
                     Toast.makeText(context, "Текст скопирован", Toast.LENGTH_SHORT).show()
                 }) { Text("Копировать") }
+            }
+        )
+    }
+
+    // ★ FB-17: Диалог "Это спам"
+    if (showSpamDialog) {
+        AlertDialog(
+            onDismissRequest = { showSpamDialog = false },
+            title = { Text("Игнорировать как спам") },
+            text = {
+                Column {
+                    Text("Приложение больше не будет создавать операции, если встретит это слово в СМС или уведомлении.")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = spamKeyword,
+                        onValueChange = { spamKeyword = it },
+                        label = { Text("Ключевое слово") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (spamKeyword.isNotBlank()) {
+                        // Сохраняем правило-игнор
+                        vm.saveCustomRule(spamKeyword.trim(), "IGNORE", type, isIgnored = true)
+                        // Удаляем операцию или закрываем диалог
+                        if (onDelete != null) {
+                            onDelete()
+                        } else {
+                            onDismiss()
+                        }
+                    }
+                }) { Text("Игнорировать и удалить", color = RED) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSpamDialog = false }) { Text("Отмена") }
             }
         )
     }
