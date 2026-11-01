@@ -74,9 +74,18 @@ object SmsParser {
 
     fun parseImportedFile(text: String, existing: List<Tx> = emptyList(), customRules: List<CustomKeywordRule> = emptyList()): List<Tx> {
         val clean = text.removePrefix("\uFEFF")
-        val lines = clean.lines()
-        val headerIdx = lines.indexOfFirst { line -> val l = line.trim().lowercase(); l.startsWith("datetime") && l.contains("direction") && l.contains("content") }
-        val parsed = if (headerIdx >= 0) parseCsvExport(lines.subList(headerIdx, lines.size).joinToString("\n"), customRules) else parsePdfText(clean, customRules)
+        
+        // ★ FB-15: Проверяем, является ли файл выпиской от банка Tez
+        val isTez = clean.contains("ВЫПИСКА ПО КАРТЕ") && clean.contains("Номер карты клиента:")
+        
+        val parsed = if (isTez) {
+            parseTezStatement(clean, customRules)
+        } else {
+            val lines = clean.lines()
+            val headerIdx = lines.indexOfFirst { line -> val l = line.trim().lowercase(); l.startsWith("datetime") && l.contains("direction") && l.contains("content") }
+            if (headerIdx >= 0) parseCsvExport(lines.subList(headerIdx, lines.size).joinToString("\n"), customRules) else parsePdfText(clean, customRules)
+        }
+        
         if (existing.isEmpty()) return parsed
         return parsed.filterNot { newTx -> existing.any { old -> old.amountMinor == newTx.amountMinor && old.type == newTx.type && old.cardId == newTx.cardId && kotlin.math.abs(old.timestamp - newTx.timestamp) < 60_000L } }
     }
@@ -139,6 +148,66 @@ object SmsParser {
         return records.filter { it.isNotEmpty() }
     }
 
+    // ★ FB-15: Специфический парсер выписок от банка Tez
+    private fun parseTezStatement(text: String, customRules: List<CustomKeywordRule>): List<Tx> {
+        val result = mutableListOf<Tx>()
+        
+        // Ищем номер карты (например: 441359****3290)
+        val cardRegex = Regex("""Номер карты клиента:\s*\d{6}\*+(\d{4})""")
+        val cardLast4 = cardRegex.find(text)?.groupValues?.get(1) ?: "0000"
+        val cardId = "${cardLast4}_UZS"
+
+        // Ищем транзакции
+        // Пример: 06-06-2026 14:25:06WBTAXI NONE3DS-41 000,00-41 000,00UZS-259 000,00
+        val txRegex = Regex("""(?<date>\d{2}-\d{2}-\d{4})\s+(?<time>\d{2}:\d{2}:\d{2})(?<desc>.*?)(?<sign>[+-])(?<amount>\d{1,3}(?:\s\d{3})*,\d{2})""")
+
+        for (match in txRegex.findAll(text)) {
+            val dateStr = match.groups["date"]?.value ?: continue
+            val timeStr = match.groups["time"]?.value ?: continue
+            val desc = match.groups["desc"]?.value?.trim() ?: ""
+            val sign = match.groups["sign"]?.value ?: ""
+            val amountStr = match.groups["amount"]?.value ?: continue
+
+            // Фильтрация переводов в Копилку и из Копилки
+            val lowerDesc = desc.lowercase()
+            if (lowerDesc.contains("копилк") || 
+                lowerDesc.contains("popolnenie kopilka") || 
+                lowerDesc.contains("rasxod popolnenie kopilka") || 
+                lowerDesc.contains("округление баланса") ||
+                lowerDesc.contains("процент на остаток") ||
+                lowerDesc.contains("разбитие копилки")) {
+                continue
+            }
+
+            val amountDouble = amountStr.replace(" ", "").replace(",", ".").toDoubleOrNull() ?: continue
+            val amountMinor = (amountDouble * 100).toLong()
+            
+            val type = if (sign == "+") TxType.INCOME else TxType.EXPENSE
+            
+            // Парсинг даты: dd-MM-yyyy HH:mm:ss
+            val formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")
+            val ts = try {
+                LocalDateTime.parse("$dateStr $timeStr", formatter).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            } catch (e: Exception) {
+                System.currentTimeMillis()
+            }
+
+            val category = guessCategory(lowerDesc, desc, customRules, type).category
+
+            result.add(Tx(
+                amountMinor = amountMinor,
+                type = type,
+                cardId = cardId,
+                description = desc,
+                category = category,
+                timestamp = ts,
+                source = "IMPORT",
+                rawText = match.value // Сохраняем оригинальную строку для самообучения
+            ))
+        }
+        return result
+    }
+
     private fun parsePdfText(text: String, customRules: List<CustomKeywordRule>): List<Tx> {
         val result = mutableListOf<Tx>()
         val normText = text.replace(Regex("\\s+"), " ")
@@ -164,7 +233,7 @@ object SmsParser {
             result.add(Tx(
                 amountMinor = amountMinor, type = type, cardId = cardId, description = displayDesc,
                 category = category, timestamp = ts, source = "IMPORT",
-                rawText = desc   // ★ D: PDF-импорт — сохраняем исходное описание как контекст
+                rawText = desc
             ))
         }
         return result
@@ -215,10 +284,8 @@ object SmsParser {
         return ""
     }
 
-    // ★ #5: возвращает RuleMatch с ruleId/keyword
     private fun guessCategory(lower: String, merchant: String, customRules: List<CustomKeywordRule>, expectedType: TxType): RuleMatch {
         val t = "$lower ${merchant.lowercase()}"
-        // ★ FB-17: отсеиваем правила-игноры, чтобы они не влияли на категоризацию
         val matched = customRules
             .filter { !it.isIgnored && it.type == expectedType && t.contains(it.keyword) }
             .maxByOrNull { it.keyword.length }
@@ -253,7 +320,6 @@ object SmsParser {
 
     private fun normalizeAmount(str: String): Long? = try { BigDecimal(str.replace(Regex("[^\\d.,]"), "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() } catch (_: Exception) { null }
 
-    // ★ D: сохраняем rawBody как rawText — это контекст для CorrectionEntity
     private fun BankTx.toTx(source: String) = Tx(
         amountMinor = amountMinor, type = type,
         cardId = cardLast4?.let { "${it}_$currency" },
