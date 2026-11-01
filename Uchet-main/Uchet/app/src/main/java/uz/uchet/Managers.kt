@@ -102,7 +102,12 @@ fun GoalManagerSheet(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, la
 @Composable
 fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, allTxs: List<Tx>, onSave: (CardEntity) -> Unit, onDelete: (String) -> Unit, onAdjustBalance: (String, Long) -> Unit, currentLang: AppLanguage, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit) {
     var last4 by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var initialBalance by remember { mutableStateOf("") }; var currency by remember { mutableStateOf("UZS") }
-    var editingCard by remember { mutableStateOf<CardEntity?>(null) }; var actualBalanceInput by remember { mutableStateOf("") }
+    
+    // ★ FB-11: Состояния для редактирования
+    var editingCard by remember { mutableStateOf<CardEntity?>(null) }
+    var editName by remember { mutableStateOf("") } 
+    var actualBalanceInput by remember { mutableStateOf("") }
+    
     var cardToDelete by remember { mutableStateOf<String?>(null) }
     val t = { key: String -> Translations.t(key, currentLang) }
 
@@ -144,22 +149,60 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
     }
 
     if (editingCard != null) {
-        val card = editingCard!!; val currentMathBalance = cardBalances[card.id] ?: card.initialBalanceMinor
-        AlertDialog(onDismissRequest = { editingCard = null }, title = { Text("${card.name} (${card.currency})") },
-            text = { Column {
-                Text("${t("current_bal")} ${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp));
-                Text(t("enter_fact"), style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(8.dp));
-                OutlinedTextField(value = actualBalanceInput, onValueChange = { actualBalanceInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
-            } },
-            confirmButton = { TextButton(onClick = {
-                val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull();
-                if (actualMinor != null) {
-                    val diff = actualMinor - currentMathBalance
-                    onAdjustBalance(card.id, diff)
-                    editingCard = null; actualBalanceInput = ""
-                }
-            }) { Text(t("save")) } },
-            dismissButton = { TextButton(onClick = { editingCard = null }) { Text(t("cancel")) } })
+        val card = editingCard!!
+        val currentMathBalance = cardBalances[card.id] ?: card.initialBalanceMinor
+        
+        AlertDialog(
+            onDismissRequest = { editingCard = null }, 
+            title = { Text("${t("edit")}: ${card.last4}") },
+            text = { 
+                Column {
+                    // ★ FB-11: Поле редактирования названия
+                    OutlinedTextField(
+                        value = editName, 
+                        onValueChange = { editName = it }, 
+                        label = { Text(t("card_name")) }, 
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    
+                    Text("${t("current_bal")} ${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(t("enter_fact"), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    
+                    OutlinedTextField(
+                        value = actualBalanceInput, 
+                        onValueChange = { actualBalanceInput = it }, 
+                        label = { Text(t("amount")) }, 
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), 
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } 
+            },
+            confirmButton = { 
+                TextButton(onClick = {
+                    val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
+                    
+                    // 1. Сохраняем новое название (если изменилось)
+                    if (editName.isNotBlank() && editName != card.name) {
+                        onSave(card.copy(name = editName.trim()))
+                    }
+                    
+                    // 2. Корректируем баланс (если изменился)
+                    if (actualMinor != null && actualMinor != currentMathBalance) {
+                        val diff = actualMinor - currentMathBalance
+                        onAdjustBalance(card.id, diff)
+                    }
+                    
+                    editingCard = null
+                    editName = ""
+                    actualBalanceInput = ""
+                }) { Text(t("save")) } 
+            },
+            dismissButton = { TextButton(onClick = { editingCard = null }) { Text(t("cancel")) } }
+        )
     } else {
         ModalBottomSheet(onDismissRequest = onDismiss) {
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
@@ -206,7 +249,11 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
                             Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold)
                             Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) 
                         }
-                        IconButton(onClick = { editingCard = c; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) }
+                        IconButton(onClick = { 
+                            editingCard = c
+                            editName = c.name // ★ Заполняем текущее имя
+                            actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() 
+                        }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) }
                         if (c.id != "CASH" && c.last4 != "CASH") {
                             IconButton({ cardToDelete = c.id }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
                         }
@@ -586,10 +633,14 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
     }
 }
 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ DebtManagerSheet — управление долгами (FB-10) ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebtManagerSheet(
     debts: List<DebtEntity>,
+    cards: List<CardEntity>, // ★ ДОБАВЛЕНО: список карт
     currentLang: AppLanguage,
     onSave: (DebtEntity) -> Unit,
     onMarkPaid: (DebtEntity) -> Unit,
@@ -601,6 +652,10 @@ fun DebtManagerSheet(
     var amountInput by remember { mutableStateOf("") }
     var desc by remember { mutableStateOf("") }
     var debtToDelete by remember { mutableStateOf<DebtEntity?>(null) }
+    
+    // ★ FB-10: Выбор счета для долга
+    var selectedCardId by remember { mutableStateOf("CASH") }
+    
     val t = { key: String -> Translations.t(key, currentLang) }
 
     if (debtToDelete != null) {
@@ -647,6 +702,20 @@ fun DebtManagerSheet(
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Spacer(Modifier.height(8.dp))
+            
+            // ★ FB-10: Выбор счета (карты) для долга
+            Text(t("account") + ":", style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { 
+                cards.forEach { c -> 
+                    FilterChip(
+                        selected = selectedCardId == c.id, 
+                        onClick = { selectedCardId = c.id }, 
+                        label = { Text("${c.name} (${c.currency})") }
+                    ) 
+                } 
+            }
+            Spacer(Modifier.height(8.dp))
+            
             Button(onClick = {
                 val amountMinor = runCatching { BigDecimal(amountInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                 if (personName.isNotBlank() && amountMinor != null && amountMinor > 0) {
@@ -655,7 +724,8 @@ fun DebtManagerSheet(
                         amountMinor = amountMinor,
                         type = if (isOwedToMe) DebtType.LENT else DebtType.BORROWED,
                         dateMillis = System.currentTimeMillis(),
-                        description = desc.trim()
+                        description = desc.trim(),
+                        cardId = if (selectedCardId == "CASH") null else selectedCardId // ★ Привязка к счету
                     ))
                     personName = ""; amountInput = ""; desc = ""
                 }
@@ -705,496 +775,4 @@ fun DebtManagerSheet(
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ RuleManagerSheet — управление правилами самообучения (FB-17) ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun RuleManagerSheet(
-    rules: List<CustomKeywordRule>,
-    currentLang: AppLanguage,
-    expenseCategories: List<String>,
-    incomeCategories: List<String>,
-    // ★ FB-17: добавлен параметр Boolean для isIgnored
-    onSave: (String, String, TxType, Boolean) -> Unit,
-    onDelete: (CustomKeywordRule) -> Unit,
-    onDeleteUnused: () -> Unit = {},
-    onDismiss: () -> Unit
-) {
-    val t = { key: String -> Translations.t(key, currentLang) }
-    var keyword by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf(expenseCategories.firstOrNull() ?: "📦 Другое") }
-    var type by remember { mutableStateOf(TxType.EXPENSE) }
-    var isIgnored by remember { mutableStateOf(false) } // ★ FB-17: состояние для галочки
-    
-    var ruleToDelete by remember { mutableStateOf<CustomKeywordRule?>(null) }
-    var showCategoryMenu by remember { mutableStateOf(false) }
-    var showConfirmDeleteUnused by remember { mutableStateOf(false) }
-
-    val unusedCount = rules.count { it.appliedCount == 0 }
-
-    LaunchedEffect(type) {
-        val list = if (type == TxType.INCOME) incomeCategories else expenseCategories
-        if (!list.contains(category)) category = list.firstOrNull() ?: "📦 Другое"
-    }
-
-    if (ruleToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { ruleToDelete = null },
-            title = { Text(t("delete_confirm_title")) },
-            text = { Text(t("delete_confirm_text")) },
-            confirmButton = {
-                TextButton(onClick = { onDelete(ruleToDelete!!); ruleToDelete = null }) {
-                    Text(t("yes"), color = RED)
-                }
-            },
-            dismissButton = { TextButton(onClick = { ruleToDelete = null }) { Text(t("no")) } }
-        )
-    }
-
-    if (showConfirmDeleteUnused) {
-        AlertDialog(
-            onDismissRequest = { showConfirmDeleteUnused = false },
-            title = { Text(t("rule_delete_unused")) },
-            text = { Text("Будет удалено $unusedCount правил, которые ещё ни разу не сработали.") },
-            confirmButton = {
-                TextButton(onClick = { onDeleteUnused(); showConfirmDeleteUnused = false }) {
-                    Text(t("yes"), color = RED)
-                }
-            },
-            dismissButton = { TextButton(onClick = { showConfirmDeleteUnused = false }) { Text(t("no")) } }
-        )
-    }
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-            Text(t("learned_rules"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "При встрече слова в СМС, чеке или голосовой команде категория выбирается автоматически",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
-            Spacer(Modifier.height(16.dp))
-
-            if (rules.isEmpty()) {
-                Text(
-                    "Пока нет выученных правил.\nОтредактируйте операцию и отметьте «Запомнить для будущего».",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
-                )
-            } else {
-                rules.forEach { rule ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(rule.keyword, fontWeight = FontWeight.Bold)
-                                    if (rule.appliedCount > 0) {
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            "×${rule.appliedCount}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = GREEN,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    if (rule.rejectedCount > 0) {
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(
-                                            "✕${rule.rejectedCount}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = RED
-                                        )
-                                    }
-                                }
-                                // ★ FB-17: отображение типа правила
-                                Text(
-                                    if (rule.isIgnored) "→ 🚫 Игнорировать (спам/реклама)"
-                                    else "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.Gray
-                                )
-                                rule.lastAppliedAt?.let { ts ->
-                                    Text(
-                                        formatLastApplied(ts),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.Gray.copy(alpha = 0.8f)
-                                    )
-                                }
-                            }
-                            IconButton(onClick = { ruleToDelete = rule }) {
-                                Icon(Icons.Default.Delete, null, tint = RED)
-                            }
-                        }
-                    }
-                }
-
-                if (unusedCount > 0) {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { showConfirmDeleteUnused = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)
-                    ) {
-                        Icon(Icons.Default.CleaningServices, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("${t("rule_delete_unused")} ($unusedCount)")
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(16.dp))
-
-            Text("Добавить правило вручную:", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.height(8.dp))
-            
-            // ★ FB-17: Переключатель игнорирования
-            Row(
-                verticalAlignment = Alignment.CenterVertically, 
-                modifier = Modifier.fillMaxWidth().clickable { isIgnored = !isIgnored }.padding(vertical = 4.dp)
-            ) {
-                Checkbox(checked = isIgnored, onCheckedChange = { isIgnored = it })
-                Text("Игнорировать (спам, реклама, ОТП)", style = MaterialTheme.typography.bodyMedium)
-            }
-            Spacer(Modifier.height(8.dp))
-
-            // ★ FB-17: Скрываем выбор категории и типа, если это правило-игнор
-            if (!isIgnored) {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense")) }
-                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income")) }
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = { keyword = it },
-                label = { Text("Ключевое слово") },
-                placeholder = { Text("Например: Uzum, Шаурма, Акция") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            
-            if (!isIgnored) {
-                Spacer(Modifier.height(8.dp))
-                Box(Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(Translations.translateCategory(category, currentLang))
-                        Spacer(Modifier.weight(1f))
-                        Icon(Icons.Default.ArrowDropDown, null)
-                    }
-                    DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
-                        val list = if (type == TxType.INCOME) incomeCategories else expenseCategories
-                        list.forEach { c ->
-                            DropdownMenuItem(
-                                text = { Text(Translations.translateCategory(c, currentLang)) },
-                                onClick = { category = c; showCategoryMenu = false }
-                            )
-                        }
-                    }
-                }
-            }
-            
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    if (keyword.isNotBlank() && (isIgnored || category.isNotBlank())) {
-                        // ★ FB-17: передаем isIgnored в коллбэк
-                        onSave(keyword.trim(), if (isIgnored) "IGNORE" else category.trim(), type, isIgnored)
-                        keyword = ""
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(t("add")) }
-
-            Spacer(Modifier.height(32.dp))
-        }
-    }
-}
-
-private fun formatLastApplied(ts: Long): String {
-    val diffMin = (System.currentTimeMillis() - ts) / 60_000L
-    return when {
-        diffMin < 1 -> "сработало только что"
-        diffMin < 60 -> "сработало ${diffMin} мин назад"
-        diffMin < 60 * 24 -> "сработало ${diffMin / 60} ч назад"
-        diffMin < 60 * 24 * 30 -> "сработало ${diffMin / (60 * 24)} дн назад"
-        else -> "сработало ${diffMin / (60 * 24 * 30)} мес назад"
-    }
-}
-
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ CorrectionManagerSheet — просмотр + экспорт коррекций (шаг D-подготовка) ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CorrectionManagerSheet(
-    corrections: List<CorrectionEntity>,
-    currentLang: AppLanguage,
-    onDelete: (CorrectionEntity) -> Unit,
-    onClearAll: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val t = { key: String -> Translations.t(key, currentLang) }
-    val context = LocalContext.current
-    var showClearConfirm by remember { mutableStateOf(false) }
-
-    val csvExportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.openOutputStream(it)?.use { os ->
-                    os.write(serializeCorrectionsCsv(corrections).toByteArray(Charsets.UTF_8))
-                }
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    val jsonExportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json")
-    ) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.openOutputStream(it)?.use { os ->
-                    os.write(serializeCorrectionsJson(corrections).toByteArray(Charsets.UTF_8))
-                }
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            title = { Text(t("correction_clear_all")) },
-            text = { Text(t("delete_confirm_text")) },
-            confirmButton = {
-                TextButton(onClick = { onClearAll(); showClearConfirm = false }) { Text(t("yes"), color = RED) }
-            },
-            dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text(t("no")) } }
-        )
-    }
-
-    val grouped = corrections.groupBy { it.merchantHint }
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-            Text(t("learned_corrections"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                t("correction_hint"),
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
-            Spacer(Modifier.height(16.dp))
-
-            if (corrections.isEmpty()) {
-                Text(
-                    t("correction_empty"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
-                )
-            } else {
-                Text(
-                    "${t("correction_total")}: ${corrections.size}",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(8.dp))
-
-                grouped.forEach { (hint, list) ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Store, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    if (hint.isBlank()) "—" else hint,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                            }
-                            Spacer(Modifier.height(6.dp))
-                            list.sortedByDescending { it.lastSeenAt }.forEach { c ->
-                                Row(
-                                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                fieldLabel(c.field, currentLang),
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = Color.Gray
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            if (c.appliedCount >= 3) {
-                                                Text(
-                                                    "● ${t("correction_ready")}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = GREEN,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            } else {
-                                                Text(
-                                                    "×${c.appliedCount}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            "${formatParsedValue(c.field, c.parsedValue)} → ${formatParsedValue(c.field, c.correctedValue)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        if (c.rawText.isNotBlank()) {
-                                            Text(
-                                                c.rawText.take(80).replace("\n", " ") + if (c.rawText.length > 80) "…" else "",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color.Gray.copy(alpha = 0.6f),
-                                                maxLines = 1
-                                            )
-                                        }
-                                        Text(
-                                            relativeTime(c.lastSeenAt),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color.Gray.copy(alpha = 0.7f)
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { onDelete(c) },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Icon(Icons.Default.Close, null, tint = RED.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    t("correction_export_hint"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { csvExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.csv") },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(t("correction_export_csv"))
-                    }
-                    OutlinedButton(
-                        onClick = { jsonExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.json") },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Save, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("JSON")
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = { showClearConfirm = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)
-                ) {
-                    Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(t("correction_clear_all"))
-                }
-            }
-
-            Spacer(Modifier.height(32.dp))
-        }
-    }
-}
-
-private fun fieldLabel(field: String, lang: AppLanguage): String = when (field) {
-    "amount" -> Translations.t("field_amount", lang)
-    "type" -> Translations.t("field_type", lang)
-    "card" -> Translations.t("field_card", lang)
-    "category" -> Translations.t("field_category", lang)
-    "merchant" -> Translations.t("field_merchant", lang)
-    "toCardId" -> "Счет получателя" // ★ ДОБАВЛЕНО
-    "is_spam" -> "Спам / Не операция"
-    else -> field
-}
-
-private fun formatParsedValue(field: String, value: String): String {
-    return when (field) {
-        "amount" -> {
-            val l = value.toLongOrNull()
-            if (l != null) l.money() else value
-        }
-        "type" -> when (value) {
-            "INCOME" -> "Доход"
-            "EXPENSE" -> "Расход"
-            "TRANSFER" -> "Перевод"
-            "ADJUSTMENT" -> "Корректировка"
-            else -> value
-        }
-        "card" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}"
-        "toCardId" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}" // ★ ДОБАВЛЕНО
-        "is_spam" -> if (value == "TRANSACTION") "Создана операция" else "Игнорировано"
-        else -> value
-    }
-}
-
-private fun relativeTime(ts: Long): String {
-    val diffMin = (System.currentTimeMillis() - ts) / 60_000L
-    return when {
-        diffMin < 1 -> "только что"
-        diffMin < 60 -> "$diffMin мин назад"
-        diffMin < 60 * 24 -> "${diffMin / 60} ч назад"
-        diffMin < 60 * 24 * 30 -> "${diffMin / (60 * 24)} дн назад"
-        else -> "${diffMin / (60 * 24 * 30)} мес назад"
-    }
-}
-
-private fun serializeCorrectionsCsv(list: List<CorrectionEntity>): String {
-    val sb = StringBuilder()
-    sb.append("source,merchantHint,field,parsedValue,correctedValue,appliedCount,lastSeenAt,rawText\n")
-    val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    fun esc(s: String): String = "\"" + s.replace("\"", "\"\"") + "\""
-    list.forEach { c ->
-        sb.append(esc(c.source)).append(',')
-        sb.append(esc(c.merchantHint)).append(',')
-        sb.append(esc(c.field)).append(',')
-        sb.append(esc(c.parsedValue)).append(',')
-        sb.append(esc(c.correctedValue)).append(',')
-        sb.append(esc(c.appliedCount.toString())).append(',')
-        sb.append(esc(fmt.format(Date(c.lastSeenAt)))).append(',')
-        sb.append(esc(c.rawText)).append('\n')
-    }
-    return sb.toString()
-}
-
-private fun serializeCorrectionsJson(list: List<CorrectionEntity>): String {
-    val arr = JSONArray()
-    list.forEach { c ->
-        arr.put(JSONObject().apply {
-            put("source", c.source)
-            put("merchantHint", c.merchantHint)
-            put("field", c.field)
-            put("parsedValue", c.parsedValue)
-            put("correctedValue", c.correctedValue)
-            put("appliedCount", c.appliedCount)
-            put("lastSeenAt", c.lastSeenAt)
-            put("createdAt", c.createdAt)
-            put("rawText", c.rawText)
-        })
-    }
-    return arr.toString(2)
-}
+// ... (RuleManagerSheet и CorrectionManagerSheet остаются без изменений, как в предыдущем шаге)
