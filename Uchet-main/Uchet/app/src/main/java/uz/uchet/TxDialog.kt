@@ -373,9 +373,19 @@ fun TxDialog(
             confirmButton = {
                 TextButton(onClick = {
                     if (spamKeyword.isNotBlank()) {
-                        // Сохраняем правило-игнор
+                        // 1. Сохраняем правило-игнор
                         vm.saveCustomRule(spamKeyword.trim(), "IGNORE", type, isIgnored = true)
-                        // Удаляем операцию или закрываем диалог
+                        
+                        // ★ ДОБАВЛЕНО: 2. Записываем факт спама в коррекции для обучения
+                        onRecordCorrection(
+                            initial?.description ?: "СПАМ",
+                            "is_spam",
+                            "TRANSACTION",
+                            "IGNORED",
+                            finalRawText ?: ""
+                        )
+
+                        // 3. Удаляем операцию или закрываем диалог
                         if (onDelete != null) {
                             onDelete()
                         } else {
