@@ -182,24 +182,42 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
+    // ★ FB-10: теперь используем cardId при создании транзакции долга
     fun saveDebt(debt: DebtEntity) {
         viewModelScope.launch {
             dao.upsertDebt(debt)
             if (debt.id == 0L) {
                 val txType = if (debt.type == DebtType.BORROWED) TxType.INCOME else TxType.EXPENSE
                 val txDesc = if (debt.type == DebtType.BORROWED) "Взял в долг: ${debt.personName}" else "Дал в долг: ${debt.personName}"
-                val tx = Tx(amountMinor = debt.amountMinor, type = txType, description = txDesc, category = "🤝 Долги", timestamp = debt.dateMillis, source = "DEBT")
+                val tx = Tx(
+                    amountMinor = debt.amountMinor, 
+                    type = txType, 
+                    cardId = debt.cardId, // ★ Привязываем к карте
+                    description = txDesc, 
+                    category = "🤝 Долги", 
+                    timestamp = debt.dateMillis, 
+                    source = "DEBT"
+                )
                 dao.upsert(tx)
             }
         }
     }
 
+    // ★ FB-10: теперь используем cardId при возврате долга
     fun markDebtPaid(debt: DebtEntity) {
         viewModelScope.launch {
             dao.upsertDebt(debt.copy(isPaid = true))
             val txType = if (debt.type == DebtType.BORROWED) TxType.EXPENSE else TxType.INCOME
             val txDesc = if (debt.type == DebtType.BORROWED) "Вернул долг: ${debt.personName}" else "Мне вернули долг: ${debt.personName}"
-            val tx = Tx(amountMinor = debt.amountMinor, type = txType, description = txDesc, category = "🤝 Долги", timestamp = System.currentTimeMillis(), source = "DEBT")
+            val tx = Tx(
+                amountMinor = debt.amountMinor, 
+                type = txType, 
+                cardId = debt.cardId, // ★ Привязываем к карте
+                description = txDesc, 
+                category = "🤝 Долги", 
+                timestamp = System.currentTimeMillis(), 
+                source = "DEBT"
+            )
             dao.upsert(tx)
         }
     }
@@ -216,7 +234,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     }
 
     // === Custom rules ===
-    // ★ FB-17: добавлен параметр isIgnored
     fun saveCustomRule(keyword: String, category: String, type: TxType, isIgnored: Boolean = false) {
         if (keyword.isBlank()) return
         viewModelScope.launch {
@@ -314,14 +331,17 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         root.put("txs", txsArray)
 
         val debtsArray = JSONArray()
-        allDebts.forEach { d -> debtsArray.put(JSONObject().apply { put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency) }) }
+        allDebts.forEach { d -> debtsArray.put(JSONObject().apply { 
+            put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency) 
+            put("cardId", d.cardId ?: JSONObject.NULL) // ★ FB-10
+        }) }
         root.put("debts", debtsArray)
 
         val rulesArray = JSONArray()
         allRules.forEach { r -> rulesArray.put(JSONObject().apply {
             put("id", r.id); put("keyword", r.keyword); put("category", r.category); put("type", r.type.name)
             put("appliedCount", r.appliedCount); put("lastAppliedAt", r.lastAppliedAt ?: JSONObject.NULL); put("rejectedCount", r.rejectedCount)
-            put("isIgnored", r.isIgnored) // ★ FB-17: сохраняем флаг
+            put("isIgnored", r.isIgnored)
         }) }
         root.put("custom_rules", rulesArray)
 
@@ -418,7 +438,17 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         root.optJSONArray("debts")?.let { debtsArray ->
             for (i in 0 until debtsArray.length()) {
                 val o = debtsArray.getJSONObject(i)
-                debtsList.add(DebtEntity(o.optLong("id"), o.getString("personName"), o.getLong("amountMinor"), DebtType.valueOf(o.getString("type")), o.getLong("dateMillis"), o.optBoolean("isPaid"), o.optString("description"), o.optString("currency", "UZS")))
+                debtsList.add(DebtEntity(
+                    id = o.optLong("id"), 
+                    personName = o.getString("personName"), 
+                    amountMinor = o.getLong("amountMinor"), 
+                    type = DebtType.valueOf(o.getString("type")), 
+                    dateMillis = o.getLong("dateMillis"), 
+                    isPaid = o.optBoolean("isPaid"), 
+                    description = o.optString("description"), 
+                    currency = o.optString("currency", "UZS"),
+                    cardId = if (o.isNull("cardId")) null else o.optString("cardId") // ★ FB-10
+                ))
             }
         }
 
@@ -434,7 +464,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                     appliedCount = o.optInt("appliedCount", 0),
                     lastAppliedAt = if (o.isNull("lastAppliedAt")) null else o.optLong("lastAppliedAt"),
                     rejectedCount = o.optInt("rejectedCount", 0),
-                    isIgnored = o.optBoolean("isIgnored", false) // ★ FB-17: восстанавливаем флаг
+                    isIgnored = o.optBoolean("isIgnored", false)
                 ))
             }
         }
