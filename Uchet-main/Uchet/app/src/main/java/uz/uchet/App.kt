@@ -436,7 +436,8 @@ fun App(
         currentLang = currentLang.value,
         expenseCategories = expenseCategories,
         incomeCategories = incomeCategories,
-        onSave = { kw, cat, type -> vm.saveCustomRule(kw, cat, type) },
+        // ★ FB-17: добавлен isIgnored в коллбэк
+        onSave = { kw, cat, type, isIgnored -> vm.saveCustomRule(kw, cat, type, isIgnored) },
         onDelete = { rule -> vm.deleteCustomRule(rule) },
         onDeleteUnused = { vm.deleteUnusedRules() },
         onDismiss = { showRuleManager = false }
