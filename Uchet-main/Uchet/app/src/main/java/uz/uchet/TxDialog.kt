@@ -62,10 +62,11 @@ fun TxDialog(
     val clipboardManager = LocalClipboardManager.current
     val t = { key: String -> Translations.t(key, currentLang) }
 
-    // Инициализация полей (с учетом быстрых шаблонов)
+    // Инициализация полей
     var amountStr by remember { mutableStateOf(if (initial != null) BigDecimal(initial.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() else "") }
     var type by remember { mutableStateOf(initial?.type ?: quickTemplate?.type ?: TxType.EXPENSE) }
     var cardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
+    var toCardId by remember { mutableStateOf(initial?.toCardId ?: "CASH") } // ★ ДОБАВЛЕНО: Счет получателя
     var category by remember { mutableStateOf(initial?.category ?: quickTemplate?.category ?: (if (type == TxType.EXPENSE) expenseCategories.firstOrNull() ?: "" else incomeCategories.firstOrNull() ?: "")) }
     var description by remember { mutableStateOf(initial?.description ?: "") }
     val dateMillis = initial?.timestamp ?: System.currentTimeMillis()
@@ -75,7 +76,7 @@ fun TxDialog(
     var appliedRuleId by remember { mutableStateOf(ruleAppliedId) }
     var appliedRuleKeyword by remember { mutableStateOf(ruleAppliedKeyword) }
     
-    // Состояния для самообучения (Запомнить правило)
+    // Состояния для самообучения
     var saveRule by remember { mutableStateOf(false) }
     var ruleKeyword by remember { mutableStateOf(description.take(15)) }
 
@@ -107,7 +108,6 @@ fun TxDialog(
         }
     }
 
-    // Автозапуск голоса, если открыто долгим нажатием на FAB
     LaunchedEffect(autoStartVoice) {
         if (autoStartVoice) {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -141,7 +141,7 @@ fun TxDialog(
                     Text("Данные из СМС/Уведомления", color = YELLOW, style = MaterialTheme.typography.bodySmall)
                 }
 
-                // ★ FB-16: Блок оригинального текста (СМС / Чек / Выписка)
+                // ★ FB-16: Блок оригинального текста
                 if (!finalRawText.isNullOrBlank()) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
@@ -179,10 +179,11 @@ fun TxDialog(
                     }
                 }
 
-                // Тип (Расход / Доход)
+                // ★ Тип (Расход / Доход / Перевод) - теперь 3 кнопки
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE; category = expenseCategories.firstOrNull() ?: "" }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense")) }
-                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME; category = incomeCategories.firstOrNull() ?: "" }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income")) }
+                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE; category = expenseCategories.firstOrNull() ?: "" }, SegmentedButtonDefaults.itemShape(0, 3)) { Text(t("expense")) }
+                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME; category = incomeCategories.firstOrNull() ?: "" }, SegmentedButtonDefaults.itemShape(1, 3)) { Text(t("income")) }
+                    SegmentedButton(type == TxType.TRANSFER, { type = TxType.TRANSFER }, SegmentedButtonDefaults.itemShape(2, 3)) { Text(t("transfer")) }
                 }
 
                 // Сумма
@@ -195,14 +196,14 @@ fun TxDialog(
                     singleLine = true
                 )
 
-                // Карта
+                // Карта (Откуда)
                 var expandedCard by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(expanded = expandedCard, onExpandedChange = { expandedCard = !expandedCard }, modifier = Modifier.padding(vertical = 4.dp)) {
                     OutlinedTextField(
                         value = cards.find { it.id == cardId }?.name ?: t("cash"),
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text(t("account")) },
+                        label = { Text(if (type == TxType.TRANSFER) t("source_card") else t("account")) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCard) },
                         modifier = Modifier.menuAnchor().fillMaxWidth()
                     )
@@ -213,21 +214,43 @@ fun TxDialog(
                     }
                 }
 
-                // Категория
-                var expandedCat by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(expanded = expandedCat, onExpandedChange = { expandedCat = !expandedCat }, modifier = Modifier.padding(vertical = 4.dp)) {
-                    val catList = if (type == TxType.EXPENSE) expenseCategories else incomeCategories
-                    OutlinedTextField(
-                        value = Translations.translateCategory(category, currentLang),
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text(t("category")) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCat) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(expanded = expandedCat, onDismissRequest = { expandedCat = false }) {
-                        catList.forEach { c ->
-                            DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; expandedCat = false })
+                // ★ ДОБАВЛЕНО: Карта (Куда) для переводов
+                if (type == TxType.TRANSFER) {
+                    var expandedToCard by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(expanded = expandedToCard, onExpandedChange = { expandedToCard = !expandedToCard }, modifier = Modifier.padding(vertical = 4.dp)) {
+                        OutlinedTextField(
+                            value = cards.find { it.id == toCardId }?.name ?: t("cash"),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(t("to_account")) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedToCard) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(expanded = expandedToCard, onDismissRequest = { expandedToCard = false }) {
+                            cards.filter { it.id != cardId }.forEach { card ->
+                                DropdownMenuItem(text = { Text(card.name) }, onClick = { toCardId = card.id; expandedToCard = false })
+                            }
+                        }
+                    }
+                }
+
+                // Категория (только для доходов/расходов)
+                if (type != TxType.TRANSFER) {
+                    var expandedCat by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(expanded = expandedCat, onExpandedChange = { expandedCat = !expandedCat }, modifier = Modifier.padding(vertical = 4.dp)) {
+                        val catList = if (type == TxType.EXPENSE) expenseCategories else incomeCategories
+                        OutlinedTextField(
+                            value = Translations.translateCategory(category, currentLang),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(t("category")) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCat) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(expanded = expandedCat, onDismissRequest = { expandedCat = false }) {
+                            catList.forEach { c ->
+                                DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; expandedCat = false })
+                            }
                         }
                     }
                 }
@@ -242,32 +265,32 @@ fun TxDialog(
                 )
                 
                 // Чекбокс "Запомнить для будущего"
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveRule = !saveRule }.padding(vertical = 4.dp)) {
-                    Checkbox(checked = saveRule, onCheckedChange = { saveRule = it })
-                    Text("Запомнить для будущего", style = MaterialTheme.typography.bodyMedium)
-                }
-                if (saveRule) {
-                    OutlinedTextField(
-                        value = ruleKeyword,
-                        onValueChange = { ruleKeyword = it },
-                        label = { Text("Ключевое слово для правила") },
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        singleLine = true
-                    )
+                if (type != TxType.TRANSFER) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveRule = !saveRule }.padding(vertical = 4.dp)) {
+                        Checkbox(checked = saveRule, onCheckedChange = { saveRule = it })
+                        Text("Запомнить для будущего", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (saveRule) {
+                        OutlinedTextField(
+                            value = ruleKeyword,
+                            onValueChange = { ruleKeyword = it },
+                            label = { Text("Ключевое слово для правила") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            singleLine = true
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))
 
                 // Кнопки
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    // Левая часть: Удалить и "Это спам"
                     Row {
                         if (onDelete != null) {
                             TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
                                 Text(t("delete"))
                             }
                         }
-                        // ★ FB-17: Кнопка "Это спам"
                         TextButton(onClick = { showSpamDialog = true }, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
                             Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -275,7 +298,6 @@ fun TxDialog(
                         }
                     }
                     
-                    // Правая часть: Отмена, Сохранить
                     Row {
                         TextButton(onClick = onDismiss) { Text(t("cancel")) }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -287,35 +309,38 @@ fun TxDialog(
                             }
                             val finalAmountMinor = parsedAmount.movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
                             
+                            // Для переводов категория не нужна
+                            val finalCategory = if (type == TxType.TRANSFER) "💸 Перевод" else category
+                            
                             val newTx = Tx(
                                 id = initial?.id ?: 0,
                                 amountMinor = finalAmountMinor,
                                 type = type,
                                 cardId = if (cardId == "CASH") null else cardId,
+                                toCardId = if (type == TxType.TRANSFER) (if (toCardId == "CASH") null else toCardId) else null,
                                 description = description,
-                                category = category,
+                                category = finalCategory,
                                 timestamp = dateMillis,
                                 source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL",
                                 currency = currency,
                                 rawText = finalRawText
                             )
 
-                            // Запись коррекций (если это редактирование)
+                            // ★ Запись коррекций для самообучения
                             if (initial != null) {
                                 val merchantHint = initial.description.take(30)
                                 if (initial.amountMinor != newTx.amountMinor) onRecordCorrection(merchantHint, "amount", initial.amountMinor.toString(), newTx.amountMinor.toString(), finalRawText ?: "")
                                 if (initial.type != newTx.type) onRecordCorrection(merchantHint, "type", initial.type.name, newTx.type.name, finalRawText ?: "")
                                 if (initial.cardId != newTx.cardId) onRecordCorrection(merchantHint, "card", initial.cardId ?: "null", newTx.cardId ?: "null", finalRawText ?: "")
+                                if (initial.toCardId != newTx.toCardId) onRecordCorrection(merchantHint, "toCardId", initial.toCardId ?: "null", newTx.toCardId ?: "null", finalRawText ?: "") // ★ ДОБАВЛЕНО
                                 if (initial.category != newTx.category) onRecordCorrection(merchantHint, "category", initial.category, newTx.category, finalRawText ?: "")
                                 if (initial.description != newTx.description) onRecordCorrection(merchantHint, "merchant", initial.description, newTx.description, finalRawText ?: "")
                             }
 
-                            // Сохранение правила
                             if (saveRule && ruleKeyword.isNotBlank()) {
                                 onSaveRule(ruleKeyword.trim(), category, type)
                             }
 
-                            // Увеличение счетчика примененного правила
                             if (appliedRuleId != null && appliedRuleId != 0L) {
                                 onRuleApplied(appliedRuleId!!)
                             }
@@ -330,7 +355,7 @@ fun TxDialog(
         }
     }
 
-    // ★ FB-16: Диалог просмотра оригинального текста
+    // FB-16: Диалог оригинала
     if (showRawTextDialog && !finalRawText.isNullOrBlank()) {
         AlertDialog(
             onDismissRequest = { showRawTextDialog = false },
@@ -352,7 +377,7 @@ fun TxDialog(
         )
     }
 
-    // ★ FB-17: Диалог "Это спам"
+    // FB-17: Диалог спама
     if (showSpamDialog) {
         AlertDialog(
             onDismissRequest = { showSpamDialog = false },
@@ -373,30 +398,13 @@ fun TxDialog(
             confirmButton = {
                 TextButton(onClick = {
                     if (spamKeyword.isNotBlank()) {
-                        // 1. Сохраняем правило-игнор
                         vm.saveCustomRule(spamKeyword.trim(), "IGNORE", type, isIgnored = true)
-                        
-                        // ★ ДОБАВЛЕНО: 2. Записываем факт спама в коррекции для обучения
-                        onRecordCorrection(
-                            initial?.description ?: "СПАМ",
-                            "is_spam",
-                            "TRANSACTION",
-                            "IGNORED",
-                            finalRawText ?: ""
-                        )
-
-                        // 3. Удаляем операцию или закрываем диалог
-                        if (onDelete != null) {
-                            onDelete()
-                        } else {
-                            onDismiss()
-                        }
+                        onRecordCorrection(initial?.description ?: "СПАМ", "is_spam", "TRANSACTION", "IGNORED", finalRawText ?: "")
+                        if (onDelete != null) onDelete() else onDismiss()
                     }
                 }) { Text("Игнорировать и удалить", color = RED) }
             },
-            dismissButton = {
-                TextButton(onClick = { showSpamDialog = false }) { Text("Отмена") }
-            }
+            dismissButton = { TextButton(onClick = { showSpamDialog = false }) { Text("Отмена") } }
         )
     }
 }
