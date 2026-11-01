@@ -18,7 +18,7 @@ import java.time.format.DateTimeFormatter
 
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
-// ★ ДЛЯ ВАРИАНТА Б: Класс для хранения строки с координатами
+// Класс для хранения строки с координатами
 data class PdfLine(
     val text: String,
     val x: Float,
@@ -28,18 +28,18 @@ data class PdfLine(
     val page: Int
 )
 
-// ★ ДЛЯ ВАРИАНТА Б: Кастомный стриппер, который собирает координаты
+// Кастомный стриппер: собирает координаты каждой строки
 class CoordinateTextStripper : PDFTextStripper() {
     val lines = mutableListOf<PdfLine>()
     override fun writeString(text: String, textPositions: List<TextPosition>) {
         if (text.isBlank() || textPositions.isEmpty()) return
         val first = textPositions.first()
         val last = textPositions.last()
-        // PDFBox возвращает координаты от нижнего левого угла, YDirAdj переводит в координаты от верхнего левого
+        // PDFBox: getXDirAdj(), getYDirAdj(), getWidthDirAdj() — есть, getHeightDirAdj() — НЕТ
         val x = first.xDirAdj
         val y = first.yDirAdj
         val w = (last.xDirAdj + last.widthDirAdj) - x
-        val h = first.heightDirAdj
+        val h = first.heightDir   // ← исправлено
         lines.add(PdfLine(text.trim(), x, y, w, h, currentPageNo))
     }
 }
@@ -70,7 +70,6 @@ fun uriToBitmap(context: Context, uri: Uri): Bitmap? = try {
     null
 }
 
-// Извлекает просто текст (для старых парсеров, у которых нет координат)
 fun extractTextFromPdf(context: Context, uri: Uri): String {
     return try {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
@@ -83,13 +82,12 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
     } catch (e: Exception) { "" }
 }
 
-// ★ Рендеринг страницы PDF в Bitmap
 fun renderPdfPageToBitmap(context: Context, uri: Uri, pageIndex: Int = 0): Bitmap? {
     return try {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             val document = PDDocument.load(inputStream)
             val renderer = PDFRenderer(document)
-            val bitmap = renderer.renderImageWithDPI(pageIndex, 200f) // 200 DPI для четкости
+            val bitmap = renderer.renderImageWithDPI(pageIndex, 200f)
             document.close()
             bitmap
         }
@@ -99,25 +97,23 @@ fun renderPdfPageToBitmap(context: Context, uri: Uri, pageIndex: Int = 0): Bitma
     }
 }
 
-// ★ Вырезает кусок из Bitmap по координатам PdfLine (с отступами)
 fun cropBitmapByLine(original: Bitmap, line: PdfLine, padding: Int = 10): Bitmap {
     val left = (line.x - padding).coerceAtLeast(0f).toInt()
     val top = (line.y - line.height - padding).coerceAtLeast(0f).toInt()
     val right = (line.x + line.width + padding).coerceAtMost(original.width.toFloat()).toInt()
     val bottom = (line.y + padding).coerceAtMost(original.height.toFloat()).toInt()
-    
+
     val width = (right - left).coerceAtLeast(1)
     val height = (bottom - top).coerceAtLeast(1)
 
     return try {
         Bitmap.createBitmap(original, left, top, width, height)
     } catch (e: Exception) {
-        original // Возвращаем оригинал, если не удалось обрезать
+        original
     }
 }
 
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
-    // ... (без изменений)
     val result = mutableListOf<CardEntity>()
     val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
     val amountRegex = Regex("""([0-9Oo\s\u00A0]+(?:[.,]\d{1,2})?)\s*(?:cyM|сум|UZS|USD|EUR|RUB|so['`]?m)""", RegexOption.IGNORE_CASE)
