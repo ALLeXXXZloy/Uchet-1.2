@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.rendering.PDFRenderer
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -16,7 +17,6 @@ import java.time.format.DateTimeFormatter
 
 data class ParsedSms(val amountStr: String, val card: String?, val description: String, val category: String)
 
-// ★ ИСПРАВЛЕНО: добавлен параметр customRules
 fun scanInboxSms(
     context: Context,
     existingTxs: List<Tx>,
@@ -53,6 +53,23 @@ fun extractTextFromPdf(context: Context, uri: Uri): String {
             text
         } ?: ""
     } catch (e: Exception) { "" }
+}
+
+// ★ НОВОЕ: Рендеринг страницы PDF в Bitmap для скриншота
+fun renderPdfPageToBitmap(context: Context, uri: Uri, pageIndex: Int = 0): Bitmap? {
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            val document = PDDocument.load(inputStream)
+            val renderer = PDFRenderer(document)
+            // 150 DPI достаточно для читаемости текста
+            val bitmap = renderer.renderImageWithDPI(pageIndex, 150f)
+            document.close()
+            bitmap
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
 }
 
 fun parseCardsFromScreenshot(text: String): List<CardEntity> {
