@@ -12,8 +12,9 @@ object MerchantCategorizer {
         if (merchantName.isNullOrBlank()) return null
         val name = merchantName.lowercase()
 
+        // ★ FB-17: отсеиваем правила-игноры, чтобы они не влияли на категоризацию
         val matched = customRules
-            .filter { it.type == expectedType && name.contains(it.keyword.lowercase()) }
+            .filter { !it.isIgnored && it.type == expectedType && name.contains(it.keyword.lowercase()) }
             .maxByOrNull { it.keyword.length }
         if (matched != null) {
             val cat = availableCategories.find { it == matched.category } ?: matched.category
