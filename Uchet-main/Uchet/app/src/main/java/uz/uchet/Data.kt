@@ -70,7 +70,9 @@ data class CustomKeywordRule(
     val type: TxType,
     val appliedCount: Int = 0,
     val lastAppliedAt: Long? = null,
-    val rejectedCount: Int = 0
+    val rejectedCount: Int = 0,
+    // ★ FB-17: флаг игнорирования (реклама, спам, ОТП)
+    val isIgnored: Boolean = false
 )
 
 // ★★ #3 + D: Коррекция — запоминаем любое исправление поля пользователем + контекст
@@ -248,7 +250,7 @@ interface AppDao {
         PlanItemEntity::class, ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 14,
+    version = 15, // ★ FB-17: Версия БД увеличена до 15
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -318,6 +320,12 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("ALTER TABLE corrections ADD COLUMN rawText TEXT NOT NULL DEFAULT ''")
             }
         }
+        // ★ FB-17: миграция 14→15 — добавляем isIgnored в custom_keyword_rules
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN isIgnored INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         fun get(context: Context): AppDb {
             return INSTANCE ?: synchronized(this) {
@@ -325,7 +333,7 @@ abstract class AppDb : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                         MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
-                        MIGRATION_12_13, MIGRATION_13_14
+                        MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15 // ★ FB-17
                     )
                     .build()
                 INSTANCE = instance
