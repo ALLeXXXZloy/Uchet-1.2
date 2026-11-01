@@ -35,6 +35,11 @@ object SmsParser {
 
     fun classify(sender: String, body: String, timestamp: Long, customRules: List<CustomKeywordRule> = emptyList()): Pair<SmsCategory, BankTx?> {
         val lower = body.lowercase()
+        
+        // ★ FB-17: Проверяем правила-игноры в самом начале (реклама, спам, ОТП)
+        val ignoredByRule = customRules.any { it.isIgnored && lower.contains(it.keyword) }
+        if (ignoredByRule) return SmsCategory.ADVERTISING to null
+
         val tx = tryParseTransaction(sender, body, timestamp, lower, customRules)
         if (tx != null) return SmsCategory.TRANSACTION to tx
 
@@ -213,8 +218,9 @@ object SmsParser {
     // ★ #5: возвращает RuleMatch с ruleId/keyword
     private fun guessCategory(lower: String, merchant: String, customRules: List<CustomKeywordRule>, expectedType: TxType): RuleMatch {
         val t = "$lower ${merchant.lowercase()}"
+        // ★ FB-17: отсеиваем правила-игноры, чтобы они не влияли на категоризацию
         val matched = customRules
-            .filter { it.type == expectedType && t.contains(it.keyword) }
+            .filter { !it.isIgnored && it.type == expectedType && t.contains(it.keyword) }
             .maxByOrNull { it.keyword.length }
         if (matched != null) return RuleMatch(matched.category, matched.id, matched.keyword)
 
