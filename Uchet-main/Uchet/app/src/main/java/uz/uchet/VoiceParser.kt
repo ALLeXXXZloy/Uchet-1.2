@@ -72,8 +72,9 @@ object VoiceParser {
 
     // ★ #5: возвращает RuleMatch? вместо String?
     private fun findCategory(text: String, categories: List<String>, customRules: List<CustomKeywordRule>, expectedType: TxType? = null): RuleMatch? {
+        // ★ FB-17: отсеиваем правила-игноры, чтобы они не влияли на категоризацию
         val matched = customRules
-            .filter { (expectedType == null || it.type == expectedType) && text.contains(it.keyword) }
+            .filter { !it.isIgnored && (expectedType == null || it.type == expectedType) && text.contains(it.keyword) }
             .maxByOrNull { it.keyword.length }
         if (matched != null) return RuleMatch(matched.category, matched.id, matched.keyword)
 
