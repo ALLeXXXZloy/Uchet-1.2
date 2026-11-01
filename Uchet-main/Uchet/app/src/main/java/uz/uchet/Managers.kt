@@ -706,7 +706,7 @@ fun DebtManagerSheet(
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ RuleManagerSheet — управление правилами самообучения ★★★
+// ★★★ RuleManagerSheet — управление правилами самообучения (FB-17) ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -715,7 +715,8 @@ fun RuleManagerSheet(
     currentLang: AppLanguage,
     expenseCategories: List<String>,
     incomeCategories: List<String>,
-    onSave: (String, String, TxType) -> Unit,
+    // ★ FB-17: добавлен параметр Boolean для isIgnored
+    onSave: (String, String, TxType, Boolean) -> Unit,
     onDelete: (CustomKeywordRule) -> Unit,
     onDeleteUnused: () -> Unit = {},
     onDismiss: () -> Unit
@@ -724,6 +725,8 @@ fun RuleManagerSheet(
     var keyword by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(expenseCategories.firstOrNull() ?: "📦 Другое") }
     var type by remember { mutableStateOf(TxType.EXPENSE) }
+    var isIgnored by remember { mutableStateOf(false) } // ★ FB-17: состояние для галочки
+    
     var ruleToDelete by remember { mutableStateOf<CustomKeywordRule?>(null) }
     var showCategoryMenu by remember { mutableStateOf(false) }
     var showConfirmDeleteUnused by remember { mutableStateOf(false) }
@@ -805,8 +808,10 @@ fun RuleManagerSheet(
                                         )
                                     }
                                 }
+                                // ★ FB-17: отображение типа правила
                                 Text(
-                                    "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})",
+                                    if (rule.isIgnored) "→ 🚫 Игнорировать (спам/реклама)"
+                                    else "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color.Gray
                                 )
@@ -843,41 +848,61 @@ fun RuleManagerSheet(
 
             Text("Добавить правило вручную:", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense")) }
-                SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income")) }
+            
+            // ★ FB-17: Переключатель игнорирования
+            Row(
+                verticalAlignment = Alignment.CenterVertically, 
+                modifier = Modifier.fillMaxWidth().clickable { isIgnored = !isIgnored }.padding(vertical = 4.dp)
+            ) {
+                Checkbox(checked = isIgnored, onCheckedChange = { isIgnored = it })
+                Text("Игнорировать (спам, реклама, ОТП)", style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(8.dp))
+
+            // ★ FB-17: Скрываем выбор категории и типа, если это правило-игнор
+            if (!isIgnored) {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense")) }
+                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income")) }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
             OutlinedTextField(
                 value = keyword,
                 onValueChange = { keyword = it },
                 label = { Text("Ключевое слово") },
-                placeholder = { Text("Например: Uzum, Шаурма") },
+                placeholder = { Text("Например: Uzum, Шаурма, Акция") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
-            Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(Translations.translateCategory(category, currentLang))
-                    Spacer(Modifier.weight(1f))
-                    Icon(Icons.Default.ArrowDropDown, null)
-                }
-                DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
-                    val list = if (type == TxType.INCOME) incomeCategories else expenseCategories
-                    list.forEach { c ->
-                        DropdownMenuItem(
-                            text = { Text(Translations.translateCategory(c, currentLang)) },
-                            onClick = { category = c; showCategoryMenu = false }
-                        )
+            
+            if (!isIgnored) {
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(Translations.translateCategory(category, currentLang))
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
+                        val list = if (type == TxType.INCOME) incomeCategories else expenseCategories
+                        list.forEach { c ->
+                            DropdownMenuItem(
+                                text = { Text(Translations.translateCategory(c, currentLang)) },
+                                onClick = { category = c; showCategoryMenu = false }
+                            )
+                        }
                     }
                 }
             }
+            
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = {
-                    if (keyword.isNotBlank() && category.isNotBlank()) {
-                        onSave(keyword.trim(), category.trim(), type)
+                    if (keyword.isNotBlank() && (isIgnored || category.isNotBlank())) {
+                        // ★ FB-17: передаем isIgnored в коллбэк
+                        onSave(keyword.trim(), if (isIgnored) "IGNORE" else category.trim(), type, isIgnored)
                         keyword = ""
                     }
                 },
@@ -916,7 +941,6 @@ fun CorrectionManagerSheet(
     val context = LocalContext.current
     var showClearConfirm by remember { mutableStateOf(false) }
 
-    // ★ Экспорт CSV
     val csvExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv")
     ) { uri: Uri? ->
@@ -929,7 +953,6 @@ fun CorrectionManagerSheet(
         }
     }
 
-    // ★ Экспорт JSON
     val jsonExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? ->
@@ -1053,7 +1076,6 @@ fun CorrectionManagerSheet(
                     }
                 }
 
-                // ★ Экспорт
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
@@ -1137,17 +1159,6 @@ private fun relativeTime(ts: Long): String {
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ Сериализаторы CSV/JSON для экспорта коррекций ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-/**
- * Формат CSV (RFC 4180):
- * source,merchantHint,field,parsedValue,correctedValue,appliedCount,lastSeenAt,rawText
- *
- * Все поля в кавычках, `"` внутри поля экранируется как `""`.
- * Открывается в Excel / Google Sheets / Numbers.
- */
 private fun serializeCorrectionsCsv(list: List<CorrectionEntity>): String {
     val sb = StringBuilder()
     sb.append("source,merchantHint,field,parsedValue,correctedValue,appliedCount,lastSeenAt,rawText\n")
@@ -1166,10 +1177,6 @@ private fun serializeCorrectionsCsv(list: List<CorrectionEntity>): String {
     return sb.toString()
 }
 
-/**
- * Формат JSON: массив объектов. Для случаев когда rawText содержит длинные
- * многострочные OCR-чеки — JSON их сохраняет без потерь.
- */
 private fun serializeCorrectionsJson(list: List<CorrectionEntity>): String {
     val arr = JSONArray()
     list.forEach { c ->
