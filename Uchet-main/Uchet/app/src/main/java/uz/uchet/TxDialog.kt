@@ -1,503 +1,317 @@
-package uz.uchet
+package com.example.uchet // Замените на ваш package name
 
-import android.content.Intent
-import android.graphics.Bitmap
-import android.net.Uri
-import android.speech.RecognizerIntent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
-import coil.compose.AsyncImage
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import kotlinx.coroutines.launch
-import java.io.File
-import java.math.BigDecimal
-import java.math.RoundingMode
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.ZonedDateTime
-import java.util.UUID
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+
+// Импортируйте ваши сущности и ViewModel
+// import com.example.uchet.data.Tx
+// import com.example.uchet.AppViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TxDialog(
-    initial: Tx?,
-    quickTemplate: QuickTemplate? = null,
-    cards: List<CardEntity>,
-    expenseCategories: List<String>,
-    incomeCategories: List<String>,
-    currentLang: AppLanguage,
-    isPendingSms: Boolean = false,
-    autoStartVoice: Boolean = false,
-    rates: List<ExchangeRateEntity>,
-    customRules: List<CustomKeywordRule>,
-    ruleAppliedId: Long? = null,
-    ruleAppliedKeyword: String? = null,
-    // ★ D: исходный текст СМС / уведомления из PendingQueue (null — если не из очереди)
-    rawSourceText: String? = null,
-    vm: VM,
-    onDismiss: () -> Unit,
-    onSave: (Tx) -> Unit,
-    onSaveRule: (String, String, TxType) -> Unit,
-    onRuleApplied: (Long) -> Unit = {},
-    onRuleRejected: (Long) -> Unit = {},
-    // ★ D: колбэк записи коррекции — теперь с rawText
-    onRecordCorrection: (merchantHint: String, field: String, parsedValue: String, correctedValue: String, rawText: String) -> Unit = { _, _, _, _, _ -> },
-    onDelete: (() -> Unit)?
+    tx: Tx?, // null = создание новой, не null = редактирование
+    viewModel: AppViewModel,
+    onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val zone = ZoneId.systemDefault()
-    val initDt = initial?.let { Instant.ofEpochMilli(it.timestamp).atZone(zone) } ?: ZonedDateTime.now(zone)
+    val clipboardManager = LocalClipboardManager.current
 
-    var type by remember { mutableStateOf(quickTemplate?.type ?: initial?.type ?: TxType.EXPENSE) }
-    var category by remember { mutableStateOf(quickTemplate?.category ?: initial?.category ?: expenseCategories.lastOrNull() ?: "📦 Другое") }
-    var amount by remember {
-        mutableStateOf(
-            quickTemplate?.averageAmountMinor?.let { BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() }
-            ?: initial?.let { BigDecimal(it.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() }
-            ?: ""
-        )
-    }
-    var currency by remember { mutableStateOf(initial?.currency ?: "UZS") }
-    var selectedCardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
-    var toCardId by remember { mutableStateOf(initial?.toCardId) }
-    var toAmount by remember { mutableStateOf(initial?.toAmountMinor?.let { BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: "") }
+    // Состояния полей
+    var amount by remember { mutableStateOf(tx?.amount?.toString() ?: "") }
+    var type by remember { mutableStateOf(tx?.type ?: "EXPENSE") } // EXPENSE / INCOME
+    var cardId by remember { mutableStateOf(tx?.cardId ?: 0) }
+    var category by remember { mutableStateOf(tx?.category ?: "Разное") }
+    var merchant by remember { mutableStateOf(tx?.merchant ?: "") }
+    var rawText by remember { mutableStateOf(tx?.rawText) }
 
-    var isCustomCard by remember { mutableStateOf(initial?.cardId?.let { !cards.map { c -> c.id }.contains(it) } ?: false) }
-    var desc by remember { mutableStateOf(initial?.description ?: "") }
-    var date by remember { mutableStateOf(initDt.format(DATE_FMT)) }
-    var photoPath by remember { mutableStateOf(initial?.photoPath) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(false) }
+    // Состояние для показа диалога с оригиналом (FB-16)
+    var showRawTextDialog by remember { mutableStateOf(false) }
 
-    var showRuleInput by remember { mutableStateOf(false) }
-    var ruleKeyword by remember { mutableStateOf(initial?.description ?: "") }
+    // Состояния для выпадающих списков
+    var showCardDropdown by remember { mutableStateOf(false) }
+    var showCategoryDropdown by remember { mutableStateOf(false) }
 
-    var appliedRuleId by remember { mutableStateOf(ruleAppliedId) }
-    var appliedRuleKeyword by remember { mutableStateOf(ruleAppliedKeyword) }
-    var appliedRuleCategory by remember { mutableStateOf(if (ruleAppliedId != null) category else null) }
+    // Получаем данные из ViewModel (предполагается, что они там есть)
+    val cards = viewModel.cards.collectAsState().value
+    val categories = viewModel.categories.collectAsState().value // Список категорий
 
-    // ★ D: локальные raw-тексты из OCR / голоса для CorrectionEntity
-    var ocrRawText by remember { mutableStateOf<String?>(null) }
-    var voiceRawText by remember { mutableStateOf<String?>(null) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Заголовок
+                Text(
+                    text = if (tx == null) "Новая операция" else "Редактирование",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
 
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val t = { key: String -> Translations.t(key, currentLang) }
-
-    var showTypeMenu by remember { mutableStateOf(false) }
-    var showCategoryMenu by remember { mutableStateOf(false) }
-    var showCardMenu by remember { mutableStateOf(false) }
-    var showToCardMenu by remember { mutableStateOf(false) }
-    var showAddCategoryDialog by remember { mutableStateOf(false) }
-    var showAddCardDialog by remember { mutableStateOf(false) }
-    var newCategoryName by remember { mutableStateOf("") }
-
-    var newCardName by remember { mutableStateOf("") }
-    var newCardLast4 by remember { mutableStateOf("") }
-    var newCardCurrency by remember { mutableStateOf("UZS") }
-
-    var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
-
-    val fromCardCurrency = cards.find { it.id == selectedCardId }?.currency ?: "UZS"
-    val toCardCurrency = cards.find { it.id == toCardId }?.currency ?: "UZS"
-    val isCurrencyDiff = type == TxType.TRANSFER && fromCardCurrency != toCardCurrency
-
-    val voiceLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spoken.isNullOrBlank()) {
-                // ★ D: сохраняем исходную фразу для CorrectionEntity
-                voiceRawText = spoken
-                val parsed = VoiceParser.parseTransaction(spoken, expenseCategories, incomeCategories, customRules)
-                parsed.type?.let { type = it }
-                parsed.amountMinor?.let { amount = BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() }
-                if (parsed.isCash) selectedCardId = "CASH"
-                else parsed.cardLast4?.let { l4 -> cards.find { it.last4 == l4 }?.let { selectedCardId = it.id } }
-                parsed.categoryName?.let { category = it }
-                if (parsed.ruleAppliedId != null) {
-                    appliedRuleId = parsed.ruleAppliedId
-                    appliedRuleKeyword = parsed.ruleAppliedKeyword
-                    appliedRuleCategory = parsed.categoryName
+                // Блок с оригинальным текстом (FB-16)
+                if (!rawText.isNullOrBlank()) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Источник: Импорт (СМС/Чек/Выписка)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedButton(
+                                onClick = { showRawTextDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = "Оригинал")
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Посмотреть оригинал")
+                            }
+                        }
+                    }
                 }
-                if (parsed.description.isNotBlank()) {
-                    desc = parsed.description
-                    if (ruleKeyword.isBlank()) ruleKeyword = parsed.description
+
+                // Бейдж «Применено правило» (если есть)
+                if (tx?.appliedRuleId != null && tx.appliedRuleId != 0L) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFE8F5E9), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                            .padding(bottom = 8.dp)
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Применено правило: ${tx.appliedRuleName ?: "Автоматически"}",
+                            color = Color(0xFF2E7D32),
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { 
+                                // Логика отмены правила
+                                // viewModel.rejectRule(tx)
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Default.Cancel, contentDescription = "Отменить правило", tint = Color.Red)
+                        }
+                    }
+                }
+
+                // Выбор типа (Расход / Доход)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    FilterChip(
+                        selected = type == "EXPENSE",
+                        onClick = { type = "EXPENSE" },
+                        label = { Text("Расход") }
+                    )
+                    FilterChip(
+                        selected = type == "INCOME",
+                        onClick = { type = "INCOME" },
+                        label = { Text("Доход") }
+                    )
+                }
+
+                // Поле ввода суммы
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Сумма") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    singleLine = true
+                )
+
+                // Выбор карты (Упрощенный вариант)
+                ExposedDropdownMenuBox(
+                    expanded = showCardDropdown,
+                    onExpandedChange = { showCardDropdown = !showCardDropdown },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = cards.find { it.id == cardId }?.name ?: "Выберите карту",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Карта / Счет") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showCardDropdown) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = showCardDropdown,
+                        onDismissRequest = { showCardDropdown = false }
+                    ) {
+                        cards.forEach { card ->
+                            DropdownMenuItem(
+                                text = { Text(card.name) },
+                                onClick = {
+                                    cardId = card.id
+                                    showCardDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Поле ввода категории
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Категория") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    singleLine = true
+                )
+
+                // Поле ввода получателя
+                OutlinedTextField(
+                    value = merchant,
+                    onValueChange = { merchant = it },
+                    label = { Text("Получатель / Описание") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    singleLine = true
+                )
+
+                // Кнопки сохранения/отмены
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Отмена")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            val parsedAmount = amount.replace(",", ".").toDoubleOrNull()
+                            if (parsedAmount == null) {
+                                Toast.makeText(context, "Введите корректную сумму", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            
+                            // Вызов сохранения в ViewModel
+                            // Если tx == null, создаем новый объект Tx с rawText
+                            // иначе обновляем существующий
+                            val newTx = tx?.copy(
+                                amount = parsedAmount,
+                                type = type,
+                                cardId = cardId,
+                                category = category,
+                                merchant = merchant,
+                                rawText = rawText // сохраняем оригинал
+                            ) ?: Tx(
+                                amount = parsedAmount,
+                                type = type,
+                                cardId = cardId,
+                                category = category,
+                                merchant = merchant,
+                                rawText = rawText,
+                                date = System.currentTimeMillis()
+                            )
+                            
+                            // viewModel.saveTx(newTx) // Вызов вашего метода сохранения
+                            onDismiss()
+                        }
+                    ) {
+                        Text("Сохранить")
+                    }
                 }
             }
-        } else { scope.launch { snackbarHostState.showSnackbar(t("voice_error")) } }
-    }
-
-    fun startVoiceInput() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (currentLang == AppLanguage.UZ) "uz-UZ" else "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, t("voice_prompt"))
         }
-        try { voiceLauncher.launch(intent) } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("voice_not_available")) } }
     }
 
-    LaunchedEffect(Unit) { if (autoStartVoice && !isPendingSms) startVoiceInput() }
-
-    fun saveImageAndFinish(bitmap: Bitmap) {
-        val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg")
-        file.parentFile?.mkdirs()
-        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-        photoPath = file.absolutePath
-        isLoading = false
-    }
-
-    fun processQrImage(bitmap: Bitmap?) {
-        if (bitmap == null) return
-        isLoading = true
-        val image = InputImage.fromBitmap(bitmap, 0)
-        val scanner = BarcodeScanning.getClient()
-        scanner.process(image).addOnSuccessListener { barcodes ->
-            if (barcodes.isNotEmpty()) {
-                val rawValue = barcodes[0].rawValue ?: ""
-                // ★ D: QR-текст тоже сохраняем как rawText
-                ocrRawText = rawValue
-                val qrData = QrReceiptParser.parse(rawValue)
-                if (qrData != null && qrData.amountMinor != null) {
-                    amount = BigDecimal(qrData.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString()
-                    qrData.dateMillis?.let { date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT) }
-                    if (!qrData.merchant.isNullOrBlank()) {
-                        desc = qrData.merchant
-                        if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let {
-                            category = it.category
-                            if (it.ruleId != null) { appliedRuleId = it.ruleId; appliedRuleKeyword = it.keyword; appliedRuleCategory = it.category }
-                        }
-                    }
-                    if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
-                    scope.launch { snackbarHostState.showSnackbar("✅ Сумма и дата извлечены из QR-кода") }
-                } else { desc = "QR: ${rawValue.take(30)}"; scope.launch { snackbarHostState.showSnackbar("QR-код не является фискальным чеком") } }
-            } else { scope.launch { snackbarHostState.showSnackbar("QR-код не найден на фото") } }
-            isLoading = false
-        }.addOnFailureListener { isLoading = false; scope.launch { snackbarHostState.showSnackbar(t("error")) } }
-    }
-
-    fun processReceiptImage(bitmap: Bitmap?) {
-        if (bitmap == null) return
-        isLoading = true
-        val image = InputImage.fromBitmap(bitmap, 0)
-        val scanner = BarcodeScanning.getClient()
-        scanner.process(image).addOnSuccessListener { barcodes ->
-            var qrAmount: Long? = null
-            if (barcodes.isNotEmpty()) {
-                val rawValue = barcodes[0].rawValue ?: ""
-                // ★ D: если в QR есть данные — сохраняем их, приоритет QR (более точный)
-                ocrRawText = rawValue
-                val qrData = QrReceiptParser.parse(rawValue)
-                if (qrData != null && qrData.amountMinor != null) {
-                    qrAmount = qrData.amountMinor
-                    qrData.dateMillis?.let { date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT) }
-                    if (!qrData.merchant.isNullOrBlank()) {
-                        desc = qrData.merchant
-                        if (ruleKeyword.isBlank()) ruleKeyword = qrData.merchant
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let {
-                            category = it.category
-                            if (it.ruleId != null) { appliedRuleId = it.ruleId; appliedRuleKeyword = it.keyword; appliedRuleCategory = it.category }
-                        }
-                    }
-                    if (!qrData.receiptNo.isNullOrBlank() && desc.isBlank()) desc = "Чек №${qrData.receiptNo}"
-                }
-            }
-            val finalQrAmount = qrAmount
-            if (finalQrAmount != null) {
-                amount = BigDecimal(finalQrAmount).movePointLeft(2).stripTrailingZeros().toPlainString()
-                saveImageAndFinish(bitmap)
-                return@addOnSuccessListener
-            }
-            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            recognizer.process(image).addOnSuccessListener { visionText ->
-                val rawText = visionText.text
-                // ★ D: сохраняем полный OCR-текст — это контекст для CorrectionEntity
-                ocrRawText = rawText
-                var ocrAmount: Long? = null
-                val receipt = ReceiptParser.parse(rawText)
-                if (receipt.amountMinor != null) {
-                    ocrAmount = receipt.amountMinor
-                    receipt.sellerName?.let {
-                        desc = it
-                        if (ruleKeyword.isBlank()) ruleKeyword = it
-                        MerchantCategorizer.getCategory(desc, expenseCategories, customRules, TxType.EXPENSE)?.let { match ->
-                            category = match.category
-                            if (match.ruleId != null) { appliedRuleId = match.ruleId; appliedRuleKeyword = match.keyword; appliedRuleCategory = match.category }
-                        }
-                    }
-                    receipt.dateMillis?.let { date = Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(DATE_FMT) }
-                }
-                if (ocrAmount == null) {
-                    val parsed = SmsParser.parseForOcr(rawText, customRules)
-                    if (parsed != null) {
-                        val amt = runCatching { BigDecimal(parsed.amountStr.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
-                        if (amt != null && amt > 0) { ocrAmount = amt; if (parsed.description.isNotBlank()) desc = parsed.description }
-                    }
-                }
-                if (ocrAmount == null) ocrAmount = ReceiptParser.extractBiggestAmount(rawText)
-                val finalOcrAmount = ocrAmount
-                if (finalOcrAmount != null) amount = BigDecimal(finalOcrAmount).movePointLeft(2).stripTrailingZeros().toPlainString()
-                else scope.launch { snackbarHostState.showSnackbar("Не удалось распознать сумму на фото") }
-                saveImageAndFinish(bitmap)
-            }.addOnFailureListener { isLoading = false; scope.launch { snackbarHostState.showSnackbar(t("error")) } }
-        }.addOnFailureListener { isLoading = false; scope.launch { snackbarHostState.showSnackbar(t("error")) } }
-    }
-
-    val cameraLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.TakePicture()) { success -> if (success && tempCameraUri != null) processReceiptImage(uriToBitmap(context, tempCameraUri!!)) }
-    val galleryLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? -> uri?.let { processReceiptImage(uriToBitmap(context, it)) } }
-    val qrLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? -> uri?.let { processQrImage(uriToBitmap(context, it)) } }
-
-    LaunchedEffect(type) { val currentList = if (type == TxType.INCOME) incomeCategories else expenseCategories; if (!currentList.contains(category) && !showAddCategoryDialog) category = currentList.lastOrNull() ?: "📦 Другое" }
-
-    if (showAddCategoryDialog) {
+    // =====================================================================
+    // FB-16: Диалог просмотра оригинального текста
+    // =====================================================================
+    if (showRawTextDialog) {
         AlertDialog(
-            onDismissRequest = { showAddCategoryDialog = false },
-            title = { Text(t("new_cat")) },
-            text = { OutlinedTextField(value = newCategoryName, onValueChange = { newCategoryName = it }, label = { Text(t("name")) }) },
-            confirmButton = { TextButton(onClick = { if (newCategoryName.isNotBlank()) { val newCat = CategoryEntity(name = newCategoryName.trim(), type = if (type == TxType.INCOME) TxType.INCOME else TxType.EXPENSE); vm.saveCategory(newCat); category = newCat.name; newCategoryName = ""; showAddCategoryDialog = false } }) { Text(t("add")) } },
-            dismissButton = { TextButton(onClick = { showAddCategoryDialog = false }) { Text(t("cancel")) } }
-        )
-    }
-
-    if (showAddCardDialog) {
-        AlertDialog(
-            onDismissRequest = { showAddCardDialog = false },
-            title = { Text(t("new_card")) },
+            onDismissRequest = { showRawTextDialog = false },
+            title = { 
+                Text(
+                    text = "Оригинальный текст", 
+                    style = MaterialTheme.typography.titleMedium
+                ) 
+            },
             text = {
-                Column {
-                    OutlinedTextField(value = newCardName, onValueChange = { newCardName = it }, label = { Text(t("card_name")) }, singleLine = true)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = newCardLast4, onValueChange = { newCardLast4 = it.filter(Char::isDigit).take(4) }, label = { Text(t("last4")) }, singleLine = true)
-                    Spacer(Modifier.height(8.dp))
-                    Box { var expanded by remember { mutableStateOf(false) }; OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("${t("currency")}: $newCardCurrency") }; DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { listOf("UZS", "USD", "EUR", "RUB").forEach { ccy -> DropdownMenuItem(text = { Text(ccy) }, onClick = { newCardCurrency = ccy; expanded = false }) } } }
+                // Прокручиваемый и выделяемый контейнер
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = rawText ?: "",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp
+                            )
+                        )
+                    }
                 }
             },
-            confirmButton = { TextButton(onClick = { if (newCardName.isNotBlank() && newCardLast4.isNotBlank()) { val id = "${newCardLast4}_${newCardCurrency}"; vm.saveCard(CardEntity(id = id, last4 = newCardLast4, name = newCardName, currency = newCardCurrency, initialBalanceMinor = 0)); selectedCardId = id; isCustomCard = false; newCardName = ""; newCardLast4 = ""; showAddCardDialog = false } }) { Text(t("add")) } },
-            dismissButton = { TextButton(onClick = { showAddCardDialog = false }) { Text(t("cancel")) } }
+            confirmButton = {
+                TextButton(onClick = { showRawTextDialog = false }) {
+                    Text("Закрыть")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    clipboardManager.setText(AnnotatedString(rawText ?: ""))
+                    Toast.makeText(context, "Текст скопирован в буфер", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("Копировать")
+                }
+            }
         )
     }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(when { isPendingSms -> t("sms_title"); initial == null -> t("new_tx"); else -> t("edit") }) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-
-                if (isPendingSms) {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(t("sms_data"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Text(t("sms_title"), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-
-                if (appliedRuleId != null) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = GREEN.copy(alpha = 0.15f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🟢", fontSize = 16.sp)
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    t("rule_applied_badge"),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                val kw = appliedRuleKeyword ?: "?"
-                                val cat = appliedRuleCategory ?: category
-                                Text(
-                                    "«$kw» → ${Translations.translateCategory(cat, currentLang)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            IconButton(onClick = {
-                                appliedRuleId?.let { onRuleRejected(it) }
-                                appliedRuleId = null
-                                appliedRuleKeyword = null
-                                appliedRuleCategory = null
-                            }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = t("rule_reject"), tint = RED, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-
-                Box(Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(type.localizedLabel(currentLang)); Spacer(Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null)
-                    }
-                    DropdownMenu(expanded = showTypeMenu, onDismissRequest = { showTypeMenu = false }) { TxType.values().forEach { tt -> DropdownMenuItem(text = { Text(tt.localizedLabel(currentLang)) }, onClick = { type = tt; showTypeMenu = false }) } }
-                }
-
-                if (!isPendingSms) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { val file = File(context.filesDir, "images/${UUID.randomUUID()}.jpg"); file.parentFile?.mkdirs(); val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file); tempCameraUri = uri; cameraLauncher.launch(uri) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { Icon(Icons.Default.CameraAlt, contentDescription = t("take_photo")) }
-                        Button(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { Icon(Icons.Default.PhotoLibrary, contentDescription = t("choose_photo")) }
-                        Button(onClick = { qrLauncher.launch("image/*") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)) { Icon(Icons.Default.QrCodeScanner, contentDescription = t("scan_qr")) }
-                        Button(onClick = { startVoiceInput() }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)) { Icon(Icons.Default.Mic, contentDescription = t("voice_input")) }
-                    }
-                }
-
-                if (photoPath != null) AsyncImage(model = File(photoPath!!), contentDescription = t("receipt"), modifier = Modifier.fillMaxWidth().height(120.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = if (amount.isEmpty()) "0" else amount, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = if (amount.isEmpty()) Color.Gray else MaterialTheme.colorScheme.onSurface)
-                    Box { var expanded by remember { mutableStateOf(false) }; OutlinedButton(onClick = { expanded = true }) { Text(currency) }; DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { listOf("UZS", "USD", "EUR", "RUB").forEach { ccy -> DropdownMenuItem(text = { Text(ccy) }, onClick = { currency = ccy; expanded = false }) } } }
-                }
-                NumericKeypad(amountStr = amount, onAmountChange = { amount = it })
-
-                Box(Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(Translations.translateCategory(category, currentLang)); Spacer(Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null)
-                    }
-                    DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
-                        val currentCategories = if (type == TxType.INCOME) incomeCategories else expenseCategories
-                        currentCategories.forEach { c -> DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; showCategoryMenu = false }) }
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text(t("add_new_cat"), color = MaterialTheme.colorScheme.primary) }, onClick = { showAddCategoryDialog = true; showCategoryMenu = false })
-                    }
-                }
-
-                Box(Modifier.fillMaxWidth()) {
-                    val cardName = cards.find { it.id == selectedCardId }?.let { "${it.name} (${it.currency})" } ?: t("cash")
-                    OutlinedButton(onClick = { showCardMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("${t("account")}: $cardName"); Spacer(Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null)
-                    }
-                    DropdownMenu(expanded = showCardMenu, onDismissRequest = { showCardMenu = false }) {
-                        cards.forEach { c -> DropdownMenuItem(text = { Text("${c.name} (${c.currency})") }, onClick = { selectedCardId = c.id; isCustomCard = false; showCardMenu = false }) }
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text(t("add_new_card"), color = MaterialTheme.colorScheme.primary) }, onClick = { showAddCardDialog = true; showCardMenu = false })
-                    }
-                }
-
-                if (type == TxType.TRANSFER) {
-                    Box(Modifier.fillMaxWidth()) {
-                        val toCardName = cards.find { it.id == toCardId }?.let { "${it.name} (${it.currency})" } ?: t("other")
-                        OutlinedButton(onClick = { showToCardMenu = true }, modifier = Modifier.fillMaxWidth()) { Text("${t("to_account")}: $toCardName"); Spacer(Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }
-                        DropdownMenu(expanded = showToCardMenu, onDismissRequest = { showToCardMenu = false }) { cards.forEach { c -> DropdownMenuItem(text = { Text("${c.name} (${c.currency})") }, onClick = { toCardId = c.id; showToCardMenu = false }) } }
-                    }
-                    if (isCurrencyDiff) OutlinedTextField(value = toAmount, onValueChange = { toAmount = it }, label = { Text("Сумма к зачислению (${toCardCurrency})") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
-                }
-
-                OutlinedTextField(desc, { desc = it; if (ruleKeyword.isBlank()) ruleKeyword = it }, label = { Text(t("desc")) })
-                OutlinedTextField(date, { date = it }, label = { Text(t("date")) }, singleLine = true)
-
-                if (isPendingSms || initial?.source == "SMS" || desc.isNotBlank()) {
-                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = showRuleInput, onCheckedChange = { showRuleInput = it })
-                        Column {
-                            Text("Запомнить для будущего", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                            Text("Автоматически ставить эту категорию", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                        }
-                    }
-                    if (showRuleInput) {
-                        OutlinedTextField(
-                            value = ruleKeyword,
-                            onValueChange = { ruleKeyword = it },
-                            label = { Text("Ключевое слово") },
-                            placeholder = { Text("Например: Uzum, Шаурма") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        Text("При встрече слова «$ruleKeyword» будет выбрана категория: $category", style = MaterialTheme.typography.labelSmall, color = BLUE)
-                    }
-                }
-
-                error?.let { Text(it, color = RED) }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = !isLoading,
-                onClick = {
-                    var amountMinor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
-                    if (currency != "UZS" && amountMinor != null) {
-                        val rateEntity = rates.find { it.currency == currency }
-                        if (rateEntity != null) amountMinor = (amountMinor.toDouble() * rateEntity.rateToUzs).toBigDecimal().setScale(0, RoundingMode.HALF_UP).toLong()
-                    }
-                    val toAmountMinor = if (isCurrencyDiff) runCatching { BigDecimal(toAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() else null
-                    val d = runCatching { LocalDate.parse(date.trim(), DATE_FMT) }.getOrNull()
-
-                    when {
-                        amountMinor == null || amountMinor <= 0 -> error = t("error")
-                        isCurrencyDiff && (toAmountMinor == null || toAmountMinor <= 0) -> error = "Введите сумму зачисления"
-                        d == null -> error = t("error")
-                        type == TxType.TRANSFER && toCardId == null -> error = t("error")
-                        else -> {
-                            if (showRuleInput && ruleKeyword.isNotBlank()) {
-                                onSaveRule(ruleKeyword, category, type)
-                            }
-                            appliedRuleId?.let { onRuleApplied(it) }
-
-                            val finalCardId = if (selectedCardId.isEmpty() || selectedCardId == "CASH") null else selectedCardId
-
-                            // ★ D: rawText нового Tx — из СМС, OCR или голоса (в порядке приоритета).
-                            // Для существующей транзакции — сохраняем её исходный rawText.
-                            val finalRawText = initial?.rawText
-                                ?: rawSourceText
-                                ?: ocrRawText
-                                ?: voiceRawText
-
-                            val finalTx = Tx(
-                                id = initial?.id ?: 0, amountMinor = amountMinor, type = type, cardId = finalCardId, toCardId = toCardId, toAmountMinor = toAmountMinor,
-                                description = desc.trim(), category = category, timestamp = d.atTime(initDt.toLocalTime()).atZone(zone).toInstant().toEpochMilli(),
-                                source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL", currency = currency, photoPath = photoPath,
-                                rawText = finalRawText
-                            )
-
-                            // ★ D: записываем коррекции (только при редактировании существующей).
-                            // rawText для CorrectionEntity — исходный текст именно этой операции.
-                            if (initial != null) {
-                                val hint = initial.description.ifBlank { desc.trim() }
-                                val ctxRaw = initial.rawText
-                                    ?: rawSourceText
-                                    ?: ocrRawText
-                                    ?: voiceRawText
-                                    ?: ""
-                                if (initial.amountMinor != finalTx.amountMinor)
-                                    onRecordCorrection(hint, "amount", initial.amountMinor.toString(), finalTx.amountMinor.toString(), ctxRaw)
-                                if (initial.type != finalTx.type)
-                                    onRecordCorrection(hint, "type", initial.type.name, finalTx.type.name, ctxRaw)
-                                if (initial.cardId != finalTx.cardId)
-                                    onRecordCorrection(hint, "card", initial.cardId ?: "null", finalTx.cardId ?: "null", ctxRaw)
-                                if (initial.category != finalTx.category)
-                                    onRecordCorrection(hint, "category", initial.category, finalTx.category, ctxRaw)
-                                if (initial.description.trim().isNotBlank() && initial.description.trim() != finalTx.description.trim())
-                                    onRecordCorrection(hint, "merchant", initial.description.trim(), finalTx.description.trim(), ctxRaw)
-                            }
-
-                            onSave(finalTx)
-                        }
-                    }
-                }) { Text(if (isPendingSms) t("confirm") else t("save")) }
-        },
-        dismissButton = { Row { onDelete?.let { TextButton(it) { Text(t("delete"), color = RED) } }; TextButton(onDismiss) { Text(if (isPendingSms) t("reject") else t("cancel")) } } }
-    )
 }
