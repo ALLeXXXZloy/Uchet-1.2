@@ -1127,7 +1127,8 @@ private fun fieldLabel(field: String, lang: AppLanguage): String = when (field) 
     "card" -> Translations.t("field_card", lang)
     "category" -> Translations.t("field_category", lang)
     "merchant" -> Translations.t("field_merchant", lang)
-    "is_spam" -> "Спам / Не операция" // ★ ДОБАВЛЕНО
+    "toCardId" -> "Счет получателя" // ★ ДОБАВЛЕНО
+    "is_spam" -> "Спам / Не операция"
     else -> field
 }
 
@@ -1145,7 +1146,8 @@ private fun formatParsedValue(field: String, value: String): String {
             else -> value
         }
         "card" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}"
-        "is_spam" -> if (value == "TRANSACTION") "Создана операция" else "Игнорировано" // ★ ДОБАВЛЕНО
+        "toCardId" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}" // ★ ДОБАВЛЕНО
+        "is_spam" -> if (value == "TRANSACTION") "Создана операция" else "Игнорировано"
         else -> value
     }
 }
