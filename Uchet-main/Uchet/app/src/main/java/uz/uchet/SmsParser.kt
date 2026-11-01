@@ -71,11 +71,10 @@ object SmsParser {
         return result
     }
 
-    // ★ НОВАЯ ФУНКЦИЯ: Парсинг PDF с координатами
+    // ★ Парсинг PDF с координатами
     fun parsePdfLines(lines: List<PdfLine>, existing: List<Tx> = emptyList(), customRules: List<CustomKeywordRule> = emptyList()): List<Pair<Tx, PdfLine>> {
         val fullText = lines.joinToString("\n") { it.text }
         
-        // Определяем банк по первым строкам
         val isTez = fullText.contains("ВЫПИСКА ПО КАРТЕ") && fullText.contains("Номер карты клиента:")
         
         val parsedWithCoords = if (isTez) {
@@ -112,7 +111,6 @@ object SmsParser {
         
         val cardRegex = Regex("""Номер карты клиента:\s*\d{6}\*+(\d{4})""")
         var cardLast4 = "0000"
-        // Ищем номер карты в первых строках
         for (line in lines.take(20)) {
             cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] }
         }
@@ -245,6 +243,20 @@ object SmsParser {
         }
         if (current.isNotEmpty() || sb.isNotEmpty()) { current.add(sb.toString()); records.add(current.toList()) }
         return records.filter { it.isNotEmpty() }
+    }
+
+    // ★ ФУНКЦИЯ ДЛЯ OCR (была потеряна)
+    fun parseForOcr(text: String, customRules: List<CustomKeywordRule> = emptyList()): ParsedSms? {
+        val (cat, tx) = classify("", text, System.currentTimeMillis(), customRules)
+        if (cat == SmsCategory.TRANSACTION && tx != null) return ParsedSms(BigDecimal(tx.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString(), tx.cardLast4, tx.merchant, tx.category)
+        val totalRegex = Regex("""(?:jami|итого|total|к оплате|сумма)[:\s=]*([\d \u00A0.,]+)""", RegexOption.IGNORE_CASE)
+        val m = totalRegex.find(text)
+        if (m != null) {
+            val amount = normalizeAmount(m.groupValues[1]) ?: return null
+            return ParsedSms(BigDecimal(amount).movePointLeft(2).stripTrailingZeros().toPlainString(), null, text.take(60).replace("\n", " ").trim(), "📦 Другое")
+        }
+        val last = extractAmounts(text).lastOrNull() ?: return null
+        return ParsedSms(BigDecimal(last.value).movePointLeft(2).stripTrailingZeros().toPlainString(), null, text.take(60).replace("\n", " ").trim(), "📦 Другое")
     }
 
     private fun tryParseTransaction(sender: String, body: String, timestamp: Long, lower: String, customRules: List<CustomKeywordRule>): BankTx? {
