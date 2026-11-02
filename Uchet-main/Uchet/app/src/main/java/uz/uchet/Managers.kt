@@ -23,7 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp  // ★ ИСПРАВЛЕНО: для fontSize = 12.sp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -447,7 +447,7 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
 }
 
 // ============================================================================
-// SettingsSheet
+// SettingsSheet — ★ FB-NEW: добавлена секция "Доступ к уведомлениям"
 // ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -460,6 +460,8 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
     var reminderHour by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_hour", 21)) }
     var reminderMinute by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_minute", 0)) }
     var showTimePicker by remember { mutableStateOf(false) }
+    // ★ Перепроверяем статус доступа к уведомлениям при каждом открытии настроек
+    var notifAccessGranted by remember { mutableStateOf(NotificationAccessHelper.isNotificationAccessGranted(context)) }
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val t = { key: String -> Translations.t(key, currentLang.value) }
 
     if (showTimePicker) {
@@ -505,6 +507,25 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Button(onClick = { vm.updateRates(); scope.launch { snackbarHostState.showSnackbar(t("rates_updated")) } }, modifier = Modifier.fillMaxWidth()) { Text(t("update_rates")) }
             Spacer(Modifier.height(16.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+
+            // ★ FB-NEW: Доступ к уведомлениям
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(t("notif_access_section"), style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (notifAccessGranted) t("notif_access_granted") else t("notif_access_not_granted"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (notifAccessGranted) GREEN else RED
+                    )
+                }
+                TextButton(onClick = {
+                    NotificationAccessHelper.requestNotificationAccess(context)
+                }) {
+                    Text(if (notifAccessGranted) t("edit") else t("notif_access_open"))
+                }
+            }
+            Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+
             Text(t("change_pin"), style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = oldPin, onValueChange = { oldPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
@@ -546,7 +567,7 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
 }
 
 // ============================================================================
-// ★ FB-20: DebtManagerSheet — с диалогом возврата
+// DebtManagerSheet (FB-20)
 // ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -578,11 +599,9 @@ fun DebtManagerSheet(
         )
     }
 
-    // ★ FB-20: Диалог возврата долга
     if (debtToRepay != null) {
         val debt = debtToRepay!!
         val isBorrowed = debt.type == DebtType.BORROWED
-        // ★ ИСПРАВЛЕНО: remember(debt.id), чтобы состояние не утекало между долгами
         var repayCardId by remember(debt.id) { mutableStateOf(debt.cardId ?: "CASH") }
 
         AlertDialog(
