@@ -75,16 +75,26 @@ fun App(
     val customRules by vm.customRules.collectAsState()
     val corrections by vm.corrections.collectAsState()
 
-    val cardBalancesInUzs = remember(cards, allTxs, rates) {
+    // ★ FIX-CURRENCY: два словаря — баланс в валюте карты и в UZS
+    val cardBalancesInCurrency = remember(cards, allTxs) {
         cards.associate { card ->
             val cardTxs = allTxs.filter { it.cardId == card.id }
             val cardIncome = cardTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
             val cardExpense = cardTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
             val cardTransferOut = cardTxs.filter { it.type == TxType.TRANSFER }.sumOf { it.amountMinor }
             val cardTransferIn = allTxs.filter { it.toCardId == card.id && it.type == TxType.TRANSFER }.sumOf { it.toAmountMinor ?: it.amountMinor }
-            val balanceInCardCurrency = card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut
-            val rate = if (card.currency == "UZS") 1.0 else rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
-            card.id to (balanceInCardCurrency.toDouble() * rate).toLong()
+            card.id to (card.initialBalanceMinor + cardIncome + cardTransferIn - cardExpense - cardTransferOut)
+        }
+    }
+    val cardBalancesInUzs = remember(cards, cardBalancesInCurrency, rates) {
+        cardBalancesInCurrency.mapValues { (id, balInCurrency) ->
+            val card = cards.find { it.id == id }
+            val rate = when {
+                card == null -> 1.0
+                card.currency == "UZS" -> 1.0
+                else -> rates.find { it.currency == card.currency }?.rateToUzs ?: 1.0
+            }
+            (balInCurrency.toDouble() * rate).toLong()
         }
     }
     val totalLiquidBalanceUzs = cardBalancesInUzs.values.sum()
@@ -384,7 +394,6 @@ fun App(
         return
     }
 
-    // ★ FB-08: единый компактный стиль для всех подписей нижнего NavigationBar
     val navLabelStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp)
 
     Scaffold(
@@ -506,7 +515,8 @@ fun App(
     if (showSettings) SettingsSheet(context, { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
     if (showCategoryManager) CategoryManagerSheet(categories, currentLang.value, { vm.saveCategory(it) }, { vm.deleteCategory(it) }, { showCategoryManager = false })
     if (showGoalManager) GoalManagerSheet(goals, cards, currentLang.value, { vm.saveGoal(it) }, { vm.deleteGoal(it) }, { g, c, a -> vm.depositToGoal(g, c, a) }, { showGoalManager = false })
-    if (showCardManager) CardManagerSheet(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
+    // ★ FIX-CURRENCY: передаём cardBalancesInCurrency (в валюте карты), а не в UZS
+    if (showCardManager) CardManagerSheet(cards, cardBalancesInCurrency, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
 
@@ -608,8 +618,37 @@ fun App(
         )
     }
 
+    // ★ FIX-CURRENCY: диалог общего баланса показывает и валютный, и UZS-эквивалент
     if (showBalanceDetails) {
-        AlertDialog(onDismissRequest = { showBalanceDetails = false }, title = { Text(t("total_balance")) }, text = { Column { cards.forEach { c -> val bal = cardBalancesInUzs[c.id] ?: 0L; Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("${c.name} (${c.currency})", fontWeight = androidx.compose.ui.text.font.FontWeight.Medium); Text("${bal.money()} UZS", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = if (bal >= 0) GREEN else RED) } } } }, confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("close")) } })
+        AlertDialog(
+            onDismissRequest = { showBalanceDetails = false },
+            title = { Text(t("total_balance")) },
+            text = {
+                Column {
+                    cards.forEach { c ->
+                        val balInCurrency = cardBalancesInCurrency[c.id] ?: c.initialBalanceMinor
+                        val balInUzs = cardBalancesInUzs[c.id] ?: 0L
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("${c.name} (${c.currency})", fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                if (c.currency != "UZS") Text("≈ ${balInUzs.money()} UZS", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            }
+                            Text(
+                                "${balInCurrency.money()} ${c.currency}",
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                color = if (balInCurrency >= 0) GREEN else RED
+                            )
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(t("total"), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        Text("${totalLiquidBalanceUzs.money()} UZS", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = if (totalLiquidBalanceUzs >= 0) GREEN else RED)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showBalanceDetails = false }) { Text(t("close")) } }
+        )
     }
     if (showPasswordDialogBackup) { PasswordDialog(t("backup_new_password"), true, currentLang.value, onDismiss = { showPasswordDialogBackup = false }, onConfirm = { pwd -> pendingBackupPassword = pwd; showPasswordDialogBackup = false; jsonExportLauncher.launch("uchet_backup_${System.currentTimeMillis()}.uchet") }) }
     if (showPasswordDialogRestore && pendingRestoreBytes != null) { PasswordDialog(t("backup_enter_password"), false, currentLang.value, onDismiss = { showPasswordDialogRestore = false; pendingRestoreBytes = null }, onConfirm = { pwd -> val bytes = pendingRestoreBytes!!; showPasswordDialogRestore = false; scope.launch { snackbarHostState.showSnackbar(t("backup_decrypting")) }; vm.restoreBackup(bytes, pwd) { ok -> if (ok) scope.launch { snackbarHostState.showSnackbar(t("export_ok")) } else scope.launch { snackbarHostState.showSnackbar(t("backup_wrong_password")) }; pendingRestoreBytes = null } }) }
