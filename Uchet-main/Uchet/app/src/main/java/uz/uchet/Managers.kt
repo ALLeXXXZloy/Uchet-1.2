@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp  // ★ ИСПРАВЛЕНО: для fontSize = 12.sp
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -32,6 +33,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// ============================================================================
+// GoalManagerSheet
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GoalManagerSheet(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, lang: AppLanguage, onSaveGoal: (SavingsGoalEntity) -> Unit, onDeleteGoal: (SavingsGoalEntity) -> Unit, onDeposit: (SavingsGoalEntity, String, Long) -> Unit, onDismiss: () -> Unit) {
@@ -62,35 +66,32 @@ fun GoalManagerSheet(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, la
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                 Text(t("goals"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(16.dp))
-                
                 Text(t("add_goal") + ":", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("goal_name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = targetAmount, onValueChange = { targetAmount = it }, label = { Text(t("target_amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                Button(onClick = { 
+                Button(onClick = {
                     val targetMinor = runCatching { BigDecimal(targetAmount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
-                    if (name.isNotBlank() && targetMinor != null && targetMinor > 0) { 
+                    if (name.isNotBlank() && targetMinor != null && targetMinor > 0) {
                         onSaveGoal(SavingsGoalEntity(name = name.trim(), targetAmountMinor = targetMinor))
                         name = ""; targetAmount = ""
-                    } 
+                    }
                 }, modifier = Modifier.fillMaxWidth()) { Text(t("add_goal")) }
-                
                 Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
                 Text(t("goals") + ":", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
-                
                 if (goals.isEmpty()) Text(t("no_found"), color = Color.Gray)
-                goals.forEach { goal -> 
-                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
-                        Column(Modifier.weight(1f)) { 
+                goals.forEach { goal ->
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
                             Text(goal.name, fontWeight = FontWeight.Bold)
-                            Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) 
+                            Text("${goal.currentAmountMinor.money()} / ${goal.targetAmountMinor.money()}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
                         IconButton(onClick = { depositGoal = goal }) { Icon(Icons.Default.Add, t("deposit"), tint = GREEN) }
-                        IconButton(onClick = { goalToDelete = goal }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } 
-                    } 
+                        IconButton(onClick = { goalToDelete = goal }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
+                    }
                 }
                 Spacer(Modifier.height(32.dp))
             }
@@ -98,15 +99,16 @@ fun GoalManagerSheet(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, la
     }
 }
 
+// ============================================================================
+// CardManagerSheet
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, allTxs: List<Tx>, onSave: (CardEntity) -> Unit, onDelete: (String) -> Unit, onAdjustBalance: (String, Long) -> Unit, currentLang: AppLanguage, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit) {
     var last4 by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var initialBalance by remember { mutableStateOf("") }; var currency by remember { mutableStateOf("UZS") }
-    
     var editingCard by remember { mutableStateOf<CardEntity?>(null) }
-    var editName by remember { mutableStateOf("") } 
+    var editName by remember { mutableStateOf("") }
     var actualBalanceInput by remember { mutableStateOf("") }
-    
     var cardToDelete by remember { mutableStateOf<String?>(null) }
     val t = { key: String -> Translations.t(key, currentLang) }
 
@@ -150,52 +152,27 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
     if (editingCard != null) {
         val card = editingCard!!
         val currentMathBalance = cardBalances[card.id] ?: card.initialBalanceMinor
-        
         AlertDialog(
-            onDismissRequest = { editingCard = null }, 
+            onDismissRequest = { editingCard = null },
             title = { Text("${t("edit")}: ${card.last4}") },
-            text = { 
+            text = {
                 Column {
-                    OutlinedTextField(
-                        value = editName, 
-                        onValueChange = { editName = it }, 
-                        label = { Text(t("card_name")) }, 
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
+                    OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text(t("card_name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     Spacer(Modifier.height(16.dp))
-                    
                     Text("${t("current_bal")} ${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
                     Text(t("enter_fact"), style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
-                    
-                    OutlinedTextField(
-                        value = actualBalanceInput, 
-                        onValueChange = { actualBalanceInput = it }, 
-                        label = { Text(t("amount")) }, 
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), 
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                } 
+                    OutlinedTextField(value = actualBalanceInput, onValueChange = { actualBalanceInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+                }
             },
-            confirmButton = { 
+            confirmButton = {
                 TextButton(onClick = {
                     val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
-                    
-                    if (editName.isNotBlank() && editName != card.name) {
-                        onSave(card.copy(name = editName.trim()))
-                    }
-                    
-                    if (actualMinor != null && actualMinor != currentMathBalance) {
-                        val diff = actualMinor - currentMathBalance
-                        onAdjustBalance(card.id, diff)
-                    }
-                    
-                    editingCard = null
-                    editName = ""
-                    actualBalanceInput = ""
-                }) { Text(t("save")) } 
+                    if (editName.isNotBlank() && editName != card.name) onSave(card.copy(name = editName.trim()))
+                    if (actualMinor != null && actualMinor != currentMathBalance) onAdjustBalance(card.id, actualMinor - currentMathBalance)
+                    editingCard = null; editName = ""; actualBalanceInput = ""
+                }) { Text(t("save")) }
             },
             dismissButton = { TextButton(onClick = { editingCard = null }) { Text(t("cancel")) } }
         )
@@ -204,12 +181,9 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(t("my_accounts"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { startVoiceCard() }) {
-                        Icon(Icons.Default.Mic, contentDescription = t("voice_input"), tint = MaterialTheme.colorScheme.primary)
-                    }
+                    IconButton(onClick = { startVoiceCard() }) { Icon(Icons.Default.Mic, contentDescription = t("voice_input"), tint = MaterialTheme.colorScheme.primary) }
                 }
                 Spacer(Modifier.height(16.dp))
-                
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -225,34 +199,28 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                 Spacer(Modifier.height(8.dp))
-                Button(onClick = { 
+                Button(onClick = {
                     val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L
-                    if (name.isNotBlank() && last4.isNotBlank()) { 
+                    if (name.isNotBlank() && last4.isNotBlank()) {
                         onSave(CardEntity(id = "${last4}_$currency", last4 = last4, name = name, currency = currency, initialBalanceMinor = balanceMinor))
-                        name = ""; last4 = ""; initialBalance = "" 
-                    } 
+                        name = ""; last4 = ""; initialBalance = ""
+                    }
                 }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
-                
+
                 Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
                 Text(t("my_accounts") + ":", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
-                
+
                 if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
-                cards.forEach { c -> 
+                cards.forEach { c ->
                     val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
-                        Column(Modifier.weight(1f)) { 
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
                             Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold)
-                            Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) 
+                            Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
-                        IconButton(onClick = { 
-                            editingCard = c
-                            editName = c.name
-                            actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() 
-                        }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) }
-                        if (c.id != "CASH" && c.last4 != "CASH") {
-                            IconButton({ cardToDelete = c.id }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
-                        }
+                        IconButton(onClick = { editingCard = c; editName = c.name; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) }
+                        if (c.id != "CASH" && c.last4 != "CASH") IconButton({ cardToDelete = c.id }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
                     }
                 }
                 Spacer(Modifier.height(32.dp))
@@ -261,6 +229,9 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
     }
 }
 
+// ============================================================================
+// BudgetManagerSheet
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BudgetManagerSheet(budgets: List<BudgetEntity>, expenseCategories: List<String>, onSave: (BudgetEntity) -> Unit, onDelete: (String) -> Unit, currentLang: AppLanguage, onDismiss: () -> Unit) {
@@ -283,10 +254,8 @@ fun BudgetManagerSheet(budgets: List<BudgetEntity>, expenseCategories: List<Stri
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text(t("budgets"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            
             Text(t("set_limit") + ":", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
-
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(Translations.translateCategory(selectedCategory, currentLang))
@@ -294,39 +263,37 @@ fun BudgetManagerSheet(budgets: List<BudgetEntity>, expenseCategories: List<Stri
                     Icon(Icons.Default.ArrowDropDown, null)
                 }
                 DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
-                    expenseCategories.forEach { c ->
-                        DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { selectedCategory = c; showCategoryMenu = false })
-                    }
+                    expenseCategories.forEach { c -> DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { selectedCategory = c; showCategoryMenu = false }) }
                 }
             }
-
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = limitInput, onValueChange = { limitInput = it }, label = { Text(t("limit")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { 
+            Button(onClick = {
                 val limitMinor = runCatching { BigDecimal(limitInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
-                if (limitMinor != null && limitMinor > 0) { onSave(BudgetEntity(category = selectedCategory, limitMinor = limitMinor)); limitInput = "" } 
+                if (limitMinor != null && limitMinor > 0) { onSave(BudgetEntity(category = selectedCategory, limitMinor = limitMinor)); limitInput = "" }
             }, modifier = Modifier.fillMaxWidth()) { Text(t("set_limit")) }
-            
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("budgets") + ":", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
-            
             if (budgets.isEmpty()) Text(t("no_found"), color = Color.Gray)
-            budgets.forEach { b -> 
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
-                    Column(Modifier.weight(1f)) { 
+            budgets.forEach { b ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
                         Text(Translations.translateCategory(b.category, currentLang), fontWeight = FontWeight.Bold)
-                        Text("${t("limit")}: ${b.limitMinor.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray) 
+                        Text("${t("limit")}: ${b.limitMinor.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                     }
-                    IconButton({ budgetToDelete = b.category }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } 
-                } 
+                    IconButton({ budgetToDelete = b.category }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
+                }
             }
             Spacer(Modifier.height(32.dp))
         }
     }
 }
 
+// ============================================================================
+// RecurringManagerSheet
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecurringManagerSheet(recurring: List<RecurringEntity>, cards: List<CardEntity>, expenseCategories: List<String>, incomeCategories: List<String>, currentLang: AppLanguage, onSave: (RecurringEntity) -> Unit, onDelete: (RecurringEntity) -> Unit, onDismiss: () -> Unit) {
@@ -334,7 +301,6 @@ fun RecurringManagerSheet(recurring: List<RecurringEntity>, cards: List<CardEnti
     var amount by remember { mutableStateOf("") }; var selectedCardId by remember { mutableStateOf("CASH") }; var desc by remember { mutableStateOf("") }; var dayOfMonth by remember { mutableStateOf("1") }
     var recToDelete by remember { mutableStateOf<RecurringEntity?>(null) }
     val t = { key: String -> Translations.t(key, currentLang) }
-
     var showTypeMenu by remember { mutableStateOf(false) }
     var showCategoryMenu by remember { mutableStateOf(false) }
 
@@ -348,19 +314,17 @@ fun RecurringManagerSheet(recurring: List<RecurringEntity>, cards: List<CardEnti
         )
     }
 
-    LaunchedEffect(type) { 
+    LaunchedEffect(type) {
         val currentList = if (type == TxType.INCOME) incomeCategories else expenseCategories
-        if (!currentList.contains(category)) category = currentList.lastOrNull() ?: "📦 Другое" 
+        if (!currentList.contains(category)) category = currentList.lastOrNull() ?: "📦 Другое"
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text(t("recurring"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-
             Text(t("add_temp") + ":", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
-
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showTypeMenu = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(type.localizedLabel(currentLang))
@@ -368,12 +332,9 @@ fun RecurringManagerSheet(recurring: List<RecurringEntity>, cards: List<CardEnti
                     Icon(Icons.Default.ArrowDropDown, null)
                 }
                 DropdownMenu(expanded = showTypeMenu, onDismissRequest = { showTypeMenu = false }) {
-                    listOf(TxType.INCOME, TxType.EXPENSE).forEach { tt ->
-                        DropdownMenuItem(text = { Text(tt.localizedLabel(currentLang)) }, onClick = { type = tt; showTypeMenu = false })
-                    }
+                    listOf(TxType.INCOME, TxType.EXPENSE).forEach { tt -> DropdownMenuItem(text = { Text(tt.localizedLabel(currentLang)) }, onClick = { type = tt; showTypeMenu = false }) }
                 }
             }
-
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             Spacer(Modifier.height(8.dp))
@@ -381,7 +342,6 @@ fun RecurringManagerSheet(recurring: List<RecurringEntity>, cards: List<CardEnti
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = dayOfMonth, onValueChange = { dayOfMonth = it.filter(Char::isDigit).take(2) }, label = { Text(t("day")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             Spacer(Modifier.height(8.dp))
-
             Text(t("category") + ":", style = MaterialTheme.typography.labelMedium)
             Box(Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { showCategoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
@@ -391,46 +351,44 @@ fun RecurringManagerSheet(recurring: List<RecurringEntity>, cards: List<CardEnti
                 }
                 DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
                     val currentCategories = if (type == TxType.INCOME) incomeCategories else expenseCategories
-                    currentCategories.forEach { c ->
-                        DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; showCategoryMenu = false })
-                    }
+                    currentCategories.forEach { c -> DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; showCategoryMenu = false }) }
                 }
             }
-
             Spacer(Modifier.height(8.dp))
             Text(t("account") + ":", style = MaterialTheme.typography.labelMedium)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { 
-                cards.forEach { c -> FilterChip(selected = selectedCardId == c.id, onClick = { selectedCardId = c.id }, label = { Text("${c.name} (${c.currency})") }) } 
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                cards.forEach { c -> FilterChip(selected = selectedCardId == c.id, onClick = { selectedCardId = c.id }, label = { Text("${c.name} (${c.currency})") }) }
             }
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { 
+            Button(onClick = {
                 val minor = runCatching { BigDecimal(amount.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                 val day = dayOfMonth.toIntOrNull()
-                if (minor != null && minor > 0 && day != null && day in 1..31) { 
-                    onSave(RecurringEntity(amountMinor = minor, type = type, cardId = if(selectedCardId == "CASH") null else selectedCardId, description = desc.trim(), category = category, dayOfMonth = day))
-                    amount = ""; desc = "" 
-                } 
+                if (minor != null && minor > 0 && day != null && day in 1..31) {
+                    onSave(RecurringEntity(amountMinor = minor, type = type, cardId = if (selectedCardId == "CASH") null else selectedCardId, description = desc.trim(), category = category, dayOfMonth = day))
+                    amount = ""; desc = ""
+                }
             }, modifier = Modifier.fillMaxWidth()) { Text(t("add_temp")) }
-            
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("recurring") + ":", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
-            
             if (recurring.isEmpty()) Text(t("no_found"), color = Color.Gray)
-            recurring.forEach { r -> 
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
-                    Column(Modifier.weight(1f)) { 
+            recurring.forEach { r ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
                         Text(r.description.ifBlank { Translations.translateCategory(r.category, currentLang) }, fontWeight = FontWeight.Bold)
-                        Text("${r.amountMinor.money()} UZS · ${r.dayOfMonth}", style = MaterialTheme.typography.bodySmall, color = Color.Gray) 
+                        Text("${r.amountMinor.money()} UZS · ${r.dayOfMonth}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                     }
-                    IconButton({ recToDelete = r }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } 
-                } 
+                    IconButton({ recToDelete = r }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
+                }
             }
             Spacer(Modifier.height(32.dp))
         }
     }
 }
 
+// ============================================================================
+// CategoryManagerSheet
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, onSave: (CategoryEntity) -> Unit, onDelete: (String) -> Unit, onDismiss: () -> Unit) {
@@ -451,100 +409,81 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text(t("categories"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-
             Text(t("add_cat") + ":", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { 
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 SegmentedButton(!isIncome, { isIncome = false }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense")) }
-                SegmentedButton(isIncome, { isIncome = true }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income")) } 
+                SegmentedButton(isIncome, { isIncome = true }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(t("income")) }
             }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("category")) }, placeholder = { Text("🐶") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { 
-                if (name.isNotBlank() && !categories.any { it.name == name }) { 
+            Button(onClick = {
+                if (name.isNotBlank() && !categories.any { it.name == name }) {
                     onSave(CategoryEntity(name = name.trim(), type = if (isIncome) TxType.INCOME else TxType.EXPENSE))
-                    name = "" 
-                } 
+                    name = ""
+                }
             }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
-            
+
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("expense") + ":", style = MaterialTheme.typography.titleSmall, color = RED)
-            categories.filter { it.type == TxType.EXPENSE }.forEach { c -> 
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+            categories.filter { it.type == TxType.EXPENSE }.forEach { c ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge)
-                    IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } 
-                } 
+                    IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
+                }
             }
             Spacer(Modifier.height(16.dp))
             Text(t("income") + ":", style = MaterialTheme.typography.titleSmall, color = GREEN)
-            categories.filter { it.type == TxType.INCOME }.forEach { c -> 
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+            categories.filter { it.type == TxType.INCOME }.forEach { c ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge)
-                    IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) } 
-                } 
+                    IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
+                }
             }
             Spacer(Modifier.height(32.dp))
         }
     }
 }
 
+// ============================================================================
+// SettingsSheet
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snackbarHostState: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope, currentTheme: MutableState<AppTheme>, currentLang: MutableState<AppLanguage>, vm: VM) {
     val prefs = SecurityHelper.getEncryptedPrefs(context)
     val settingsPrefs = context.getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE)
-    
     var oldPin by remember { mutableStateOf("") }; var newPin by remember { mutableStateOf("") }; var confirmPin by remember { mutableStateOf("") }; var useBiometric by remember { mutableStateOf(prefs.getBoolean("use_biometric", true)) }
     var smsDebug by remember { mutableStateOf(settingsPrefs.getBoolean("sms_debug_mode", false)) }
-    
     var dailyReminder by remember { mutableStateOf(settingsPrefs.getBoolean("daily_reminder", false)) }
     var reminderHour by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_hour", 21)) }
     var reminderMinute by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_minute", 0)) }
     var showTimePicker by remember { mutableStateOf(false) }
-    
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val t = { key: String -> Translations.t(key, currentLang.value) }
-    
+
     if (showTimePicker) {
-        val timePickerState = rememberTimePickerState(
-            initialHour = reminderHour,
-            initialMinute = reminderMinute,
-            is24Hour = true
-        )
+        val timePickerState = rememberTimePickerState(initialHour = reminderHour, initialMinute = reminderMinute, is24Hour = true)
         AlertDialog(
             onDismissRequest = { showTimePicker = false },
             title = { Text("Время напоминания") },
-            text = {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TimeInput(state = timePickerState)
-                }
-            },
+            text = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimeInput(state = timePickerState) } },
             confirmButton = {
                 TextButton(onClick = {
-                    reminderHour = timePickerState.hour
-                    reminderMinute = timePickerState.minute
-                    settingsPrefs.edit()
-                        .putInt("reminder_hour", reminderHour)
-                        .putInt("reminder_minute", reminderMinute)
-                        .apply()
-                    
-                    if (dailyReminder) {
-                        NotificationHelper.scheduleDailyReminder(context, reminderHour, reminderMinute)
-                    }
+                    reminderHour = timePickerState.hour; reminderMinute = timePickerState.minute
+                    settingsPrefs.edit().putInt("reminder_hour", reminderHour).putInt("reminder_minute", reminderMinute).apply()
+                    if (dailyReminder) NotificationHelper.scheduleDailyReminder(context, reminderHour, reminderMinute)
                     showTimePicker = false
                 }) { Text("OK") }
             },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Отмена") }
-            }
+            dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text("Отмена") } }
         )
     }
-    
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text(t("settings"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-
             Text(t("language"), style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -555,7 +494,6 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
                 FilterChip(selected = currentLang.value == AppLanguage.KAA, onClick = { currentLang.value = AppLanguage.KAA; settingsPrefs.edit().putString("app_lang", "KAA").apply() }, label = { Text("Qaraqalpaqsha") })
                 FilterChip(selected = currentLang.value == AppLanguage.KK, onClick = { currentLang.value = AppLanguage.KK; settingsPrefs.edit().putString("app_lang", "KK").apply() }, label = { Text("Қазақша") })
             }
-            
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("theme"), style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
@@ -564,10 +502,8 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
                 FilterChip(selected = currentTheme.value == AppTheme.LIGHT, onClick = { currentTheme.value = AppTheme.LIGHT; settingsPrefs.edit().putString("app_theme", "LIGHT").apply() }, label = { Text(t("light")) })
                 FilterChip(selected = currentTheme.value == AppTheme.DARK, onClick = { currentTheme.value = AppTheme.DARK; settingsPrefs.edit().putString("app_theme", "DARK").apply() }, label = { Text(t("dark")) })
             }
-            
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Button(onClick = { vm.updateRates(); scope.launch { snackbarHostState.showSnackbar(t("rates_updated")) } }, modifier = Modifier.fillMaxWidth()) { Text(t("update_rates")) }
-
             Spacer(Modifier.height(16.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("change_pin"), style = MaterialTheme.typography.titleSmall); Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = oldPin, onValueChange = { oldPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
@@ -576,59 +512,42 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = confirmPin, onValueChange = { confirmPin = it.filter(Char::isDigit).take(4) }, label = { Text(t("pin_repeat")) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            
-            Button(onClick = { when { 
+            Button(onClick = { when {
                 oldPin != savedPin -> scope.launch { snackbarHostState.showSnackbar(t("wrong_pin")) }
                 newPin.length != 4 -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }
                 newPin != confirmPin -> scope.launch { snackbarHostState.showSnackbar(t("pin_error")) }
-                else -> { 
-                    prefs.edit().putString("pin", newPin).apply()
-                    oldPin = ""; newPin = ""; confirmPin = ""
-                    scope.launch { snackbarHostState.showSnackbar(t("pin_ok")) } 
-                } 
+                else -> { prefs.edit().putString("pin", newPin).apply(); oldPin = ""; newPin = ""; confirmPin = ""; scope.launch { snackbarHostState.showSnackbar(t("pin_ok")) } }
             } }, modifier = Modifier.fillMaxWidth()) { Text(t("change_pin")) }
-            
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(t("biometric"), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                Switch(checked = useBiometric, onCheckedChange = { useBiometric = it; prefs.edit().putBoolean("use_biometric", it).apply() }) 
+                Switch(checked = useBiometric, onCheckedChange = { useBiometric = it; prefs.edit().putBoolean("use_biometric", it).apply() })
             }
-
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Ежедневные напоминания", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        text = "Каждый день в %02d:%02d".format(reminderHour, reminderMinute),
-                        style = MaterialTheme.typography.bodySmall, 
-                        color = if (dailyReminder) MaterialTheme.colorScheme.primary else Color.Gray,
-                        modifier = Modifier.clickable { showTimePicker = true }
-                    )
+                    Text(text = "Каждый день в %02d:%02d".format(reminderHour, reminderMinute), style = MaterialTheme.typography.bodySmall, color = if (dailyReminder) MaterialTheme.colorScheme.primary else Color.Gray, modifier = Modifier.clickable { showTimePicker = true })
                 }
-                Switch(
-                    checked = dailyReminder, 
-                    onCheckedChange = { isChecked ->
-                        dailyReminder = isChecked
-                        settingsPrefs.edit().putBoolean("daily_reminder", isChecked).apply()
-                        if (isChecked) {
-                            NotificationHelper.scheduleDailyReminder(context, reminderHour, reminderMinute)
-                        } else {
-                            NotificationHelper.cancelDailyReminder(context)
-                        }
-                    }
-                ) 
+                Switch(checked = dailyReminder, onCheckedChange = { isChecked ->
+                    dailyReminder = isChecked
+                    settingsPrefs.edit().putBoolean("daily_reminder", isChecked).apply()
+                    if (isChecked) NotificationHelper.scheduleDailyReminder(context, reminderHour, reminderMinute) else NotificationHelper.cancelDailyReminder(context)
+                })
             }
-
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { 
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(t("sms_debug"), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                Switch(checked = smsDebug, onCheckedChange = { smsDebug = it; settingsPrefs.edit().putBoolean("sms_debug_mode", it).apply() }) 
+                Switch(checked = smsDebug, onCheckedChange = { smsDebug = it; settingsPrefs.edit().putBoolean("sms_debug_mode", it).apply() })
             }
             Spacer(Modifier.height(32.dp))
         }
     }
 }
 
+// ============================================================================
+// ★ FB-20: DebtManagerSheet — с диалогом возврата
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebtManagerSheet(
@@ -636,7 +555,7 @@ fun DebtManagerSheet(
     cards: List<CardEntity>,
     currentLang: AppLanguage,
     onSave: (DebtEntity) -> Unit,
-    onMarkPaid: (DebtEntity) -> Unit,
+    onRepay: (DebtEntity, String?, Long) -> Unit,
     onDelete: (DebtEntity) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -645,6 +564,7 @@ fun DebtManagerSheet(
     var amountInput by remember { mutableStateOf("") }
     var desc by remember { mutableStateOf("") }
     var debtToDelete by remember { mutableStateOf<DebtEntity?>(null) }
+    var debtToRepay by remember { mutableStateOf<DebtEntity?>(null) }
     var selectedCardId by remember { mutableStateOf("CASH") }
     val t = { key: String -> Translations.t(key, currentLang) }
 
@@ -655,6 +575,51 @@ fun DebtManagerSheet(
             text = { Text(t("delete_confirm_text")) },
             confirmButton = { TextButton(onClick = { onDelete(debtToDelete!!); debtToDelete = null }) { Text(t("yes"), color = RED) } },
             dismissButton = { TextButton(onClick = { debtToDelete = null }) { Text(t("no")) } }
+        )
+    }
+
+    // ★ FB-20: Диалог возврата долга
+    if (debtToRepay != null) {
+        val debt = debtToRepay!!
+        val isBorrowed = debt.type == DebtType.BORROWED
+        // ★ ИСПРАВЛЕНО: remember(debt.id), чтобы состояние не утекало между долгами
+        var repayCardId by remember(debt.id) { mutableStateOf(debt.cardId ?: "CASH") }
+
+        AlertDialog(
+            onDismissRequest = { debtToRepay = null },
+            title = { Text(if (isBorrowed) "Вернуть долг" else "Получить возврат") },
+            text = {
+                Column {
+                    Text("${if (isBorrowed) "Вы должны" else "Вам должны"}: ${debt.personName}", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Сумма: ${debt.amountMinor.money()} UZS", color = if (isBorrowed) RED else GREEN, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(16.dp))
+                    Text("Как был осуществлён возврат?", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        cards.forEach { c ->
+                            FilterChip(
+                                selected = repayCardId == c.id,
+                                onClick = { repayCardId = c.id },
+                                label = { Text("${c.name} (${c.currency})") }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (isBorrowed) "Будет создан Расход на ${debt.amountMinor.money()} с категорией «Возврат долга»"
+                        else "Будет создан Доход на ${debt.amountMinor.money()} с категорией «Возврат долга»",
+                        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRepay(debt, if (repayCardId == "CASH") null else repayCardId, debt.amountMinor)
+                    debtToRepay = null
+                }) { Text("Подтвердить", color = GREEN) }
+            },
+            dismissButton = { TextButton(onClick = { debtToRepay = null }) { Text(t("cancel")) } }
         )
     }
 
@@ -676,10 +641,12 @@ fun DebtManagerSheet(
                     Text("-${totalIOwe.money()} UZS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = RED)
                 }
             }
-            
+
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
 
-            Text("Добавить долг:", style = MaterialTheme.typography.titleSmall)
+            Text("Добавить долг (вручную):", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+            Text("Совет: проще создать долг через операцию с категорией «🤝 Долги»", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 SegmentedButton(isOwedToMe, { isOwedToMe = true }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("owed_to_me")) }
@@ -692,19 +659,11 @@ fun DebtManagerSheet(
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text(t("desc")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Spacer(Modifier.height(8.dp))
-            
             Text(t("account") + ":", style = MaterialTheme.typography.labelMedium)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { 
-                cards.forEach { c -> 
-                    FilterChip(
-                        selected = selectedCardId == c.id, 
-                        onClick = { selectedCardId = c.id }, 
-                        label = { Text("${c.name} (${c.currency})") }
-                    ) 
-                } 
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                cards.forEach { c -> FilterChip(selected = selectedCardId == c.id, onClick = { selectedCardId = c.id }, label = { Text("${c.name} (${c.currency})") }) }
             }
             Spacer(Modifier.height(8.dp))
-            
             Button(onClick = {
                 val amountMinor = runCatching { BigDecimal(amountInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                 if (personName.isNotBlank() && amountMinor != null && amountMinor > 0) {
@@ -741,7 +700,9 @@ fun DebtManagerSheet(
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("${if (d.type == DebtType.LENT) "+" else "-"}${d.amountMinor.money()}", color = if (d.type == DebtType.LENT) GREEN else RED, fontWeight = FontWeight.Bold)
-                            TextButton(onClick = { onMarkPaid(d) }) { Text(t("mark_paid")) }
+                            TextButton(onClick = { debtToRepay = d }) {
+                                Text(if (d.type == DebtType.BORROWED) "Вернуть" else "Получено", fontSize = 12.sp)
+                            }
                         }
                         IconButton(onClick = { debtToDelete = d }) { Icon(Icons.Default.Delete, null, tint = RED) }
                     }
@@ -764,6 +725,9 @@ fun DebtManagerSheet(
     }
 }
 
+// ============================================================================
+// RuleManagerSheet (FB-17)
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RuleManagerSheet(
@@ -781,11 +745,9 @@ fun RuleManagerSheet(
     var category by remember { mutableStateOf(expenseCategories.firstOrNull() ?: "📦 Другое") }
     var type by remember { mutableStateOf(TxType.EXPENSE) }
     var isIgnored by remember { mutableStateOf(false) }
-    
     var ruleToDelete by remember { mutableStateOf<CustomKeywordRule?>(null) }
     var showCategoryMenu by remember { mutableStateOf(false) }
     var showConfirmDeleteUnused by remember { mutableStateOf(false) }
-
     val unusedCount = rules.count { it.appliedCount == 0 }
 
     LaunchedEffect(type) {
@@ -798,25 +760,16 @@ fun RuleManagerSheet(
             onDismissRequest = { ruleToDelete = null },
             title = { Text(t("delete_confirm_title")) },
             text = { Text(t("delete_confirm_text")) },
-            confirmButton = {
-                TextButton(onClick = { onDelete(ruleToDelete!!); ruleToDelete = null }) {
-                    Text(t("yes"), color = RED)
-                }
-            },
+            confirmButton = { TextButton(onClick = { onDelete(ruleToDelete!!); ruleToDelete = null }) { Text(t("yes"), color = RED) } },
             dismissButton = { TextButton(onClick = { ruleToDelete = null }) { Text(t("no")) } }
         )
     }
-
     if (showConfirmDeleteUnused) {
         AlertDialog(
             onDismissRequest = { showConfirmDeleteUnused = false },
             title = { Text(t("rule_delete_unused")) },
             text = { Text("Будет удалено $unusedCount правил, которые ещё ни разу не сработали.") },
-            confirmButton = {
-                TextButton(onClick = { onDeleteUnused(); showConfirmDeleteUnused = false }) {
-                    Text(t("yes"), color = RED)
-                }
-            },
+            confirmButton = { TextButton(onClick = { onDeleteUnused(); showConfirmDeleteUnused = false }) { Text(t("yes"), color = RED) } },
             dismissButton = { TextButton(onClick = { showConfirmDeleteUnused = false }) { Text(t("no")) } }
         )
     }
@@ -825,19 +778,10 @@ fun RuleManagerSheet(
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text(t("learned_rules"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
-            Text(
-                "При встрече слова в СМС, чеке или голосовой команде категория выбирается автоматически",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
+            Text("При встрече слова в СМС, чеке или голосовой команде категория выбирается автоматически", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             Spacer(Modifier.height(16.dp))
-
             if (rules.isEmpty()) {
-                Text(
-                    "Пока нет выученных правил.\nОтредактируйте операцию и отметьте «Запомнить для будущего».",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
-                )
+                Text("Пока нет выученных правил.\nОтредактируйте операцию и отметьте «Запомнить для будущего».", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             } else {
                 rules.forEach { rule ->
                     Card(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
@@ -845,73 +789,33 @@ fun RuleManagerSheet(
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(rule.keyword, fontWeight = FontWeight.Bold)
-                                    if (rule.appliedCount > 0) {
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            "×${rule.appliedCount}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = GREEN,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    if (rule.rejectedCount > 0) {
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(
-                                            "✕${rule.rejectedCount}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = RED
-                                        )
-                                    }
+                                    if (rule.appliedCount > 0) { Spacer(Modifier.width(8.dp)); Text("×${rule.appliedCount}", style = MaterialTheme.typography.labelSmall, color = GREEN, fontWeight = FontWeight.Bold) }
+                                    if (rule.rejectedCount > 0) { Spacer(Modifier.width(4.dp)); Text("✕${rule.rejectedCount}", style = MaterialTheme.typography.labelSmall, color = RED) }
                                 }
-                                Text(
-                                    if (rule.isIgnored) "→ 🚫 Игнорировать (спам/реклама)"
-                                    else "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.Gray
-                                )
-                                rule.lastAppliedAt?.let { ts ->
-                                    Text(
-                                        formatLastApplied(ts),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.Gray.copy(alpha = 0.8f)
-                                    )
-                                }
+                                Text(if (rule.isIgnored) "→ 🚫 Игнорировать (спам/реклама)" else "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                rule.lastAppliedAt?.let { ts -> Text(formatLastApplied(ts), style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.8f)) }
                             }
-                            IconButton(onClick = { ruleToDelete = rule }) {
-                                Icon(Icons.Default.Delete, null, tint = RED)
-                            }
+                            IconButton(onClick = { ruleToDelete = rule }) { Icon(Icons.Default.Delete, null, tint = RED) }
                         }
                     }
                 }
-
                 if (unusedCount > 0) {
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { showConfirmDeleteUnused = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)
-                    ) {
+                    OutlinedButton(onClick = { showConfirmDeleteUnused = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)) {
                         Icon(Icons.Default.CleaningServices, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("${t("rule_delete_unused")} ($unusedCount)")
                     }
                 }
             }
-
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(16.dp))
-
             Text("Добавить правило вручную:", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
-            
-            Row(
-                verticalAlignment = Alignment.CenterVertically, 
-                modifier = Modifier.fillMaxWidth().clickable { isIgnored = !isIgnored }.padding(vertical = 4.dp)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isIgnored = !isIgnored }.padding(vertical = 4.dp)) {
                 Checkbox(checked = isIgnored, onCheckedChange = { isIgnored = it })
                 Text("Игнорировать (спам, реклама, ОТП)", style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(8.dp))
-
             if (!isIgnored) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("expense")) }
@@ -919,16 +823,7 @@ fun RuleManagerSheet(
                 }
                 Spacer(Modifier.height(8.dp))
             }
-
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = { keyword = it },
-                label = { Text("Ключевое слово") },
-                placeholder = { Text("Например: Uzum, Шаурма, Акция") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            
+            OutlinedTextField(value = keyword, onValueChange = { keyword = it }, label = { Text("Ключевое слово") }, placeholder = { Text("Например: Uzum, Шаурма, Акция") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             if (!isIgnored) {
                 Spacer(Modifier.height(8.dp))
                 Box(Modifier.fillMaxWidth()) {
@@ -939,27 +834,17 @@ fun RuleManagerSheet(
                     }
                     DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
                         val list = if (type == TxType.INCOME) incomeCategories else expenseCategories
-                        list.forEach { c ->
-                            DropdownMenuItem(
-                                text = { Text(Translations.translateCategory(c, currentLang)) },
-                                onClick = { category = c; showCategoryMenu = false }
-                            )
-                        }
+                        list.forEach { c -> DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; showCategoryMenu = false }) }
                     }
                 }
             }
-            
             Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    if (keyword.isNotBlank() && (isIgnored || category.isNotBlank())) {
-                        onSave(keyword.trim(), if (isIgnored) "IGNORE" else category.trim(), type, isIgnored)
-                        keyword = ""
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(t("add")) }
-
+            Button(onClick = {
+                if (keyword.isNotBlank() && (isIgnored || category.isNotBlank())) {
+                    onSave(keyword.trim(), if (isIgnored) "IGNORE" else category.trim(), type, isIgnored)
+                    keyword = ""
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
             Spacer(Modifier.height(32.dp))
         }
     }
@@ -976,6 +861,9 @@ private fun formatLastApplied(ts: Long): String {
     }
 }
 
+// ============================================================================
+// CorrectionManagerSheet (FB-16/17/18)
+// ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CorrectionManagerSheet(
@@ -989,28 +877,11 @@ fun CorrectionManagerSheet(
     val context = LocalContext.current
     var showClearConfirm by remember { mutableStateOf(false) }
 
-    val csvExportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.openOutputStream(it)?.use { os ->
-                    os.write(serializeCorrectionsCsv(corrections).toByteArray(Charsets.UTF_8))
-                }
-            } catch (e: Exception) { e.printStackTrace() }
-        }
+    val csvExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
+        uri?.let { try { context.contentResolver.openOutputStream(it)?.use { os -> os.write(serializeCorrectionsCsv(corrections).toByteArray(Charsets.UTF_8)) } } catch (e: Exception) { e.printStackTrace() } }
     }
-
-    val jsonExportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json")
-    ) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.openOutputStream(it)?.use { os ->
-                    os.write(serializeCorrectionsJson(corrections).toByteArray(Charsets.UTF_8))
-                }
-            } catch (e: Exception) { e.printStackTrace() }
-        }
+    val jsonExportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        uri?.let { try { context.contentResolver.openOutputStream(it)?.use { os -> os.write(serializeCorrectionsJson(corrections).toByteArray(Charsets.UTF_8)) } } catch (e: Exception) { e.printStackTrace() } }
     }
 
     if (showClearConfirm) {
@@ -1018,9 +889,7 @@ fun CorrectionManagerSheet(
             onDismissRequest = { showClearConfirm = false },
             title = { Text(t("correction_clear_all")) },
             text = { Text(t("delete_confirm_text")) },
-            confirmButton = {
-                TextButton(onClick = { onClearAll(); showClearConfirm = false }) { Text(t("yes"), color = RED) }
-            },
+            confirmButton = { TextButton(onClick = { onClearAll(); showClearConfirm = false }) { Text(t("yes"), color = RED) } },
             dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text(t("no")) } }
         )
     }
@@ -1031,91 +900,36 @@ fun CorrectionManagerSheet(
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text(t("learned_corrections"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
-            Text(
-                t("correction_hint"),
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
+            Text(t("correction_hint"), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             Spacer(Modifier.height(16.dp))
-
             if (corrections.isEmpty()) {
-                Text(
-                    t("correction_empty"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
-                )
+                Text(t("correction_empty"), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             } else {
-                Text(
-                    "${t("correction_total")}: ${corrections.size}",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("${t("correction_total")}: ${corrections.size}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-
                 grouped.forEach { (hint, list) ->
                     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Column(Modifier.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Store, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text(
-                                    if (hint.isBlank()) "—" else hint,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
+                                Text(if (hint.isBlank()) "—" else hint, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
                             }
                             Spacer(Modifier.height(6.dp))
                             list.sortedByDescending { it.lastSeenAt }.forEach { c ->
-                                Row(
-                                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                fieldLabel(c.field, currentLang),
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = Color.Gray
-                                            )
+                                            Text(fieldLabel(c.field, currentLang), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                                             Spacer(Modifier.width(6.dp))
-                                            if (c.appliedCount >= 3) {
-                                                Text(
-                                                    "● ${t("correction_ready")}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = GREEN,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            } else {
-                                                Text(
-                                                    "×${c.appliedCount}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
+                                            if (c.appliedCount >= 3) Text("● ${t("correction_ready")}", style = MaterialTheme.typography.labelSmall, color = GREEN, fontWeight = FontWeight.Bold)
+                                            else Text("×${c.appliedCount}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
-                                        Text(
-                                            "${formatParsedValue(c.field, c.parsedValue)} → ${formatParsedValue(c.field, c.correctedValue)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        if (c.rawText.isNotBlank()) {
-                                            Text(
-                                                c.rawText.take(80).replace("\n", " ") + if (c.rawText.length > 80) "…" else "",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color.Gray.copy(alpha = 0.6f),
-                                                maxLines = 1
-                                            )
-                                        }
-                                        Text(
-                                            relativeTime(c.lastSeenAt),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color.Gray.copy(alpha = 0.7f)
-                                        )
+                                        Text("${formatParsedValue(c.field, c.parsedValue)} → ${formatParsedValue(c.field, c.correctedValue)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                        if (c.rawText.isNotBlank()) Text(c.rawText.take(80).replace("\n", " ") + if (c.rawText.length > 80) "…" else "", style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.6f), maxLines = 1)
+                                        Text(relativeTime(c.lastSeenAt), style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.7f))
                                     }
-                                    IconButton(
-                                        onClick = { onDelete(c) },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
+                                    IconButton(onClick = { onDelete(c) }, modifier = Modifier.size(32.dp)) {
                                         Icon(Icons.Default.Close, null, tint = RED.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
                                     }
                                 }
@@ -1123,47 +937,22 @@ fun CorrectionManagerSheet(
                         }
                     }
                 }
-
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    t("correction_export_hint"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
+                Spacer(Modifier.height(16.dp)); HorizontalDivider(); Spacer(Modifier.height(12.dp))
+                Text(t("correction_export_hint"), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { csvExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.csv") },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(t("correction_export_csv"))
+                    Button(onClick = { csvExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.csv") }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(t("correction_export_csv"))
                     }
-                    OutlinedButton(
-                        onClick = { jsonExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.json") },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Save, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("JSON")
+                    OutlinedButton(onClick = { jsonExportLauncher.launch("uchet_corrections_${System.currentTimeMillis()}.json") }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Save, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("JSON")
                     }
                 }
-
                 Spacer(Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = { showClearConfirm = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)
-                ) {
-                    Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(t("correction_clear_all"))
+                OutlinedButton(onClick = { showClearConfirm = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = RED)) {
+                    Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(t("correction_clear_all"))
                 }
             }
-
             Spacer(Modifier.height(32.dp))
         }
     }
@@ -1180,24 +969,13 @@ private fun fieldLabel(field: String, lang: AppLanguage): String = when (field) 
     else -> field
 }
 
-private fun formatParsedValue(field: String, value: String): String {
-    return when (field) {
-        "amount" -> {
-            val l = value.toLongOrNull()
-            if (l != null) l.money() else value
-        }
-        "type" -> when (value) {
-            "INCOME" -> "Доход"
-            "EXPENSE" -> "Расход"
-            "TRANSFER" -> "Перевод"
-            "ADJUSTMENT" -> "Корректировка"
-            else -> value
-        }
-        "card" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}"
-        "toCardId" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}"
-        "is_spam" -> if (value == "TRANSACTION") "Создана операция" else "Игнорировано"
-        else -> value
-    }
+private fun formatParsedValue(field: String, value: String): String = when (field) {
+    "amount" -> { val l = value.toLongOrNull(); if (l != null) l.money() else value }
+    "type" -> when (value) { "INCOME" -> "Доход"; "EXPENSE" -> "Расход"; "TRANSFER" -> "Перевод"; "ADJUSTMENT" -> "Корректировка"; else -> value }
+    "card" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}"
+    "toCardId" -> if (value == "null") "Без карты" else "*${value.split("_").firstOrNull() ?: value}"
+    "is_spam" -> if (value == "TRANSACTION") "Создана операция" else "Игнорировано"
+    else -> value
 }
 
 private fun relativeTime(ts: Long): String {
@@ -1233,15 +1011,10 @@ private fun serializeCorrectionsJson(list: List<CorrectionEntity>): String {
     val arr = JSONArray()
     list.forEach { c ->
         arr.put(JSONObject().apply {
-            put("source", c.source)
-            put("merchantHint", c.merchantHint)
-            put("field", c.field)
-            put("parsedValue", c.parsedValue)
-            put("correctedValue", c.correctedValue)
-            put("appliedCount", c.appliedCount)
-            put("lastSeenAt", c.lastSeenAt)
-            put("createdAt", c.createdAt)
-            put("rawText", c.rawText)
+            put("source", c.source); put("merchantHint", c.merchantHint); put("field", c.field)
+            put("parsedValue", c.parsedValue); put("correctedValue", c.correctedValue)
+            put("appliedCount", c.appliedCount); put("lastSeenAt", c.lastSeenAt)
+            put("createdAt", c.createdAt); put("rawText", c.rawText)
         })
     }
     return arr.toString(2)
