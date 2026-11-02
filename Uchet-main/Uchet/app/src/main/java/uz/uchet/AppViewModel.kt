@@ -52,6 +52,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             when {
                 conf?.status == "CONFIRMED" -> false
                 conf?.status == "POSTPONED" && conf.lastPostponedDate == todayStr -> false
+                conf?.status == "SKIPPED" -> false
                 else -> true
             }
         }
@@ -161,18 +162,26 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long) {
+    // ★ Обновленный confirmRecurring: принимает конкретный месяц (targetMonth)
+    fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long, targetMonth: String) {
         if (actualAmountMinor <= 0) return
         viewModelScope.launch {
-            val today = LocalDate.now()
-            val monthStr = YearMonth.from(today).toString()
-            val existing = dao.getConfirmation(r.id, monthStr)
+            val existing = dao.getConfirmation(r.id, targetMonth)
             if (existing?.status == "CONFIRMED") return@launch
-            val effectiveDay = minOf(r.dayOfMonth, today.lengthOfMonth())
-            val txDate = today.withDayOfMonth(effectiveDay)
-            val txTimestamp = txDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            
+            val yearMonth = YearMonth.parse(targetMonth)
+            val date = yearMonth.atDay(minOf(r.dayOfMonth, yearMonth.lengthOfMonth()))
+            val txTimestamp = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            
             dao.upsert(Tx(amountMinor = actualAmountMinor, type = r.type, cardId = r.cardId, description = r.description, category = r.category, timestamp = txTimestamp, source = "RECURRING"))
-            dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = monthStr, status = "CONFIRMED", actualAmountMinor = actualAmountMinor))
+            dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = targetMonth, status = "CONFIRMED", actualAmountMinor = actualAmountMinor))
+        }
+    }
+
+    // ★ Новый метод: пропустить регулярную операцию в указанном месяце
+    fun skipRecurring(r: RecurringEntity, targetMonth: String) {
+        viewModelScope.launch {
+            dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = targetMonth, status = "SKIPPED", actualAmountMinor = 0L))
         }
     }
 
