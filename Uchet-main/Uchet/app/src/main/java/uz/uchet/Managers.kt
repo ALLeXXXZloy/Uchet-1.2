@@ -100,11 +100,21 @@ fun GoalManagerSheet(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, la
 }
 
 // ============================================================================
-// CardManagerSheet
+// CardManagerSheet — ★ FIX-CURRENCY
 // ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, allTxs: List<Tx>, onSave: (CardEntity) -> Unit, onDelete: (String) -> Unit, onAdjustBalance: (String, Long) -> Unit, currentLang: AppLanguage, rates: List<ExchangeRateEntity>, onDismiss: () -> Unit) {
+fun CardManagerSheet(
+    cards: List<CardEntity>,
+    cardBalancesInCurrency: Map<String, Long>,  // ★ в валюте карты, не в UZS
+    allTxs: List<Tx>,
+    onSave: (CardEntity) -> Unit,
+    onDelete: (String) -> Unit,
+    onAdjustBalance: (String, Long) -> Unit,     // ★ diff в валюте карты
+    currentLang: AppLanguage,
+    rates: List<ExchangeRateEntity>,
+    onDismiss: () -> Unit
+) {
     var last4 by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var initialBalance by remember { mutableStateOf("") }; var currency by remember { mutableStateOf("UZS") }
     var editingCard by remember { mutableStateOf<CardEntity?>(null) }
     var editName by remember { mutableStateOf("") }
@@ -139,6 +149,9 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
         }
     }
 
+    fun rateFor(currencyCode: String): Double =
+        if (currencyCode == "UZS") 1.0 else rates.find { it.currency == currencyCode }?.rateToUzs ?: 1.0
+
     if (cardToDelete != null) {
         AlertDialog(
             onDismissRequest = { cardToDelete = null },
@@ -151,7 +164,9 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
 
     if (editingCard != null) {
         val card = editingCard!!
-        val currentMathBalance = cardBalances[card.id] ?: card.initialBalanceMinor
+        val currentBalInCurrency = cardBalancesInCurrency[card.id] ?: card.initialBalanceMinor
+        val rate = rateFor(card.currency)
+        val balanceInUzs = (currentBalInCurrency.toDouble() * rate).toLong()
         AlertDialog(
             onDismissRequest = { editingCard = null },
             title = { Text("${t("edit")}: ${card.last4}") },
@@ -159,18 +174,29 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
                 Column {
                     OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text(t("card_name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     Spacer(Modifier.height(16.dp))
-                    Text("${t("current_bal")} ${currentMathBalance.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium)
+                    Text("${t("current_bal")} ${currentBalInCurrency.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium)
+                    if (card.currency != "UZS") {
+                        Text("≈ ${balanceInUzs.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
                     Spacer(Modifier.height(8.dp))
-                    Text(t("enter_fact"), style = MaterialTheme.typography.bodyMedium)
+                    Text("${t("enter_fact")} (${card.currency})", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = actualBalanceInput, onValueChange = { actualBalanceInput = it }, label = { Text(t("amount")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+                        value = actualBalanceInput,
+                        onValueChange = { actualBalanceInput = it },
+                        label = { Text(t("amount")) },
+                        suffix = { Text(card.currency) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                     if (editName.isNotBlank() && editName != card.name) onSave(card.copy(name = editName.trim()))
-                    if (actualMinor != null && actualMinor != currentMathBalance) onAdjustBalance(card.id, actualMinor - currentMathBalance)
+                    // ★ diff в валюте карты
+                    if (actualMinor != null && actualMinor != currentBalInCurrency) onAdjustBalance(card.id, actualMinor - currentBalInCurrency)
                     editingCard = null; editName = ""; actualBalanceInput = ""
                 }) { Text(t("save")) }
             },
@@ -197,7 +223,15 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(value = initialBalance, onValueChange = { initialBalance = it }, label = { Text(t("amount")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                OutlinedTextField(
+                    value = initialBalance,
+                    onValueChange = { initialBalance = it },
+                    label = { Text(t("amount")) },
+                    suffix = { Text(currency) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = {
                     val balanceMinor = runCatching { BigDecimal(initialBalance.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull() ?: 0L
@@ -213,13 +247,22 @@ fun CardManagerSheet(cards: List<CardEntity>, cardBalances: Map<String, Long>, a
 
                 if (cards.isEmpty()) Text(t("no_found"), color = Color.Gray)
                 cards.forEach { c ->
-                    val currentBal = cardBalances[c.id] ?: c.initialBalanceMinor
+                    val currentBalInCurrency = cardBalancesInCurrency[c.id] ?: c.initialBalanceMinor
+                    val rate = rateFor(c.currency)
+                    val balanceInUzs = (currentBalInCurrency.toDouble() * rate).toLong()
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold)
-                            Text("${currentBal.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Text("${currentBalInCurrency.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            if (c.currency != "UZS") {
+                                Text("≈ ${balanceInUzs.money()} UZS", style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.7f))
+                            }
                         }
-                        IconButton(onClick = { editingCard = c; editName = c.name; actualBalanceInput = BigDecimal(currentBal).movePointLeft(2).stripTrailingZeros().toPlainString() }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) }
+                        IconButton(onClick = {
+                            editingCard = c
+                            editName = c.name
+                            actualBalanceInput = BigDecimal(currentBalInCurrency).movePointLeft(2).stripTrailingZeros().toPlainString()
+                        }) { Icon(Icons.Default.Edit, t("edit"), tint = MaterialTheme.colorScheme.primary) }
                         if (c.id != "CASH" && c.last4 != "CASH") IconButton({ cardToDelete = c.id }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
                     }
                 }
@@ -419,7 +462,6 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("category")) }, placeholder = { Text("🐶") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Spacer(Modifier.height(8.dp))
             Button(onClick = {
-                // ★ FIX-A: запрещаем создавать виртуальные спец-категории вручную
                 if (name.isNotBlank() && !categories.any { it.name == name } && name !in SPECIAL_CATEGORIES) {
                     onSave(CategoryEntity(name = name.trim(), type = if (isIncome) TxType.INCOME else TxType.EXPENSE))
                     name = ""
@@ -428,7 +470,6 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
 
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("expense") + ":", style = MaterialTheme.typography.titleSmall, color = RED)
-            // ★ FIX-A: спец-категории скрыты — они виртуальные, нельзя удалить
             categories.filter { it.type == TxType.EXPENSE && it.name !in SPECIAL_CATEGORIES }.forEach { c ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge)
@@ -449,7 +490,7 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
 }
 
 // ============================================================================
-// SettingsSheet — секция "Доступ к уведомлениям" (версия FIX-B, без FIX-C)
+// SettingsSheet
 // ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -462,7 +503,6 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
     var reminderHour by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_hour", 21)) }
     var reminderMinute by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_minute", 0)) }
     var showTimePicker by remember { mutableStateOf(false) }
-    // ★ FIX-B: статус доступа к уведомлениям (перепроверяется при каждом открытии настроек)
     var notifAccessGranted by remember { mutableStateOf(NotificationAccessHelper.isNotificationAccessGranted(context)) }
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val t = { key: String -> Translations.t(key, currentLang.value) }
 
@@ -510,7 +550,6 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             Button(onClick = { vm.updateRates(); scope.launch { snackbarHostState.showSnackbar(t("rates_updated")) } }, modifier = Modifier.fillMaxWidth()) { Text(t("update_rates")) }
             Spacer(Modifier.height(16.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
 
-            // ★ FIX-B: Доступ к уведомлениям
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(t("notif_access_section"), style = MaterialTheme.typography.titleSmall)
