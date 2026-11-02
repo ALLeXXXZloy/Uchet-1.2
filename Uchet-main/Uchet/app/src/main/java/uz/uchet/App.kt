@@ -402,11 +402,12 @@ fun App(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(selected = currentTab == 0, onClick = { currentTab = 0 }, icon = { Icon(Icons.Default.Home, null) }, label = { Text(t("operations")) })
-                NavigationBarItem(selected = currentTab == 1, onClick = { currentTab = 1 }, icon = { Icon(Icons.Default.BarChart, null) }, label = { Text(t("analytics")) })
-                NavigationBarItem(selected = currentTab == 2, onClick = { currentTab = 2 }, icon = { BadgedBox(badge = { if (vm.pendingRecurring.collectAsState().value.isNotEmpty()) Badge { Text("${vm.pendingRecurring.collectAsState().value.size}") } }) { Icon(Icons.Default.Assignment, null) } }, label = { Text(t("standard_forecast")) })
-                NavigationBarItem(selected = currentTab == 3, onClick = { currentTab = 3 }, icon = { Icon(Icons.Default.TrendingUp, null) }, label = { Text(t("forecast_list")) })
-                NavigationBarItem(selected = false, onClick = { showSettings = true }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text(t("settings")) })
+                // ★ FB-08: Исправляем обрезание текста в нижней навигации
+                NavigationBarItem(selected = currentTab == 0, onClick = { currentTab = 0 }, icon = { Icon(Icons.Default.Home, null) }, label = { Text(t("operations"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(selected = currentTab == 1, onClick = { currentTab = 1 }, icon = { Icon(Icons.Default.BarChart, null) }, label = { Text(t("analytics"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(selected = currentTab == 2, onClick = { currentTab = 2 }, icon = { BadgedBox(badge = { if (vm.pendingRecurring.collectAsState().value.isNotEmpty()) Badge { Text("${vm.pendingRecurring.collectAsState().value.size}") } }) { Icon(Icons.Default.Assignment, null) } }, label = { Text(t("standard_forecast"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(selected = currentTab == 3, onClick = { currentTab = 3 }, icon = { Icon(Icons.Default.TrendingUp, null) }, label = { Text(t("forecast_list"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(selected = false, onClick = { showSettings = true }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text(t("settings"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
             }
         },
         topBar = {
@@ -478,9 +479,11 @@ fun App(
                 onShowGoalManager = { showGoalManager = true }, onShowDebtManager = { showDebtManager = true },
                 onShowBalanceDetails = { showBalanceDetails = true }, onQuickTemplateClick = { template -> selectedQuickTemplate = template; adding = true }
             )
-            1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { currentTab = 0 })
-            2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
-            3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
+            // ★ FB-12: Передаем paddingValues в AnalyticsScreen
+            1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, paddingValues = pad, onBack = { currentTab = 0 })
+            2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, paddingValues = pad, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
+            // ★ FB-07 & FB-12: Передаем paddingValues в ForecastListScreen
+            3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, paddingValues = pad, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
         }
     }
 
