@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -30,8 +31,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
+import java.io.File
 import java.math.BigDecimal
 import java.math.RoundingMode
+
+private const val CATEGORY_DEBT = "🤝 Долги"
+private const val CATEGORY_REPAY = "💸 Возврат долга"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,33 +68,46 @@ fun TxDialog(
     val clipboardManager = LocalClipboardManager.current
     val t = { key: String -> Translations.t(key, currentLang) }
 
-    // Инициализация полей
     var amountStr by remember { mutableStateOf(if (initial != null) BigDecimal(initial.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString() else "") }
     var type by remember { mutableStateOf(initial?.type ?: quickTemplate?.type ?: TxType.EXPENSE) }
     var cardId by remember { mutableStateOf(initial?.cardId ?: "CASH") }
-    var toCardId by remember { mutableStateOf(initial?.toCardId ?: "CASH") } // ★ ДОБАВЛЕНО: Счет получателя
+    var toCardId by remember { mutableStateOf(initial?.toCardId ?: "CASH") }
     var category by remember { mutableStateOf(initial?.category ?: quickTemplate?.category ?: (if (type == TxType.EXPENSE) expenseCategories.firstOrNull() ?: "" else incomeCategories.firstOrNull() ?: "")) }
     var description by remember { mutableStateOf(initial?.description ?: "") }
     val dateMillis = initial?.timestamp ?: System.currentTimeMillis()
     val currency = initial?.currency ?: "UZS"
 
-    // Состояния для правил
+    // ★ FB-20: Имя человека для долга
+    var personName by remember {
+        mutableStateOf(
+            when {
+                initial != null && initial.category == CATEGORY_DEBT -> extractPersonNameFromDescription(initial.description)
+                else -> ""
+            }
+        )
+    }
+
+    // ★ FB-20: state диалога информации о связанном долге
+    var showLinkedDebtInfo by remember { mutableStateOf(false) }
+
     var appliedRuleId by remember { mutableStateOf(ruleAppliedId) }
     var appliedRuleKeyword by remember { mutableStateOf(ruleAppliedKeyword) }
-    
-    // Состояния для самообучения
+
     var saveRule by remember { mutableStateOf(false) }
     var ruleKeyword by remember { mutableStateOf(description.take(15)) }
 
-    // FB-16: Состояние для просмотра оригинала
     var showRawTextDialog by remember { mutableStateOf(false) }
     val finalRawText = initial?.rawText ?: rawSourceText
 
-    // ★ FB-17: Состояния для режима "Это спам"
+    var showPhotoDialog by remember { mutableStateOf(false) }
+    val photoPath = initial?.photoPath
+
     var showSpamDialog by remember { mutableStateOf(false) }
     var spamKeyword by remember { mutableStateOf(description.take(15).trim().ifBlank { category }) }
 
-    // Голосовой ввод
+    // ★ FB-20: подтверждение при попытке сохранить без имени
+    var nameError by remember { mutableStateOf(false) }
+
     val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
@@ -128,7 +147,7 @@ fun TxDialog(
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(if (initial == null) t("new_tx") else t("edit"), style = MaterialTheme.typography.titleLarge)
-                    if (autoStartVoice) IconButton(onClick = { 
+                    if (autoStartVoice) IconButton(onClick = {
                         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                             putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (currentLang == AppLanguage.UZ) "uz-UZ" else "ru-RU")
@@ -136,24 +155,74 @@ fun TxDialog(
                         try { voiceLauncher.launch(intent) } catch (e: Exception) {}
                     }) { Icon(Icons.Default.Mic, contentDescription = "Voice", tint = MaterialTheme.colorScheme.primary) }
                 }
-                
+
                 if (isPendingSms) {
                     Text("Данные из СМС/Уведомления", color = YELLOW, style = MaterialTheme.typography.bodySmall)
                 }
 
-                // ★ FB-16: Блок оригинального текста
-                if (!finalRawText.isNullOrBlank()) {
+                // ★ Бейдж "Связано с долгом"
+                if (initial?.linkedDebtId != null) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Связано с долгом", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                Text("ID: #${initial.linkedDebtId}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            }
+                            TextButton(onClick = { showLinkedDebtInfo = true }) {
+                                Text("Инфо")
+                            }
+                        }
+                    }
+                }
+
+                // ★ Предупреждение для "Возврат долга"
+                if (category == CATEGORY_REPAY) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = YELLOW.copy(alpha = 0.15f)),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = YELLOW)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Возврат долга лучше оформлять через менеджер долгов (кнопка «Оплачено»). Здесь операция создастся без привязки к долгу.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = YELLOW
+                            )
+                        }
+                    }
+                }
+
+                // Блок источника (текст + фото)
+                if (!finalRawText.isNullOrBlank() || photoPath != null) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("Источник: Импорт", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.height(4.dp))
-                            OutlinedButton(onClick = { showRawTextDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                                Icon(Icons.Default.Info, contentDescription = "Оригинал")
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Посмотреть оригинал")
+                            Text("Источник данных", style = MaterialTheme.typography.labelMedium)
+                            if (photoPath != null && File(photoPath).exists()) {
+                                Spacer(Modifier.height(8.dp))
+                                AsyncImage(
+                                    model = File(photoPath),
+                                    contentDescription = "Скриншот из источника",
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp).clickable { showPhotoDialog = true },
+                                    contentScale = ContentScale.Crop
+                                )
+                                Text("Нажмите на фото, чтобы увеличить", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                Spacer(Modifier.height(8.dp))
+                            }
+                            if (!finalRawText.isNullOrBlank()) {
+                                OutlinedButton(onClick = { showRawTextDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                                    Icon(Icons.Default.Info, contentDescription = "Оригинал")
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Посмотреть текст")
+                                }
                             }
                         }
                     }
@@ -168,7 +237,7 @@ fun TxDialog(
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Применено правило: $appliedRuleKeyword", color = Color(0xFF2E7D32), fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { 
+                        IconButton(onClick = {
                             appliedRuleId?.let { onRuleRejected(it) }
                             appliedRuleId = null
                             appliedRuleKeyword = null
@@ -179,11 +248,29 @@ fun TxDialog(
                     }
                 }
 
-                // ★ Тип (Расход / Доход / Перевод) - теперь 3 кнопки
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    SegmentedButton(type == TxType.EXPENSE, { type = TxType.EXPENSE; category = expenseCategories.firstOrNull() ?: "" }, SegmentedButtonDefaults.itemShape(0, 3)) { Text(t("expense")) }
-                    SegmentedButton(type == TxType.INCOME, { type = TxType.INCOME; category = incomeCategories.firstOrNull() ?: "" }, SegmentedButtonDefaults.itemShape(1, 3)) { Text(t("income")) }
-                    SegmentedButton(type == TxType.TRANSFER, { type = TxType.TRANSFER }, SegmentedButtonDefaults.itemShape(2, 3)) { Text(t("transfer")) }
+                // ★ Переключатель тип (если категория долга, нельзя переключать тип — иначе сломается связь)
+                if (initial?.linkedDebtId == null) {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                        SegmentedButton(type == TxType.EXPENSE, {
+                            type = TxType.EXPENSE
+                            if (category != CATEGORY_DEBT && category != CATEGORY_REPAY) category = expenseCategories.firstOrNull() ?: ""
+                        }, SegmentedButtonDefaults.itemShape(0, 3)) { Text(t("expense")) }
+                        SegmentedButton(type == TxType.INCOME, {
+                            type = TxType.INCOME
+                            if (category != CATEGORY_DEBT && category != CATEGORY_REPAY) category = incomeCategories.firstOrNull() ?: ""
+                        }, SegmentedButtonDefaults.itemShape(1, 3)) { Text(t("income")) }
+                        SegmentedButton(type == TxType.TRANSFER, {
+                            type = TxType.TRANSFER
+                        }, SegmentedButtonDefaults.itemShape(2, 3)) { Text(t("transfer")) }
+                    }
+                } else {
+                    // Для связанного долга показываем только тип (без возможности переключения)
+                    Text(
+                        "Тип: ${type.localizedLabel(currentLang)} (нельзя изменить — связано с долгом)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
                 }
 
                 // Сумма
@@ -214,7 +301,7 @@ fun TxDialog(
                     }
                 }
 
-                // ★ ДОБАВЛЕНО: Карта (Куда) для переводов
+                // Карта (Куда) для переводов
                 if (type == TxType.TRANSFER) {
                     var expandedToCard by remember { mutableStateOf(false) }
                     ExposedDropdownMenuBox(expanded = expandedToCard, onExpandedChange = { expandedToCard = !expandedToCard }, modifier = Modifier.padding(vertical = 4.dp)) {
@@ -234,7 +321,7 @@ fun TxDialog(
                     }
                 }
 
-                // Категория (только для доходов/расходов)
+                // Категория
                 if (type != TxType.TRANSFER) {
                     var expandedCat by remember { mutableStateOf(false) }
                     ExposedDropdownMenuBox(expanded = expandedCat, onExpandedChange = { expandedCat = !expandedCat }, modifier = Modifier.padding(vertical = 4.dp)) {
@@ -249,23 +336,51 @@ fun TxDialog(
                         )
                         ExposedDropdownMenu(expanded = expandedCat, onDismissRequest = { expandedCat = false }) {
                             catList.forEach { c ->
-                                DropdownMenuItem(text = { Text(Translations.translateCategory(c, currentLang)) }, onClick = { category = c; expandedCat = false })
+                                DropdownMenuItem(
+                                    text = { Text(Translations.translateCategory(c, currentLang)) },
+                                    onClick = {
+                                        category = c
+                                        expandedCat = false
+                                        if (c != CATEGORY_DEBT) personName = ""
+                                    }
+                                )
                             }
                         }
                     }
                 }
 
-                // Описание
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text(t("desc")) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    singleLine = true
-                )
-                
-                // Чекбокс "Запомнить для будущего"
-                if (type != TxType.TRANSFER) {
+                // ★ FB-20: Поле "Имя человека" для долга
+                if (category == CATEGORY_DEBT) {
+                    OutlinedTextField(
+                        value = personName,
+                        onValueChange = { personName = it; nameError = false },
+                        label = { Text("Имя человека (кому/у кого долг)") },
+                        isError = nameError,
+                        supportingText = {
+                            if (nameError) Text("Введите имя", color = RED)
+                            else Text(
+                                if (type == TxType.EXPENSE) "Вы дали в долг" else "Вы взяли в долг",
+                                color = Color.Gray
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        singleLine = true
+                    )
+                }
+
+                // Описание (скрываем для "Долги" — оно формируется автоматически)
+                if (category != CATEGORY_DEBT) {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text(t("desc")) },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        singleLine = true
+                    )
+                }
+
+                // Чекбокс "Запомнить для будущего" (скрываем для долгов)
+                if (type != TxType.TRANSFER && category != CATEGORY_DEBT && category != CATEGORY_REPAY) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveRule = !saveRule }.padding(vertical = 4.dp)) {
                         Checkbox(checked = saveRule, onCheckedChange = { saveRule = it })
                         Text("Запомнить для будущего", style = MaterialTheme.typography.bodyMedium)
@@ -291,53 +406,74 @@ fun TxDialog(
                                 Text(t("delete"))
                             }
                         }
-                        TextButton(onClick = { showSpamDialog = true }, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
-                            Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Это спам", fontSize = 12.sp)
+                        if (category != CATEGORY_DEBT && category != CATEGORY_REPAY) {
+                            TextButton(onClick = { showSpamDialog = true }, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
+                                Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Это спам", fontSize = 12.sp)
+                            }
                         }
                     }
-                    
+
                     Row {
                         TextButton(onClick = onDismiss) { Text(t("cancel")) }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(Modifier.width(8.dp))
                         Button(onClick = {
                             val parsedAmount = amountStr.replace(",", ".").toBigDecimalOrNull()
                             if (parsedAmount == null) {
                                 Toast.makeText(context, t("error"), Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
+
+                            // ★ FB-20: валидация имени для долга
+                            if (category == CATEGORY_DEBT && personName.isBlank()) {
+                                nameError = true
+                                return@Button
+                            }
+
                             val finalAmountMinor = parsedAmount.movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-                            
-                            // Для переводов категория не нужна
-                            val finalCategory = if (type == TxType.TRANSFER) "💸 Перевод" else category
-                            
+
+                            // ★ FB-20: формируем финальное описание и категорию
+                            val finalCategory = when {
+                                type == TxType.TRANSFER -> "💸 Перевод"
+                                category == CATEGORY_DEBT -> CATEGORY_DEBT
+                                else -> category
+                            }
+                            val finalDescription = when {
+                                category == CATEGORY_DEBT -> {
+                                    if (type == TxType.EXPENSE) "Дал в долг: ${personName.trim()}"
+                                    else "Взял в долг: ${personName.trim()}"
+                                }
+                                else -> description
+                            }
+
                             val newTx = Tx(
                                 id = initial?.id ?: 0,
                                 amountMinor = finalAmountMinor,
                                 type = type,
                                 cardId = if (cardId == "CASH") null else cardId,
                                 toCardId = if (type == TxType.TRANSFER) (if (toCardId == "CASH") null else toCardId) else null,
-                                description = description,
+                                description = finalDescription,
                                 category = finalCategory,
                                 timestamp = dateMillis,
                                 source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL",
                                 currency = currency,
-                                rawText = finalRawText
+                                rawText = finalRawText,
+                                photoPath = photoPath,
+                                linkedDebtId = initial?.linkedDebtId // сохраняем связь
                             )
 
-                            // ★ Запись коррекций для самообучения
                             if (initial != null) {
                                 val merchantHint = initial.description.take(30)
                                 if (initial.amountMinor != newTx.amountMinor) onRecordCorrection(merchantHint, "amount", initial.amountMinor.toString(), newTx.amountMinor.toString(), finalRawText ?: "")
                                 if (initial.type != newTx.type) onRecordCorrection(merchantHint, "type", initial.type.name, newTx.type.name, finalRawText ?: "")
                                 if (initial.cardId != newTx.cardId) onRecordCorrection(merchantHint, "card", initial.cardId ?: "null", newTx.cardId ?: "null", finalRawText ?: "")
-                                if (initial.toCardId != newTx.toCardId) onRecordCorrection(merchantHint, "toCardId", initial.toCardId ?: "null", newTx.toCardId ?: "null", finalRawText ?: "") // ★ ДОБАВЛЕНО
+                                if (initial.toCardId != newTx.toCardId) onRecordCorrection(merchantHint, "toCardId", initial.toCardId ?: "null", newTx.toCardId ?: "null", finalRawText ?: "")
                                 if (initial.category != newTx.category) onRecordCorrection(merchantHint, "category", initial.category, newTx.category, finalRawText ?: "")
                                 if (initial.description != newTx.description) onRecordCorrection(merchantHint, "merchant", initial.description, newTx.description, finalRawText ?: "")
                             }
 
-                            if (saveRule && ruleKeyword.isNotBlank()) {
+                            if (saveRule && ruleKeyword.isNotBlank() && category != CATEGORY_DEBT) {
                                 onSaveRule(ruleKeyword.trim(), category, type)
                             }
 
@@ -355,7 +491,35 @@ fun TxDialog(
         }
     }
 
-    // FB-16: Диалог оригинала
+    // Инфо о связанном долге
+    if (showLinkedDebtInfo && initial?.linkedDebtId != null) {
+        AlertDialog(
+            onDismissRequest = { showLinkedDebtInfo = false },
+            title = { Text("Связанный долг") },
+            text = {
+                Column {
+                    Text("ID: #${initial.linkedDebtId}")
+                    Spacer(Modifier.height(4.dp))
+                    Text("Изменения синхронизируются с менеджером долгов, пока долг не оплачен.")
+                    Text("Для полной информации откройте менеджер долгов.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLinkedDebtInfo = false }) { Text("Закрыть") } }
+        )
+    }
+
+    // Просмотр скриншота
+    if (showPhotoDialog && photoPath != null) {
+        Dialog(onDismissRequest = { showPhotoDialog = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(modifier = Modifier.fillMaxSize(), color = Color.Black.copy(alpha = 0.9f)) {
+                Box(Modifier.fillMaxSize().clickable { showPhotoDialog = false }, contentAlignment = Alignment.Center) {
+                    AsyncImage(model = File(photoPath), contentDescription = "Скриншот", modifier = Modifier.fillMaxWidth().padding(16.dp), contentScale = ContentScale.Fit)
+                }
+            }
+        }
+    }
+
+    // Просмотр оригинального текста
     if (showRawTextDialog && !finalRawText.isNullOrBlank()) {
         AlertDialog(
             onDismissRequest = { showRawTextDialog = false },
@@ -377,7 +541,7 @@ fun TxDialog(
         )
     }
 
-    // FB-17: Диалог спама
+    // Диалог "Это спам"
     if (showSpamDialog) {
         AlertDialog(
             onDismissRequest = { showSpamDialog = false },
@@ -407,4 +571,15 @@ fun TxDialog(
             dismissButton = { TextButton(onClick = { showSpamDialog = false }) { Text("Отмена") } }
         )
     }
+}
+
+// ★ FB-20: извлечение имени из описания долга
+private fun extractPersonNameFromDescription(description: String): String {
+    val patterns = listOf("Дал в долг:", "Взял в долг:", "Дал в долг :", "Взял в долг :")
+    for (p in patterns) {
+        val idx = description.indexOf(p, ignoreCase = true)
+        if (idx >= 0) return description.substring(idx + p.length).trim()
+    }
+    val colonIdx = description.indexOf(':')
+    return if (colonIdx >= 0) description.substring(colonIdx + 1).trim() else ""
 }
