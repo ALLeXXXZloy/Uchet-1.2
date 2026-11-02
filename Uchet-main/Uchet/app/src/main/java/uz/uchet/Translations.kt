@@ -147,7 +147,7 @@ object Translations {
             "bulk_import_done" to "Импортировано",
             "bulk_import_suffix" to "чеков. Открыть для проверки?",
             "open_for_review" to "Открыть",
-            // --- Долги (FB-21 + расширение для устранения хардкода) ---
+            // --- Долги (FB-21) ---
             "debts" to "Долги",
             "i_owe" to "Я должен",
             "owed_to_me" to "Мне должны",
@@ -192,9 +192,17 @@ object Translations {
             "debt_created_borrowed" to "Взял в долг: %s",
             "debt_returned_by_me_desc" to "Вернул долг: %s",
             "debt_returned_to_me_desc" to "Мне вернули долг: %s",
-            // --- FB-08: короткие подписи нижней навигации ---
+            // --- FB-08 ---
             "nav_forecast" to "Прогноз",
-            "nav_plans" to "Планы"
+            "nav_plans" to "Планы",
+            // --- FB-NEW: Доступ к уведомлениям ---
+            "notif_access_title" to "Доступ к уведомлениям",
+            "notif_access_desc" to "Чтобы UzBudget автоматически считывал банковские операции из уведомлений, разрешите доступ к уведомлениям в системных настройках. Это безопасно: приложение читает только уведомления банковских приложений и не передаёт их третьим лицам.\n\nВ открывшемся списке найдите «UzBudget» и включите переключатель.",
+            "notif_access_open" to "Открыть настройки",
+            "notif_access_later" to "Позже",
+            "notif_access_section" to "Доступ к уведомлениям",
+            "notif_access_granted" to "Разрешён",
+            "notif_access_not_granted" to "Не разрешён"
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -388,7 +396,15 @@ object Translations {
             "debt_returned_to_me_desc" to "Menga qarz qaytarildi: %s",
             // --- FB-08 ---
             "nav_forecast" to "Prognoz",
-            "nav_plans" to "Rejalar"
+            "nav_plans" to "Rejalar",
+            // --- FB-NEW: Доступ к уведомлениям ---
+            "notif_access_title" to "Bildirishnomalarga kirish",
+            "notif_access_desc" to "UzBudget bildirishnomalardan bank operatsiyalarini avtomatik o'qishi uchun tizim sozlamalarida bildirishnomalarga kirishni yoqing. Bu xavfsiz: ilova faqat bank ilovalarining bildirishnomalarini o'qiydi va uchinchi shaxslarga uzatmaydi.\n\nOchilgan ro'yxatda «UzBudget»ni toping va kalitni yoqing.",
+            "notif_access_open" to "Sozlamalarni ochish",
+            "notif_access_later" to "Keyinroq",
+            "notif_access_section" to "Bildirishnomalarga kirish",
+            "notif_access_granted" to "Ruxsat berilgan",
+            "notif_access_not_granted" to "Ruxsat berilmagan"
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -582,7 +598,15 @@ object Translations {
             "debt_returned_to_me_desc" to "Debt returned to me: %s",
             // --- FB-08 ---
             "nav_forecast" to "Forecast",
-            "nav_plans" to "Plans"
+            "nav_plans" to "Plans",
+            // --- Notification access ---
+            "notif_access_title" to "Notification access",
+            "notif_access_desc" to "To let UzBudget automatically read bank transactions from notifications, allow notification access in system settings. This is safe: the app only reads notifications from banking apps and does not share them with third parties.\n\nIn the opened list, find «UzBudget» and enable the toggle.",
+            "notif_access_open" to "Open settings",
+            "notif_access_later" to "Later",
+            "notif_access_section" to "Notification access",
+            "notif_access_granted" to "Granted",
+            "notif_access_not_granted" to "Not granted"
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -776,7 +800,15 @@ object Translations {
             "debt_returned_to_me_desc" to "Ба ман қарз баргардониданд: %s",
             // --- FB-08 ---
             "nav_forecast" to "Пешгӯӣ",
-            "nav_plans" to "Нақшаҳо"
+            "nav_plans" to "Нақшаҳо",
+            // --- Дастрасӣ ба огоҳиномаҳо ---
+            "notif_access_title" to "Дастрасӣ ба огоҳиномаҳо",
+            "notif_access_desc" to "Барои он ки UzBudget амалиётҳои бонкиро аз огоҳиномаҳо худкор хонад, дар танзимоти система дастрасиро ба огоҳиномаҳо иҷозат диҳед. Ин бехатар аст: барнома танҳо огоҳиномаҳои барномаҳои бонкиро мехонад ва ба шахсони сеюм намедиҳад.\n\nДар рӯйхати кушодашуда «UzBudget»-ро ёбед ва тугмаро фаъол кунед.",
+            "notif_access_open" to "Кушодани танзимот",
+            "notif_access_later" to "Баъдтар",
+            "notif_access_section" to "Дастрасӣ ба огоҳиномаҳо",
+            "notif_access_granted" to "Иҷозат дода шуд",
+            "notif_access_not_granted" to "Иҷозат дода нашудааст"
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -970,7 +1002,15 @@ object Translations {
             "debt_returned_to_me_desc" to "Maǵan qarz qaytarıldı: %s",
             // --- FB-08 ---
             "nav_forecast" to "Prognoz",
-            "nav_plans" to "Rejeler"
+            "nav_plans" to "Rejeler",
+            // --- Bildiriwlerge kiriw ---
+            "notif_access_title" to "Bildiriwlerge kiriw",
+            "notif_access_desc" to "UzBudget bildiriwlerden bank operatsiyaların avtomatik oqıwı ushın sistema sazlamalarında bildiriwlerge kiriwdi qosıń. Bul qáwipsiz: ilova tek bank ilovalarınıń bildiriwlerin oqıydı hám úshinshi shaxslarǵa bermeydi.\n\nAshılǵan dizimde «UzBudget»tı tabıń hám túymeni qosıń.",
+            "notif_access_open" to "Sazlamalardı ashıw",
+            "notif_access_later" to "Keyinirek",
+            "notif_access_section" to "Bildiriwlerge kiriw",
+            "notif_access_granted" to "Ruxsat berilgen",
+            "notif_access_not_granted" to "Ruxsat berilmegen"
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -1164,7 +1204,15 @@ object Translations {
             "debt_returned_to_me_desc" to "Маған қарыз қайтарылды: %s",
             // --- FB-08 ---
             "nav_forecast" to "Болжам",
-            "nav_plans" to "Жоспарлар"
+            "nav_plans" to "Жоспарлар",
+            // --- Хабарламаларға рұқсат ---
+            "notif_access_title" to "Хабарламаларға рұқсат",
+            "notif_access_desc" to "UzBudget банк операцияларын хабарламалардан автоматты түрде оқуы үшін жүйе параметрлерінде хабарламаларға рұқсат беріңіз. Бұл қауіпсіз: қолданба тек банк қолданбаларының хабарламаларын оқиды және үшінші тұлғаларға бермейді.\n\nАшылған тізімнен «UzBudget» тауып, қосқышты қосыңыз.",
+            "notif_access_open" to "Параметрлерді ашу",
+            "notif_access_later" to "Кейінірек",
+            "notif_access_section" to "Хабарламаларға рұқсат",
+            "notif_access_granted" to "Рұқсат берілді",
+            "notif_access_not_granted" to "Рұқсат берілмеді"
         )
     )
 
@@ -1183,7 +1231,6 @@ object Translations {
             AppLanguage.TG -> "tg"; AppLanguage.KAA -> "kaa"; AppLanguage.KK -> "kk"
             else -> "en"
         }
-        // ★ FB-21: добавлены "🤝 Долги" и "💸 Возврат долга" во все языки
         val catMap = mapOf(
             "uz" to mapOf(
                 "🍔 Еда" to "🍔 Ovqat", "🚕 Транспорт" to "🚕 Transport", "🏠 Жилье" to "🏠 Uy-joy",
