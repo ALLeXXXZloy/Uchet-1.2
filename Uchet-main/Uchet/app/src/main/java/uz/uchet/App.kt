@@ -280,55 +280,44 @@ fun App(
         }
     }
 
-    // ★ ИМПОРТ PDF С ТОЧНЫМ ВЫРЕЗАНИЕМ СТРОК
     val fileImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { scope.launch {
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
-
                 if (mimeType == "application/pdf") {
                     bulkInProgress = true
                     val parsedTxs = withContext(Dispatchers.IO) {
                         val inputStream = context.contentResolver.openInputStream(it)
                         val doc = PDDocument.load(inputStream)
-
                         val stripper = CoordinateTextStripper()
                         stripper.getText(doc)
                         val pdfLines = stripper.lines
-
                         val parsedPairs = SmsParser.parsePdfLines(pdfLines, allTxs, customRules)
-
                         val pageBitmaps = mutableMapOf<Int, Bitmap>()
                         val resultList = mutableListOf<Tx>()
-
                         for ((tx, pdfLine) in parsedPairs) {
                             val pageIdx = (pdfLine.page - 1).coerceAtLeast(0)
                             val pageBitmap = pageBitmaps.getOrPut(pageIdx) {
                                 val renderer = com.tom_roush.pdfbox.rendering.PDFRenderer(doc)
                                 renderer.renderImageWithDPI(pageIdx, 200f)
                             }
-
                             val croppedBitmap = cropBitmapByLine(pageBitmap, pdfLine, padding = 15)
-
                             val photoFile = File(context.filesDir, "images/pdf_crop_${UUID.randomUUID()}.jpg")
                             photoFile.parentFile?.mkdirs()
                             photoFile.outputStream().use { out ->
                                 croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                             }
-
                             resultList.add(tx.copy(photoPath = photoFile.absolutePath))
                         }
                         doc.close()
                         resultList
                     }
-
                     bulkInProgress = false
                     if (parsedTxs.isNotEmpty()) {
                         reviewTxs = parsedTxs
                     } else {
                         snackbarHostState.showSnackbar(t("no_tx_found"))
                     }
-
                 } else {
                     val text = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
                     val parsedTxs = withContext(Dispatchers.IO) { SmsParser.parseImportedFile(text, allTxs, customRules) }
@@ -471,9 +460,10 @@ fun App(
                 onShowGoalManager = { showGoalManager = true }, onShowDebtManager = { showDebtManager = true },
                 onShowBalanceDetails = { showBalanceDetails = true }, onQuickTemplateClick = { template -> selectedQuickTemplate = template; adding = true }
             )
-            1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { currentTab = 0 })
-            2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
-            3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
+            // ★ ИСПРАВЛЕНО: добавлен paddingValues = pad
+            1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, paddingValues = pad, onBack = { currentTab = 0 })
+            2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, paddingValues = pad, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
+            3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, paddingValues = pad, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
         }
     }
 
