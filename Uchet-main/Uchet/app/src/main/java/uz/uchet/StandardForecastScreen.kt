@@ -25,6 +25,7 @@ import java.time.YearMonth
 fun StandardForecastScreen(
     vm: VM,
     currentLang: AppLanguage,
+    paddingValues: PaddingValues, // ★ ДОБАВЛЕНО
     onManageRecurring: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -61,24 +62,23 @@ fun StandardForecastScreen(
 
     var confirming by remember { mutableStateOf<RecurringEntity?>(null) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(t("standard_forecast")) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) }
-                },
-                actions = {
-                    IconButton(onClick = onManageRecurring) {
-                        Icon(Icons.Default.Settings, t("manage_recurring"))
-                    }
-                }
-            )
+    // ★ ИСПОЛЬЗУЕМ Column ВМЕСТО Scaffold
+    Column(Modifier.fillMaxSize().padding(paddingValues)) {
+        // Заголовок
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) }
+            Text(t("standard_forecast"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            IconButton(onClick = onManageRecurring) {
+                Icon(Icons.Default.Settings, t("manage_recurring"))
+            }
         }
-    ) { pad ->
+
         if (recurring.isEmpty()) {
             Column(
-                Modifier.padding(pad).fillMaxSize().padding(32.dp),
+                Modifier.fillMaxSize().padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -96,11 +96,11 @@ fun StandardForecastScreen(
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = onManageRecurring) { Text(t("manage_recurring")) }
             }
-            return@Scaffold
+            return@Column
         }
 
         LazyColumn(
-            Modifier.padding(pad).fillMaxSize(),
+            Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp)
         ) {
             item {
