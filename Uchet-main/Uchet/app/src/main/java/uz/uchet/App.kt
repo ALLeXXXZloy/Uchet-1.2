@@ -348,8 +348,11 @@ fun App(
         } }
     }
 
-    val expenseCategories = categories.filter { it.type == TxType.EXPENSE }.map { it.name }
-    val incomeCategories = categories.filter { it.type == TxType.INCOME }.map { it.name }
+    // ★ FIX-A: спец-категории всегда доступны в обоих списках (виртуально, не в БД)
+    val dbExpenseNames = categories.filter { it.type == TxType.EXPENSE }.map { it.name }.filterNot { it in SPECIAL_CATEGORIES }
+    val dbIncomeNames = categories.filter { it.type == TxType.INCOME }.map { it.name }.filterNot { it in SPECIAL_CATEGORIES }
+    val expenseCategories = dbExpenseNames + SPECIAL_CATEGORIES
+    val incomeCategories = dbIncomeNames + SPECIAL_CATEGORIES
 
     if (openedForecastId != null) {
         val forecast = forecasts.find { it.id == openedForecastId }
@@ -409,14 +412,12 @@ fun App(
                                 Badge { Text("${vm.pendingRecurring.collectAsState().value.size}") }
                         }) { Icon(Icons.Default.Assignment, null) }
                     },
-                    // ★ FB-08: короткий ключ nav_forecast вместо длинного standard_forecast
                     label = { Text(t("nav_forecast"), style = navLabelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
                 )
                 NavigationBarItem(
                     selected = currentTab == 3,
                     onClick = { currentTab = 3 },
                     icon = { Icon(Icons.Default.TrendingUp, null) },
-                    // ★ FB-08: короткий ключ nav_plans вместо длинного forecast_list
                     label = { Text(t("nav_plans"), style = navLabelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
                 )
                 NavigationBarItem(
