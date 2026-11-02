@@ -40,8 +40,9 @@ fun StandardForecastScreen(
     val currentMonth = YearMonth.from(today)
     var selectedMonth by remember { mutableStateOf(currentMonth) }
 
-    // Редактирование операции
+    // ★ ИСПРАВЛЕНО: Состояния вынесены наверх, чтобы быть доступными внутри LazyColumn
     var editingRecurring by remember { mutableStateOf<RecurringEntity?>(null) }
+    var confirmingRecurring by remember { mutableStateOf<RecurringEntity?>(null) }
 
     // Формируем список месяцев (например, от -6 до +6)
     val monthsList = remember {
@@ -285,7 +286,6 @@ fun StandardForecastScreen(
     }
 
     // Диалог подтверждения
-    var confirmingRecurring by remember { mutableStateOf<RecurringEntity?>(null) }
     if (confirmingRecurring != null) {
         ConfirmRecurringDialog(
             recurring = confirmingRecurring!!,
