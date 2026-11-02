@@ -52,7 +52,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             when {
                 conf?.status == "CONFIRMED" -> false
                 conf?.status == "POSTPONED" && conf.lastPostponedDate == todayStr -> false
-                conf?.status == "SKIPPED" -> false
                 else -> true
             }
         }
@@ -110,9 +109,58 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    fun save(t: Tx) { viewModelScope.launch { dao.upsert(t) } }
+    // ★ FB-20: Умное сохранение Tx с учетом категории "Долги"
+    fun save(t: Tx) {
+        viewModelScope.launch {
+            if (t.category == "🤝 Долги") {
+                val personName = extractPersonName(t.description)
+                if (t.linkedDebtId == null) {
+                    // Создаем новый долг
+                    val debtType = if (t.type == TxType.EXPENSE) DebtType.LENT else DebtType.BORROWED
+                    val debtId = dao.upsertDebt(DebtEntity(
+                        personName = personName,
+                        amountMinor = t.amountMinor,
+                        type = debtType,
+                        dateMillis = t.timestamp,
+                        description = t.description,
+                        currency = t.currency,
+                        cardId = t.cardId
+                    ))
+                    dao.upsert(t.copy(linkedDebtId = debtId))
+                } else {
+                    // Обновляем существующий долг, если он не оплачен
+                    val debt = dao.getDebtById(t.linkedDebtId)
+                    if (debt != null && !debt.isPaid) {
+                        dao.upsertDebt(debt.copy(
+                            personName = personName,
+                            amountMinor = t.amountMinor,
+                            cardId = t.cardId,
+                            dateMillis = t.timestamp
+                        ))
+                    }
+                    dao.upsert(t)
+                }
+            } else {
+                dao.upsert(t)
+            }
+        }
+    }
+
     fun bulkSave(txs: List<Tx>) { viewModelScope.launch { dao.insertAll(txs) } }
-    fun delete(t: Tx) { viewModelScope.launch { dao.delete(t) } }
+
+    // ★ FB-20: Удаление Tx с каскадным удалением неоплаченного долга
+    fun delete(t: Tx) {
+        viewModelScope.launch {
+            if (t.linkedDebtId != null && t.category == "🤝 Долги") {
+                val debt = dao.getDebtById(t.linkedDebtId)
+                if (debt != null && !debt.isPaid) {
+                    dao.deleteDebt(debt)
+                }
+            }
+            dao.delete(t)
+        }
+    }
+
     fun shift(n: Long) { month.value = month.value.plusMonths(n) }
     fun saveCard(card: CardEntity) { viewModelScope.launch { dao.upsertCard(card) } }
     fun deleteCard(id: String) { if (id != "CASH") viewModelScope.launch { dao.unlinkCardTransactions(id); dao.deleteCard(id) } }
@@ -162,26 +210,18 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    // ★ Обновленный confirmRecurring: принимает конкретный месяц (targetMonth)
-    fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long, targetMonth: String) {
+    fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long) {
         if (actualAmountMinor <= 0) return
         viewModelScope.launch {
-            val existing = dao.getConfirmation(r.id, targetMonth)
+            val today = LocalDate.now()
+            val monthStr = YearMonth.from(today).toString()
+            val existing = dao.getConfirmation(r.id, monthStr)
             if (existing?.status == "CONFIRMED") return@launch
-            
-            val yearMonth = YearMonth.parse(targetMonth)
-            val date = yearMonth.atDay(minOf(r.dayOfMonth, yearMonth.lengthOfMonth()))
-            val txTimestamp = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            
+            val effectiveDay = minOf(r.dayOfMonth, today.lengthOfMonth())
+            val txDate = today.withDayOfMonth(effectiveDay)
+            val txTimestamp = txDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
             dao.upsert(Tx(amountMinor = actualAmountMinor, type = r.type, cardId = r.cardId, description = r.description, category = r.category, timestamp = txTimestamp, source = "RECURRING"))
-            dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = targetMonth, status = "CONFIRMED", actualAmountMinor = actualAmountMinor))
-        }
-    }
-
-    // ★ Новый метод: пропустить регулярную операцию в указанном месяце
-    fun skipRecurring(r: RecurringEntity, targetMonth: String) {
-        viewModelScope.launch {
-            dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = targetMonth, status = "SKIPPED", actualAmountMinor = 0L))
+            dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = monthStr, status = "CONFIRMED", actualAmountMinor = actualAmountMinor))
         }
     }
 
@@ -191,43 +231,25 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    // ★ FB-10: теперь используем cardId при создании транзакции долга
-    fun saveDebt(debt: DebtEntity) {
+    // ★ FB-20: Возврат долга. Создает Tx с категорией "Возврат долга" и помечает долг оплаченным.
+    // Если BORROWED (я должен) → EXPENSE (я вернул)
+    // Если LENT (мне должны) → INCOME (мне вернули)
+    fun repayDebt(debt: DebtEntity, cardId: String?, amountMinor: Long) {
         viewModelScope.launch {
-            dao.upsertDebt(debt)
-            if (debt.id == 0L) {
-                val txType = if (debt.type == DebtType.BORROWED) TxType.INCOME else TxType.EXPENSE
-                val txDesc = if (debt.type == DebtType.BORROWED) "Взял в долг: ${debt.personName}" else "Дал в долг: ${debt.personName}"
-                val tx = Tx(
-                    amountMinor = debt.amountMinor, 
-                    type = txType, 
-                    cardId = debt.cardId, // ★ Привязываем к карте
-                    description = txDesc, 
-                    category = "🤝 Долги", 
-                    timestamp = debt.dateMillis, 
-                    source = "DEBT"
-                )
-                dao.upsert(tx)
-            }
-        }
-    }
-
-    // ★ FB-10: теперь используем cardId при возврате долга
-    fun markDebtPaid(debt: DebtEntity) {
-        viewModelScope.launch {
-            dao.upsertDebt(debt.copy(isPaid = true))
             val txType = if (debt.type == DebtType.BORROWED) TxType.EXPENSE else TxType.INCOME
-            val txDesc = if (debt.type == DebtType.BORROWED) "Вернул долг: ${debt.personName}" else "Мне вернули долг: ${debt.personName}"
+            val desc = if (debt.type == DebtType.BORROWED) "Вернул долг: ${debt.personName}" else "Мне вернули долг: ${debt.personName}"
             val tx = Tx(
-                amountMinor = debt.amountMinor, 
-                type = txType, 
-                cardId = debt.cardId, // ★ Привязываем к карте
-                description = txDesc, 
-                category = "🤝 Долги", 
-                timestamp = System.currentTimeMillis(), 
-                source = "DEBT"
+                amountMinor = amountMinor,
+                type = txType,
+                cardId = cardId,
+                description = desc,
+                category = "💸 Возврат долга",
+                timestamp = System.currentTimeMillis(),
+                source = "DEBT_REPAY",
+                linkedDebtId = debt.id
             )
             dao.upsert(tx)
+            dao.upsertDebt(debt.copy(isPaid = true))
         }
     }
 
@@ -236,10 +258,17 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             dao.deleteDebt(debt)
             if (!debt.isPaid) {
                 val all = dao.getAllTxs()
-                val relatedTx = all.find { it.source == "DEBT" && it.amountMinor == debt.amountMinor && it.timestamp == debt.dateMillis }
+                val relatedTx = all.find { it.linkedDebtId == debt.id && it.category == "🤝 Долги" }
                 if (relatedTx != null) dao.delete(relatedTx)
             }
         }
+    }
+
+    private fun extractPersonName(description: String): String {
+        // "Дал в долг: Иван" → "Иван"
+        // "Взял в долг: Иван" → "Иван"
+        val colonIdx = description.indexOf(':')
+        return if (colonIdx >= 0) description.substring(colonIdx + 1).trim() else description.trim()
     }
 
     // === Custom rules ===
@@ -262,21 +291,10 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     // === Corrections ===
     fun normalizeMerchantHint(s: String): String {
         if (s.isBlank()) return ""
-        return s.lowercase()
-            .replace(Regex("[^a-zа-яё0-9\\s]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .take(30)
+        return s.lowercase().replace(Regex("[^a-zа-яё0-9\\s]"), " ").replace(Regex("\\s+"), " ").trim().take(30)
     }
 
-    fun recordCorrection(
-        source: String,
-        merchantHint: String,
-        field: String,
-        parsedValue: String,
-        correctedValue: String,
-        rawText: String = ""
-    ) {
+    fun recordCorrection(source: String, merchantHint: String, field: String, parsedValue: String, correctedValue: String, rawText: String = "") {
         if (parsedValue == correctedValue) return
         if (merchantHint.isBlank()) return
         if (correctedValue.isBlank()) return
@@ -292,14 +310,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                         dao.bumpCorrection(existing.id, System.currentTimeMillis())
                     }
                 } else {
-                    dao.upsertCorrection(CorrectionEntity(
-                        source = source,
-                        merchantHint = hint,
-                        field = field,
-                        parsedValue = parsedValue,
-                        correctedValue = correctedValue,
-                        rawText = rawText
-                    ))
+                    dao.upsertCorrection(CorrectionEntity(source = source, merchantHint = hint, field = field, parsedValue = parsedValue, correctedValue = correctedValue, rawText = rawText))
                 }
             } catch (e: Exception) { e.printStackTrace() }
         }
@@ -336,13 +347,14 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency)
             put("photoPath", t.photoPath ?: JSONObject.NULL)
             put("rawText", t.rawText ?: JSONObject.NULL)
+            put("linkedDebtId", t.linkedDebtId ?: JSONObject.NULL) // ★ FB-20
         }) }
         root.put("txs", txsArray)
 
         val debtsArray = JSONArray()
-        allDebts.forEach { d -> debtsArray.put(JSONObject().apply { 
-            put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency) 
-            put("cardId", d.cardId ?: JSONObject.NULL) // ★ FB-10
+        allDebts.forEach { d -> debtsArray.put(JSONObject().apply {
+            put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency)
+            put("cardId", d.cardId ?: JSONObject.NULL)
         }) }
         root.put("debts", debtsArray)
 
@@ -438,7 +450,8 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                     source = o.optString("source"),
                     currency = o.optString("currency", "UZS"),
                     photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"),
-                    rawText = if (o.isNull("rawText")) null else o.optString("rawText").takeIf { it.isNotBlank() }
+                    rawText = if (o.isNull("rawText")) null else o.optString("rawText").takeIf { it.isNotBlank() },
+                    linkedDebtId = if (o.isNull("linkedDebtId")) null else o.optLong("linkedDebtId") // ★ FB-20
                 ))
             }
         }
@@ -448,15 +461,11 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             for (i in 0 until debtsArray.length()) {
                 val o = debtsArray.getJSONObject(i)
                 debtsList.add(DebtEntity(
-                    id = o.optLong("id"), 
-                    personName = o.getString("personName"), 
-                    amountMinor = o.getLong("amountMinor"), 
-                    type = DebtType.valueOf(o.getString("type")), 
-                    dateMillis = o.getLong("dateMillis"), 
-                    isPaid = o.optBoolean("isPaid"), 
-                    description = o.optString("description"), 
+                    id = o.optLong("id"), personName = o.getString("personName"), amountMinor = o.getLong("amountMinor"),
+                    type = DebtType.valueOf(o.getString("type")), dateMillis = o.getLong("dateMillis"),
+                    isPaid = o.optBoolean("isPaid"), description = o.optString("description"),
                     currency = o.optString("currency", "UZS"),
-                    cardId = if (o.isNull("cardId")) null else o.optString("cardId") // ★ FB-10
+                    cardId = if (o.isNull("cardId")) null else o.optString("cardId")
                 ))
             }
         }
@@ -466,14 +475,10 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             for (i in 0 until rulesArray.length()) {
                 val o = rulesArray.getJSONObject(i)
                 rulesList.add(CustomKeywordRule(
-                    id = o.optLong("id"),
-                    keyword = o.getString("keyword"),
-                    category = o.getString("category"),
-                    type = TxType.valueOf(o.getString("type")),
-                    appliedCount = o.optInt("appliedCount", 0),
+                    id = o.optLong("id"), keyword = o.getString("keyword"), category = o.getString("category"),
+                    type = TxType.valueOf(o.getString("type")), appliedCount = o.optInt("appliedCount", 0),
                     lastAppliedAt = if (o.isNull("lastAppliedAt")) null else o.optLong("lastAppliedAt"),
-                    rejectedCount = o.optInt("rejectedCount", 0),
-                    isIgnored = o.optBoolean("isIgnored", false)
+                    rejectedCount = o.optInt("rejectedCount", 0), isIgnored = o.optBoolean("isIgnored", false)
                 ))
             }
         }
@@ -483,16 +488,10 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             for (i in 0 until corrArray.length()) {
                 val o = corrArray.getJSONObject(i)
                 correctionsList.add(CorrectionEntity(
-                    id = o.optLong("id"),
-                    source = o.optString("source", "MANUAL"),
-                    merchantHint = o.getString("merchantHint"),
-                    field = o.getString("field"),
-                    parsedValue = o.getString("parsedValue"),
-                    correctedValue = o.getString("correctedValue"),
-                    appliedCount = o.optInt("appliedCount", 1),
-                    lastSeenAt = o.optLong("lastSeenAt", System.currentTimeMillis()),
-                    createdAt = o.optLong("createdAt", System.currentTimeMillis()),
-                    rawText = o.optString("rawText", "")
+                    id = o.optLong("id"), source = o.optString("source", "MANUAL"), merchantHint = o.getString("merchantHint"),
+                    field = o.getString("field"), parsedValue = o.getString("parsedValue"), correctedValue = o.getString("correctedValue"),
+                    appliedCount = o.optInt("appliedCount", 1), lastSeenAt = o.optLong("lastSeenAt", System.currentTimeMillis()),
+                    createdAt = o.optLong("createdAt", System.currentTimeMillis()), rawText = o.optString("rawText", "")
                 ))
             }
         }
