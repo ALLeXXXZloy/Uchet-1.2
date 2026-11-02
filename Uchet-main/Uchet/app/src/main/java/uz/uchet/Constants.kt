@@ -13,18 +13,23 @@ val RED = Color(0xFFC62828)
 val YELLOW = Color(0xFFF9A825)
 val BLUE = Color(0xFF1976D2)
 
+// ---------- Специальные категории (виртуальные, не хранятся в БД) ----------
+const val CATEGORY_DEBT = "🤝 Долги"
+const val CATEGORY_REPAY = "💸 Возврат долга"
+val SPECIAL_CATEGORIES = listOf(CATEGORY_DEBT, CATEGORY_REPAY)
+
 // ---------- Категории по умолчанию ----------
-// ★ FB-20: добавлены "🤝 Долги" и "💸 Возврат долга" для новых установок
+// ★ FIX-A: "🤝 Долги" и "💸 Возврат долга" НЕ в DEFAULT, потому что CategoryEntity
+// имеет @PrimaryKey val name: String и не может иметь две версии (EXPENSE + INCOME).
+// Эти две категории всегда добавляются в UI виртуально.
 val DEFAULT_EXPENSE_CATEGORIES = listOf(
     "🍔 Еда", "🚕 Транспорт", "🏠 Жилье", "🛒 Покупки",
     "💊 Здоровье", "🎉 Развлечения",
-    "🤝 Долги", "💸 Возврат долга",
     "📦 Другое"
 )
 val DEFAULT_INCOME_CATEGORIES = listOf(
     "💵 Зарплата", "🎁 Подарок", "💸 Перевод",
     "📈 Инвестиции",
-    "🤝 Долги", "💸 Возврат долга",
     "📦 Другое"
 )
 
