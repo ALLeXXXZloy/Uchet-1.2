@@ -156,9 +156,21 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
+    // ★ FIX-CURRENCY: пишем валюту карты в корректировочный Tx, чтобы при подсчёте
+    // cardBalancesInUzs не было двойной конвертации. diffMinor уже в валюте карты.
     fun adjustBalance(cardId: String, diffMinor: Long) {
         if (diffMinor == 0L) return
-        val tx = Tx(amountMinor = kotlin.math.abs(diffMinor), type = if (diffMinor > 0) TxType.INCOME else TxType.EXPENSE, cardId = cardId, description = "Корректировка баланса", category = "⚙️ Система", timestamp = System.currentTimeMillis(), source = "ADJUSTMENT")
+        val cardCurrency = cards.value.find { it.id == cardId }?.currency ?: "UZS"
+        val tx = Tx(
+            amountMinor = kotlin.math.abs(diffMinor),
+            type = if (diffMinor > 0) TxType.INCOME else TxType.EXPENSE,
+            cardId = cardId,
+            description = "Корректировка баланса",
+            category = "⚙️ Система",
+            timestamp = System.currentTimeMillis(),
+            source = "ADJUSTMENT",
+            currency = cardCurrency
+        )
         viewModelScope.launch { dao.upsert(tx) }
     }
     fun depositToGoal(goal: SavingsGoalEntity, cardId: String, amountMinor: Long) {
