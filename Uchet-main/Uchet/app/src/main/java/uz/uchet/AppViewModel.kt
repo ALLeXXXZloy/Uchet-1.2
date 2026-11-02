@@ -57,7 +57,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
     init {
         viewModelScope.launch {
             seedDefaultCategories()
-            ensureDebtCategories()   // ★ ДОБАВЛЕНО: гарантированно досоздаёт "🤝 Долги" и "💸 Возврат долга"
             ensureCashAccount()
             updateRates()
             migrateLegacyAutoTxs()
@@ -69,21 +68,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             DEFAULT_EXPENSE_CATEGORIES.forEach { dao.upsertCategory(CategoryEntity(it, TxType.EXPENSE)) }
             DEFAULT_INCOME_CATEGORIES.forEach { dao.upsertCategory(CategoryEntity(it, TxType.INCOME)) }
         }
-    }
-
-    // ★ ДОБАВЛЕНО: для существующих установок и на случай, если пользователь удалил категорию вручную
-    private suspend fun ensureDebtCategories() {
-        val existing = dao.getCategoriesList()
-        val debtName = "🤝 Долги"
-        val repayName = "💸 Возврат долга"
-        if (existing.none { it.name == debtName && it.type == TxType.EXPENSE })
-            dao.upsertCategory(CategoryEntity(debtName, TxType.EXPENSE))
-        if (existing.none { it.name == debtName && it.type == TxType.INCOME })
-            dao.upsertCategory(CategoryEntity(debtName, TxType.INCOME))
-        if (existing.none { it.name == repayName && it.type == TxType.EXPENSE })
-            dao.upsertCategory(CategoryEntity(repayName, TxType.EXPENSE))
-        if (existing.none { it.name == repayName && it.type == TxType.INCOME })
-            dao.upsertCategory(CategoryEntity(repayName, TxType.INCOME))
     }
 
     private suspend fun ensureCashAccount() {
@@ -111,7 +95,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
 
     fun save(t: Tx) {
         viewModelScope.launch {
-            if (t.category == "🤝 Долги") {
+            if (t.category == CATEGORY_DEBT) {
                 val personName = extractPersonName(t.description)
                 if (t.linkedDebtId == null) {
                     val debtType = if (t.type == TxType.EXPENSE) DebtType.LENT else DebtType.BORROWED
@@ -129,7 +113,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
 
     fun delete(t: Tx) {
         viewModelScope.launch {
-            if (t.linkedDebtId != null && t.category == "🤝 Долги") {
+            if (t.linkedDebtId != null && t.category == CATEGORY_DEBT) {
                 val debt = dao.getDebtById(t.linkedDebtId)
                 if (debt != null && !debt.isPaid) dao.deleteDebt(debt)
             }
@@ -212,7 +196,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         viewModelScope.launch {
             val txType = if (debt.type == DebtType.BORROWED) TxType.EXPENSE else TxType.INCOME
             val desc = if (debt.type == DebtType.BORROWED) "Вернул долг: ${debt.personName}" else "Мне вернули долг: ${debt.personName}"
-            val tx = Tx(amountMinor = amountMinor, type = txType, cardId = cardId, description = desc, category = "💸 Возврат долга", timestamp = System.currentTimeMillis(), source = "DEBT_REPAY", linkedDebtId = debt.id)
+            val tx = Tx(amountMinor = amountMinor, type = txType, cardId = cardId, description = desc, category = CATEGORY_REPAY, timestamp = System.currentTimeMillis(), source = "DEBT_REPAY", linkedDebtId = debt.id)
             dao.upsert(tx)
             dao.upsertDebt(debt.copy(isPaid = true))
         }
@@ -222,7 +206,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             dao.deleteDebt(debt)
             if (!debt.isPaid) {
                 val all = dao.getAllTxs()
-                val relatedTx = all.find { it.linkedDebtId == debt.id && it.category == "🤝 Долги" }
+                val relatedTx = all.find { it.linkedDebtId == debt.id && it.category == CATEGORY_DEBT }
                 if (relatedTx != null) dao.delete(relatedTx)
             }
         }
