@@ -122,9 +122,9 @@ fun App(
     var showPasswordDialogRestore by remember { mutableStateOf(false) }
     var pendingBackupPassword by remember { mutableStateOf<String?>(null) }
     var pendingRestoreBytes by remember { mutableStateOf<ByteArray?>(null) }
-    
+
     var reviewTxs by remember { mutableStateOf<List<Tx>?>(null) }
-    
+
     var importedCards by remember { mutableStateOf<List<CardEntity>?>(null) }
     var showCardImportConfirm by remember { mutableStateOf(false) }
     var ocrDebugInfo by remember { mutableStateOf<String?>(null) }
@@ -246,7 +246,7 @@ fun App(
             }
             bulkProcessed = uris.size
             bulkInProgress = false
-            
+
             if (imported.isNotEmpty()) {
                 reviewTxs = imported
             } else {
@@ -279,49 +279,43 @@ fun App(
             } catch (e: Exception) { scope.launch { snackbarHostState.showSnackbar(t("error")) } }
         }
     }
-    
+
     // ★ ИМПОРТ PDF С ТОЧНЫМ ВЫРЕЗАНИЕМ СТРОК
     val fileImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { scope.launch {
             try {
                 val mimeType = context.contentResolver.getType(it) ?: ""
-                
+
                 if (mimeType == "application/pdf") {
-                    bulkInProgress = true // показываем прогрессбар
+                    bulkInProgress = true
                     val parsedTxs = withContext(Dispatchers.IO) {
                         val inputStream = context.contentResolver.openInputStream(it)
                         val doc = PDDocument.load(inputStream)
-                        
-                        // 1. Извлекаем строки с координатами
+
                         val stripper = CoordinateTextStripper()
-                        stripper.getText(doc) // заполняет stripper.lines
+                        stripper.getText(doc)
                         val pdfLines = stripper.lines
-                        
-                        // 2. Парсим операции
+
                         val parsedPairs = SmsParser.parsePdfLines(pdfLines, allTxs, customRules)
-                        
-                        // 3. Рендерим страницы и вырезаем нужные строки
+
                         val pageBitmaps = mutableMapOf<Int, Bitmap>()
                         val resultList = mutableListOf<Tx>()
-                        
+
                         for ((tx, pdfLine) in parsedPairs) {
-                            // Рендерим страницу 1 раз (в PDFBox страницы начинаются с 1, но renderImageWithDPI ждет 0-based index)
                             val pageIdx = (pdfLine.page - 1).coerceAtLeast(0)
                             val pageBitmap = pageBitmaps.getOrPut(pageIdx) {
                                 val renderer = com.tom_roush.pdfbox.rendering.PDFRenderer(doc)
                                 renderer.renderImageWithDPI(pageIdx, 200f)
                             }
-                            
-                            // Вырезаем строку
+
                             val croppedBitmap = cropBitmapByLine(pageBitmap, pdfLine, padding = 15)
-                            
-                            // Сохраняем как файл
+
                             val photoFile = File(context.filesDir, "images/pdf_crop_${UUID.randomUUID()}.jpg")
                             photoFile.parentFile?.mkdirs()
                             photoFile.outputStream().use { out ->
                                 croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                             }
-                            
+
                             resultList.add(tx.copy(photoPath = photoFile.absolutePath))
                         }
                         doc.close()
@@ -334,21 +328,20 @@ fun App(
                     } else {
                         snackbarHostState.showSnackbar(t("no_tx_found"))
                     }
-                    
+
                 } else {
-                    // Обычный импорт CSV или текста
                     val text = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
                     val parsedTxs = withContext(Dispatchers.IO) { SmsParser.parseImportedFile(text, allTxs, customRules) }
                     if (parsedTxs.isNotEmpty()) { reviewTxs = parsedTxs } else snackbarHostState.showSnackbar(t("no_tx_found"))
                 }
-            } catch (e: Exception) { 
+            } catch (e: Exception) {
                 e.printStackTrace()
                 bulkInProgress = false
-                snackbarHostState.showSnackbar(t("file_read_error")) 
+                snackbarHostState.showSnackbar(t("file_read_error"))
             }
         } }
     }
-    
+
     val cardImagePicker = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { scope.launch {
             val bitmap = uriToBitmap(context, it)
@@ -402,12 +395,11 @@ fun App(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar {
-                // ★ FB-08: Исправляем обрезание текста в нижней навигации
-                NavigationBarItem(selected = currentTab == 0, onClick = { currentTab = 0 }, icon = { Icon(Icons.Default.Home, null) }, label = { Text(t("operations"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
-                NavigationBarItem(selected = currentTab == 1, onClick = { currentTab = 1 }, icon = { Icon(Icons.Default.BarChart, null) }, label = { Text(t("analytics"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
-                NavigationBarItem(selected = currentTab == 2, onClick = { currentTab = 2 }, icon = { BadgedBox(badge = { if (vm.pendingRecurring.collectAsState().value.isNotEmpty()) Badge { Text("${vm.pendingRecurring.collectAsState().value.size}") } }) { Icon(Icons.Default.Assignment, null) } }, label = { Text(t("standard_forecast"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
-                NavigationBarItem(selected = currentTab == 3, onClick = { currentTab = 3 }, icon = { Icon(Icons.Default.TrendingUp, null) }, label = { Text(t("forecast_list"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
-                NavigationBarItem(selected = false, onClick = { showSettings = true }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text(t("settings"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(selected = currentTab == 0, onClick = { currentTab = 0 }, icon = { Icon(Icons.Default.Home, null) }, label = { Text(t("operations")) })
+                NavigationBarItem(selected = currentTab == 1, onClick = { currentTab = 1 }, icon = { Icon(Icons.Default.BarChart, null) }, label = { Text(t("analytics")) })
+                NavigationBarItem(selected = currentTab == 2, onClick = { currentTab = 2 }, icon = { BadgedBox(badge = { if (vm.pendingRecurring.collectAsState().value.isNotEmpty()) Badge { Text("${vm.pendingRecurring.collectAsState().value.size}") } }) { Icon(Icons.Default.Assignment, null) } }, label = { Text(t("standard_forecast")) })
+                NavigationBarItem(selected = currentTab == 3, onClick = { currentTab = 3 }, icon = { Icon(Icons.Default.TrendingUp, null) }, label = { Text(t("forecast_list")) })
+                NavigationBarItem(selected = false, onClick = { showSettings = true }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text(t("settings")) })
             }
         },
         topBar = {
@@ -479,11 +471,9 @@ fun App(
                 onShowGoalManager = { showGoalManager = true }, onShowDebtManager = { showDebtManager = true },
                 onShowBalanceDetails = { showBalanceDetails = true }, onQuickTemplateClick = { template -> selectedQuickTemplate = template; adding = true }
             )
-            // ★ FB-12: Передаем paddingValues в AnalyticsScreen
-            1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, paddingValues = pad, onBack = { currentTab = 0 })
-            2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, paddingValues = pad, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
-            // ★ FB-07 & FB-12: Передаем paddingValues в ForecastListScreen
-            3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, paddingValues = pad, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
+            1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, onBack = { currentTab = 0 })
+            2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
+            3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
         }
     }
 
@@ -493,7 +483,15 @@ fun App(
     if (showCardManager) CardManagerSheet(cards, cardBalancesInUzs, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
-    if (showDebtManager) DebtManagerSheet(debts, cards, currentLang.value, { vm.saveDebt(it) }, { vm.markDebtPaid(it) }, { vm.deleteDebt(it) }, { showDebtManager = false })
+
+    // ★ FB-20: DebtManagerSheet с onRepay
+    if (showDebtManager) DebtManagerSheet(
+        debts, cards, currentLang.value,
+        { vm.saveDebt(it) },
+        { debt, cardId, amount -> vm.repayDebt(debt, cardId, amount) },
+        { vm.deleteDebt(it) },
+        { showDebtManager = false }
+    )
 
     if (showRuleManager) RuleManagerSheet(
         rules = customRules,
