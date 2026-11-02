@@ -2,14 +2,19 @@ package uz.uchet
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,7 +24,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import java.time.Instant
 import java.time.Year
 import java.time.YearMonth
@@ -36,18 +44,26 @@ fun AnalyticsScreen(
 ) {
     val t = { key: String -> Translations.t(key, currentLang) }
     var selectedType by remember { mutableStateOf(TxType.EXPENSE) }
+    var isOverall by remember { mutableStateOf(false) } // ★ НОВОЕ: Месяц или Общая
 
-    val incomeMonth = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-    val expenseMonth = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-    val netMonth = incomeMonth - expenseMonth
+    // Выбираем источник данных в зависимости от режима
+    val sourceTxs = if (isOverall) allTxs else txs
 
-    val filteredTxs = txs.filter { it.type == selectedType }
-    val filteredAllTxs = allTxs.filter { it.type == selectedType }
+    val incomeTotal = sourceTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
+    val expenseTotal = sourceTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
+    val netTotal = incomeTotal - expenseTotal
+
+    val filteredTxs = sourceTxs.filter { it.type == selectedType }
+    val filteredAllTxs = allTxs.filter { it.type == selectedType } // Для годового графика всегда берем все
     val byCategory = filteredTxs.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
 
-    // Используем Column вместо Scaffold, чтобы избежать наложения
+    // Состояния для диалогов
+    var selectedCategoryDetails by remember { mutableStateOf<String?>(null) }
+    var showFullscreenPie by remember { mutableStateOf(false) }
+
+    // Используем Column вместо Scaffold
     Column(Modifier.padding(paddingValues).fillMaxSize().verticalScroll(rememberScrollState())) {
-        // Верхняя панель теперь просто Row, так как глобальный TopBar не показывается на этой вкладке
+        // Верхняя панель
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -57,6 +73,20 @@ fun AnalyticsScreen(
         }
 
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            // ★ Переключатель периода (Месяц / Общая)
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                SegmentedButton(
+                    selected = !isOverall,
+                    onClick = { isOverall = false },
+                    shape = SegmentedButtonDefaults.itemShape(0, 2)
+                ) { Text(t("operations")) } // "Месяц"
+                SegmentedButton(
+                    selected = isOverall,
+                    onClick = { isOverall = true },
+                    shape = SegmentedButtonDefaults.itemShape(1, 2)
+                ) { Text("Общая") }
+            }
+
             // Сводка
             Card(
                 Modifier.fillMaxWidth(),
@@ -65,19 +95,19 @@ fun AnalyticsScreen(
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(t("income"), fontWeight = FontWeight.Medium)
-                        Text("+${incomeMonth.money()}", color = GREEN, fontWeight = FontWeight.Bold)
+                        Text("+${incomeTotal.money()}", color = GREEN, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(t("expense"), fontWeight = FontWeight.Medium)
-                        Text("-${expenseMonth.money()}", color = RED, fontWeight = FontWeight.Bold)
+                        Text("-${expenseTotal.money()}", color = RED, fontWeight = FontWeight.Bold)
                     }
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(t("total"), fontWeight = FontWeight.Bold)
                         Text(
-                            "${if (netMonth >= 0) "+" else ""}${netMonth.money()}",
-                            color = if (netMonth >= 0) GREEN else RED,
+                            "${if (netTotal >= 0) "+" else ""}${netTotal.money()}",
+                            color = if (netTotal >= 0) GREEN else RED,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -86,7 +116,7 @@ fun AnalyticsScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // Переключатель
+            // Переключатель Расход/Доход
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 SegmentedButton(
                     selected = selectedType == TxType.EXPENSE,
@@ -112,7 +142,8 @@ fun AnalyticsScreen(
                     Text(t("no_found"), color = Color.Gray)
                 }
             } else {
-                if (filteredTxs.isNotEmpty()) {
+                // График по дням (только для режима "Месяц")
+                if (!isOverall && filteredTxs.isNotEmpty()) {
                     Text(
                         if (selectedType == TxType.INCOME) t("daily_chart_inc") else t("daily_chart"),
                         style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold
@@ -121,6 +152,8 @@ fun AnalyticsScreen(
                     DailyChart(txs = filteredTxs, yearMonth = YearMonth.now(), type = selectedType, currentLang = currentLang)
                     Spacer(Modifier.height(32.dp))
                 }
+                
+                // График по месяцам (показываем всегда, но если isOverall, то за год)
                 if (filteredAllTxs.isNotEmpty()) {
                     Text(
                         if (selectedType == TxType.INCOME) t("monthly_chart_inc") else t("monthly_chart"),
@@ -130,16 +163,132 @@ fun AnalyticsScreen(
                     MonthlyChart(allTxs = filteredAllTxs, type = selectedType, currentLang = currentLang)
                     Spacer(Modifier.height(32.dp))
                 }
+
+                // Пирог по категориям + Кнопка развертывания
                 if (byCategory.isNotEmpty()) {
-                    Text(
-                        if (selectedType == TxType.INCOME) t("inc_by_cat") else t("exp_by_cat"),
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold
-                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (selectedType == TxType.INCOME) t("inc_by_cat") else t("exp_by_cat"),
+                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { showFullscreenPie = true }) {
+                            Icon(Icons.Default.Fullscreen, contentDescription = "Развернуть")
+                        }
+                    }
                     Spacer(Modifier.height(16.dp))
-                    CategoryPieChart(byCategory, currentLang)
+                    
+                    CategoryPieChart(
+                        data = byCategory, 
+                        lang = currentLang,
+                        onCategoryClick = { cat -> selectedCategoryDetails = cat }
+                    )
                 }
             }
-            Spacer(Modifier.height(80.dp)) // Отступ снизу, чтобы последний элемент не прилипал к FAB/панели
+            Spacer(Modifier.height(80.dp)) 
+        }
+    }
+
+    // ★ Диалог детализации (Drill-down)
+    if (selectedCategoryDetails != null) {
+        val cat = selectedCategoryDetails!!
+        val catTxs = filteredTxs.filter { it.category == cat }.sortedByDescending { it.timestamp }
+        
+        AlertDialog(
+            onDismissRequest = { selectedCategoryDetails = null },
+            title = { Text("${Translations.translateCategory(cat, currentLang)} (${catTxs.size})") },
+            text = {
+                if (catTxs.isEmpty()) {
+                    Text("Нет операций")
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                        items(catTxs) { tx ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        if (tx.description.isNotBlank()) tx.description else "Без описания",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    val date = Instant.ofEpochMilli(tx.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+                                    Text(date.format(DATE_FMT), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                }
+                                Text(
+                                    "${if (tx.type == TxType.INCOME) "+" else "-"}${tx.amountMinor.money()}",
+                                    color = if (tx.type == TxType.INCOME) GREEN else RED,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedCategoryDetails = null }) { Text(t("close")) } }
+        )
+    }
+
+    // ★ Полноэкранный диалог пирога
+    if (showFullscreenPie) {
+        Dialog(
+            onDismissRequest = { showFullscreenPie = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (selectedType == TxType.INCOME) t("inc_by_cat") else t("exp_by_cat"),
+                            style = MaterialTheme.typography.titleLarge, 
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { showFullscreenPie = false }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Закрыть")
+                        }
+                    }
+                    
+                    // Большой Canvas
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(16.dp), contentAlignment = Alignment.Center) {
+                        LargePieChart(byCategory, currentLang)
+                    }
+                    
+                    Spacer(Modifier.height(24.dp))
+                    
+                    // Полная легенда
+                    val total = byCategory.values.sum().toFloat()
+                    val colors = listOf(
+                        Color(0xFFE57373), Color(0xFF81C784), Color(0xFF64B5F6), Color(0xFFFFB74D),
+                        Color(0xFFBA68C8), Color(0xFF4DB6AC), Color(0xFFA1887F)
+                    )
+                    byCategory.entries.sortedByDescending { it.value }.forEachIndexed { index, entry ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.size(16.dp).background(colors[index % colors.size], shape = CircleShape))
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                Translations.translateCategory(entry.key, currentLang),
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "${entry.value.money()} (${(entry.value / total * 100).toInt()}%)",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -263,7 +412,11 @@ fun MonthlyChart(allTxs: List<Tx>, type: TxType, currentLang: AppLanguage) {
 }
 
 @Composable
-fun CategoryPieChart(data: Map<String, Long>, lang: AppLanguage) {
+fun CategoryPieChart(
+    data: Map<String, Long>, 
+    lang: AppLanguage,
+    onCategoryClick: (String) -> Unit
+) {
     val total = data.values.sum().toFloat()
     if (total == 0f) return
     val colors = listOf(
@@ -271,8 +424,16 @@ fun CategoryPieChart(data: Map<String, Long>, lang: AppLanguage) {
         Color(0xFFBA68C8), Color(0xFF4DB6AC), Color(0xFFA1887F)
     )
     val sortedData = data.entries.sortedByDescending { it.value }
+    
     Row(Modifier.fillMaxWidth().height(120.dp), verticalAlignment = Alignment.CenterVertically) {
-        Canvas(modifier = Modifier.size(110.dp).padding(8.dp)) {
+        Canvas(
+            modifier = Modifier.size(110.dp).padding(8.dp).pointerInput(data) {
+                detectTapGestures { offset ->
+                    // Простое определение сектора по координатам (опционально, можно оставить только клики по легенде)
+                    // Для простоты и надежности оставим клики по легенде.
+                }
+            }
+        ) {
             var startAngle = -90f
             sortedData.forEachIndexed { index, entry ->
                 val sweepAngle = (entry.value / total) * 360f
@@ -288,15 +449,49 @@ fun CategoryPieChart(data: Map<String, Long>, lang: AppLanguage) {
         Spacer(Modifier.width(16.dp))
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             sortedData.take(4).forEachIndexed { index, entry ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onCategoryClick(entry.key) }
+                        .padding(vertical = 2.dp)
+                ) {
                     Box(Modifier.size(10.dp).background(colors[index % colors.size], shape = CircleShape))
                     Spacer(Modifier.width(6.dp))
                     Text(
                         "${Translations.translateCategory(entry.key, lang)}: ${(entry.value / total * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+fun LargePieChart(data: Map<String, Long>, lang: AppLanguage) {
+    val total = data.values.sum().toFloat()
+    if (total == 0f) return
+    val colors = listOf(
+        Color(0xFFE57373), Color(0xFF81C784), Color(0xFF64B5F6), Color(0xFFFFB74D),
+        Color(0xFFBA68C8), Color(0xFF4DB6AC), Color(0xFFA1887F)
+    )
+    val sortedData = data.entries.sortedByDescending { it.value }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        var startAngle = -90f
+        sortedData.forEachIndexed { index, entry ->
+            val sweepAngle = (entry.value / total) * 360f
+            drawArc(
+                color = colors[index % colors.size],
+                startAngle = startAngle,
+                sweepAngle = sweepAngle,
+                useCenter = true
+            )
+            startAngle += sweepAngle
+        }
+        // Внутренний круг (эффект пончика)
+        drawCircle(color = Color.White, radius = size.minDimension / 3f)
     }
 }
