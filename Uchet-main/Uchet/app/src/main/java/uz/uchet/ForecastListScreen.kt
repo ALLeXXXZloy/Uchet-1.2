@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 fun ForecastListScreen(
     forecasts: List<ForecastPlanEntity>,
     currentLang: AppLanguage,
+    paddingValues: PaddingValues,
     onSave: (ForecastPlanEntity) -> Unit,
     onDelete: (Long) -> Unit,
     onOpen: (ForecastPlanEntity) -> Unit,
@@ -51,99 +52,106 @@ fun ForecastListScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(t("forecast_list")) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) }
+    Box(Modifier.fillMaxSize().padding(paddingValues)) {
+        Column(Modifier.fillMaxSize()) {
+            // Заголовок
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) }
+                Text(t("forecast_list"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+
+            if (forecasts.isEmpty()) {
+                Column(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.TrendingUp, null,
+                        modifier = Modifier.size(64.dp),
+                        tint = Color.Gray.copy(alpha = 0.5f)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        t("forecast_empty"),
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center
+                    )
                 }
-            )
-        },
-        floatingActionButton = {
-            if (forecasts.size < 10) {
-                FloatingActionButton(onClick = { showAddDialog = true }) {
-                    Icon(Icons.Default.Add, t("forecast_new"))
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    items(forecasts, key = { it.id }) { f ->
+                        Card(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { onOpen(f) }
+                        ) {
+                            Row(
+                                Modifier.padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(f.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "${t("forecast_months_short")}: ${f.months} · ${t("forecast_start_short")}: ${f.startMonth}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                                IconButton(onClick = { editingForecast = f }) {
+                                    Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                                IconButton(onClick = { forecastToDelete = f }) {
+                                    Icon(Icons.Default.Delete, null, tint = RED)
+                                }
+                            }
+                        }
+                    }
+
+                    if (forecasts.size >= 10) {
+                        item {
+                            Card(
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                colors = CardDefaults.cardColors(containerColor = YELLOW.copy(alpha = 0.15f))
+                            ) {
+                                Row(
+                                    Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Info, null, tint = YELLOW)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        t("forecast_limit_reached"),
+                                        color = YELLOW,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-    ) { pad ->
-        if (forecasts.isEmpty()) {
-            Column(
-                Modifier.padding(pad).fillMaxSize().padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    Icons.Default.TrendingUp, null,
-                    modifier = Modifier.size(64.dp),
-                    tint = Color.Gray.copy(alpha = 0.5f)
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    t("forecast_empty"),
-                    color = Color.Gray,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center
-                )
-            }
-        } else {
-            LazyColumn(
-                Modifier.padding(pad).fillMaxSize(),
-                contentPadding = PaddingValues(16.dp)
-            ) {
-                items(forecasts, key = { it.id }) { f ->
-                    Card(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onOpen(f) }
-                    ) {
-                        Row(
-                            Modifier.padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(f.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    "${t("forecast_months_short")}: ${f.months} · ${t("forecast_start_short")}: ${f.startMonth}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.Gray
-                                )
-                            }
-                            IconButton(onClick = { editingForecast = f }) {
-                                Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary)
-                            }
-                            IconButton(onClick = { forecastToDelete = f }) {
-                                Icon(Icons.Default.Delete, null, tint = RED)
-                            }
-                        }
-                    }
-                }
 
-                if (forecasts.size >= 10) {
-                    item {
-                        Card(
-                            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            colors = CardDefaults.cardColors(containerColor = YELLOW.copy(alpha = 0.15f))
-                        ) {
-                            Row(
-                                Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Info, null, tint = YELLOW)
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    t("forecast_limit_reached"),
-                                    color = YELLOW,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                }
+        // FAB поверх списка (справа снизу)
+        if (forecasts.size < 10) {
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.Default.Add, t("forecast_new"))
             }
         }
     }
