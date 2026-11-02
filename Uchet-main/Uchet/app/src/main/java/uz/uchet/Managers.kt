@@ -419,7 +419,8 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(t("category")) }, placeholder = { Text("🐶") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Spacer(Modifier.height(8.dp))
             Button(onClick = {
-                if (name.isNotBlank() && !categories.any { it.name == name }) {
+                // ★ FIX-A: запрещаем создавать виртуальные спец-категории вручную
+                if (name.isNotBlank() && !categories.any { it.name == name } && name !in SPECIAL_CATEGORIES) {
                     onSave(CategoryEntity(name = name.trim(), type = if (isIncome) TxType.INCOME else TxType.EXPENSE))
                     name = ""
                 }
@@ -427,7 +428,8 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
 
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
             Text(t("expense") + ":", style = MaterialTheme.typography.titleSmall, color = RED)
-            categories.filter { it.type == TxType.EXPENSE }.forEach { c ->
+            // ★ FIX-A: спец-категории скрыты — они виртуальные, нельзя удалить
+            categories.filter { it.type == TxType.EXPENSE && it.name !in SPECIAL_CATEGORIES }.forEach { c ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge)
                     IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
@@ -435,7 +437,7 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
             }
             Spacer(Modifier.height(16.dp))
             Text(t("income") + ":", style = MaterialTheme.typography.titleSmall, color = GREEN)
-            categories.filter { it.type == TxType.INCOME }.forEach { c ->
+            categories.filter { it.type == TxType.INCOME && it.name !in SPECIAL_CATEGORIES }.forEach { c ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Translations.translateCategory(c.name, lang), style = MaterialTheme.typography.bodyLarge)
                     IconButton({ catToDelete = c.name }) { Icon(Icons.Default.Delete, t("delete"), tint = RED) }
@@ -447,7 +449,7 @@ fun CategoryManagerSheet(categories: List<CategoryEntity>, lang: AppLanguage, on
 }
 
 // ============================================================================
-// SettingsSheet — ★ FB-NEW: добавлена секция "Доступ к уведомлениям"
+// SettingsSheet — секция "Доступ к уведомлениям" (версия FIX-B, без FIX-C)
 // ============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -460,7 +462,7 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
     var reminderHour by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_hour", 21)) }
     var reminderMinute by remember { mutableIntStateOf(settingsPrefs.getInt("reminder_minute", 0)) }
     var showTimePicker by remember { mutableStateOf(false) }
-    // ★ Перепроверяем статус доступа к уведомлениям при каждом открытии настроек
+    // ★ FIX-B: статус доступа к уведомлениям (перепроверяется при каждом открытии настроек)
     var notifAccessGranted by remember { mutableStateOf(NotificationAccessHelper.isNotificationAccessGranted(context)) }
     val savedPin = prefs.getString("pin", "0000") ?: "0000"; val t = { key: String -> Translations.t(key, currentLang.value) }
 
@@ -508,7 +510,7 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             Button(onClick = { vm.updateRates(); scope.launch { snackbarHostState.showSnackbar(t("rates_updated")) } }, modifier = Modifier.fillMaxWidth()) { Text(t("update_rates")) }
             Spacer(Modifier.height(16.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
 
-            // ★ FB-NEW: Доступ к уведомлениям
+            // ★ FIX-B: Доступ к уведомлениям
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(t("notif_access_section"), style = MaterialTheme.typography.titleSmall)
