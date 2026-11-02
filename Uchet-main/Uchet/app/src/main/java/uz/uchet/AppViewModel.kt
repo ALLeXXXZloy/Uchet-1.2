@@ -185,6 +185,11 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         viewModelScope.launch { dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = YearMonth.now().toString(), status = "POSTPONED", lastPostponedDate = LocalDate.now().toString())) }
     }
 
+    // ★ ДОБАВЛЕНО: сохранение долга из DebtManagerSheet
+    fun saveDebt(debt: DebtEntity) {
+        viewModelScope.launch { dao.upsertDebt(debt) }
+    }
+
     fun repayDebt(debt: DebtEntity, cardId: String?, amountMinor: Long) {
         viewModelScope.launch {
             val txType = if (debt.type == DebtType.BORROWED) TxType.EXPENSE else TxType.INCOME
