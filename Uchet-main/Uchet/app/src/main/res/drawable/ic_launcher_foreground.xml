@@ -1,4 +1,31 @@
-<?xml version="1.0" encoding="utf-8"?>
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/app_icon"
-    android:gravity="center" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Фон (прозрачный, так как цвет задается в ic_launcher_background.xml) -->
+    
+    <!-- График (Стрелка вверх) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,64 L48,52 L56,60 L72,44 L66,44 L66,38 L82,38 L82,54 L76,54 L76,48 L56,68 L48,60 L40,68 Z" />
+        
+    <!-- Столбики графика -->
+    <path
+        android:fillColor="#4DB6AC"
+        android:pathData="M30,68 L38,68 L38,84 L30,84 Z" />
+    <path
+        android:fillColor="#4DB6AC"
+        android:pathData="M42,60 L50,60 L50,84 L42,84 Z" />
+    <path
+        android:fillColor="#4DB6AC"
+        android:pathData="M54,54 L62,54 L62,84 L54,84 Z" />
+        
+    <!-- Желтая монетка -->
+    <path
+        android:fillColor="#FFCA28"
+        android:pathData="M68,70 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M65,64 L71,64 L71,66 L69,66 L69,74 L71,74 L71,76 L65,76 L65,74 L67,74 L67,66 L65,66 Z" />
+</vector>
