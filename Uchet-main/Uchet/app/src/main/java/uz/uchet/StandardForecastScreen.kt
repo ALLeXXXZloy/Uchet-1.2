@@ -243,14 +243,13 @@ fun StandardForecastScreen(
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Button(
                                                 onClick = { 
-                                                    // Открываем диалог подтверждения (можно использовать существующий ConfirmRecurringDialog)
-                                                    // Для простоты используем простой вызов, но лучше передавать в стейт
-                                                    // Временно: мы вызовем диалог через отдельный стейт
+                                                    // Открываем диалог подтверждения
+                                                    confirmingRecurring = r
                                                 },
                                                 modifier = Modifier.weight(1f)
                                             ) { Text(t("confirm")) }
                                             OutlinedButton(
-                                                onClick = { vm.skipRecurring(r, selectedMonth.toString()) },
+                                                onClick = { vm.skipRecurring(r) },
                                                 modifier = Modifier.weight(1f)
                                             ) { Text(t("not_spent")) }
                                         }
@@ -285,7 +284,7 @@ fun StandardForecastScreen(
         )
     }
 
-    // Диалог подтверждения (упрощенный)
+    // Диалог подтверждения
     var confirmingRecurring by remember { mutableStateOf<RecurringEntity?>(null) }
     if (confirmingRecurring != null) {
         ConfirmRecurringDialog(
@@ -293,7 +292,7 @@ fun StandardForecastScreen(
             currentLang = currentLang,
             onDismiss = { confirmingRecurring = null },
             onConfirm = { amount ->
-                vm.confirmRecurring(confirmingRecurring!!, amount, selectedMonth.toString())
+                vm.confirmRecurring(confirmingRecurring!!, amount)
                 confirmingRecurring = null
             }
         )
