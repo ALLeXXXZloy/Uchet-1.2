@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -380,15 +381,50 @@ fun App(
         return
     }
 
+    // ★ FB-08: единый компактный стиль для всех подписей нижнего NavigationBar
+    val navLabelStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp)
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(selected = currentTab == 0, onClick = { currentTab = 0 }, icon = { Icon(Icons.Default.Home, null) }, label = { Text(t("operations")) })
-                NavigationBarItem(selected = currentTab == 1, onClick = { currentTab = 1 }, icon = { Icon(Icons.Default.BarChart, null) }, label = { Text(t("analytics")) })
-                NavigationBarItem(selected = currentTab == 2, onClick = { currentTab = 2 }, icon = { BadgedBox(badge = { if (vm.pendingRecurring.collectAsState().value.isNotEmpty()) Badge { Text("${vm.pendingRecurring.collectAsState().value.size}") } }) { Icon(Icons.Default.Assignment, null) } }, label = { Text(t("standard_forecast")) })
-                NavigationBarItem(selected = currentTab == 3, onClick = { currentTab = 3 }, icon = { Icon(Icons.Default.TrendingUp, null) }, label = { Text(t("forecast_list")) })
-                NavigationBarItem(selected = false, onClick = { showSettings = true }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text(t("settings")) })
+                NavigationBarItem(
+                    selected = currentTab == 0,
+                    onClick = { currentTab = 0 },
+                    icon = { Icon(Icons.Default.Home, null) },
+                    label = { Text(t("operations"), style = navLabelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                )
+                NavigationBarItem(
+                    selected = currentTab == 1,
+                    onClick = { currentTab = 1 },
+                    icon = { Icon(Icons.Default.BarChart, null) },
+                    label = { Text(t("analytics"), style = navLabelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                )
+                NavigationBarItem(
+                    selected = currentTab == 2,
+                    onClick = { currentTab = 2 },
+                    icon = {
+                        BadgedBox(badge = {
+                            if (vm.pendingRecurring.collectAsState().value.isNotEmpty())
+                                Badge { Text("${vm.pendingRecurring.collectAsState().value.size}") }
+                        }) { Icon(Icons.Default.Assignment, null) }
+                    },
+                    // ★ FB-08: короткий ключ nav_forecast вместо длинного standard_forecast
+                    label = { Text(t("nav_forecast"), style = navLabelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                )
+                NavigationBarItem(
+                    selected = currentTab == 3,
+                    onClick = { currentTab = 3 },
+                    icon = { Icon(Icons.Default.TrendingUp, null) },
+                    // ★ FB-08: короткий ключ nav_plans вместо длинного forecast_list
+                    label = { Text(t("nav_plans"), style = navLabelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = { showSettings = true },
+                    icon = { Icon(Icons.Default.Settings, null) },
+                    label = { Text(t("settings"), style = navLabelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                )
             }
         },
         topBar = {
@@ -460,7 +496,6 @@ fun App(
                 onShowGoalManager = { showGoalManager = true }, onShowDebtManager = { showDebtManager = true },
                 onShowBalanceDetails = { showBalanceDetails = true }, onQuickTemplateClick = { template -> selectedQuickTemplate = template; adding = true }
             )
-            // ★ ИСПРАВЛЕНО: добавлен paddingValues = pad
             1 -> AnalyticsScreen(txs = txs, allTxs = allTxs, currentLang = currentLang.value, paddingValues = pad, onBack = { currentTab = 0 })
             2 -> StandardForecastScreen(vm = vm, currentLang = currentLang.value, paddingValues = pad, onManageRecurring = { showRecurringManager = true }, onBack = { currentTab = 0 })
             3 -> ForecastListScreen(forecasts = forecasts, currentLang = currentLang.value, paddingValues = pad, onSave = { vm.saveForecast(it) }, onDelete = { vm.deleteForecast(it) }, onOpen = { openedForecastId = it.id }, onBack = { currentTab = 0 })
@@ -474,7 +509,6 @@ fun App(
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
 
-    // ★ FB-20: DebtManagerSheet с onRepay
     if (showDebtManager) DebtManagerSheet(
         debts, cards, currentLang.value,
         { vm.saveDebt(it) },
