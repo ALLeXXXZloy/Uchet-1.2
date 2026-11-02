@@ -10,12 +10,7 @@ enum class TxType(val label: String) { INCOME("Доход"), EXPENSE("Расхо
 enum class CapitalizationType { MONTHLY, DAILY, END_OF_TERM }
 enum class DebtType { LENT, BORROWED }
 
-/** ★ #5: результат срабатывания правила. Возвращается парсерами при матчинге. */
-data class RuleMatch(
-    val category: String,
-    val ruleId: Long?,
-    val keyword: String?
-)
+data class RuleMatch(val category: String, val ruleId: Long?, val keyword: String?)
 
 @Entity(tableName = "txs", indices = [Index(value = ["timestamp"], name = "index_txs_timestamp"), Index(value = ["cardId"], name = "index_txs_cardId"), Index(value = ["toCardId"], name = "index_txs_toCardId"), Index(value = ["category"], name = "index_txs_category")])
 data class Tx(
@@ -24,7 +19,8 @@ data class Tx(
     val cardId: String? = null, val toCardId: String? = null, val toAmountMinor: Long? = null,
     val description: String = "", val category: String = "", val timestamp: Long,
     val source: String = "MANUAL", val currency: String = "UZS", val photoPath: String? = null,
-    val rawText: String? = null
+    val rawText: String? = null,
+    val linkedDebtId: Long? = null
 )
 
 @Entity(tableName = "cards")
@@ -52,46 +48,33 @@ data class SavingsGoalEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, 
 @Entity(tableName = "rates")
 data class ExchangeRateEntity(@PrimaryKey val currency: String, val rateToUzs: Double)
 
-// ★ FB-10: добавлено поле cardId для привязки долга к счету
 @Entity(tableName = "debts")
 data class DebtEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val personName: String, val amountMinor: Long, val type: DebtType,
     val dateMillis: Long, val isPaid: Boolean = false, val description: String = "", val currency: String = "UZS",
-    val cardId: String? = null 
+    val cardId: String? = null
 )
 
 @Entity(tableName = "custom_keyword_rules")
 data class CustomKeywordRule(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val keyword: String,
-    val category: String,
-    val type: TxType,
-    val appliedCount: Int = 0,
-    val lastAppliedAt: Long? = null,
-    val rejectedCount: Int = 0,
-    val isIgnored: Boolean = false // ★ FB-17
+    val keyword: String, val category: String, val type: TxType,
+    val appliedCount: Int = 0, val lastAppliedAt: Long? = null, val rejectedCount: Int = 0,
+    val isIgnored: Boolean = false
 )
 
-@Entity(
-    tableName = "corrections",
-    indices = [
-        Index(value = ["merchantHint"], name = "index_corrections_merchantHint"),
-        Index(value = ["field"], name = "index_corrections_field"),
-        Index(value = ["merchantHint", "field"], name = "index_corrections_merchant_field")
-    ]
-)
+@Entity(tableName = "corrections", indices = [
+    Index(value = ["merchantHint"], name = "index_corrections_merchantHint"),
+    Index(value = ["field"], name = "index_corrections_field"),
+    Index(value = ["merchantHint", "field"], name = "index_corrections_merchant_field")
+])
 data class CorrectionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val source: String,
-    val merchantHint: String,
-    val field: String,
-    val parsedValue: String,
-    val correctedValue: String,
-    val appliedCount: Int = 1,
-    val lastSeenAt: Long = System.currentTimeMillis(),
-    val createdAt: Long = System.currentTimeMillis(),
-    val rawText: String = ""
+    val source: String, val merchantHint: String, val field: String,
+    val parsedValue: String, val correctedValue: String,
+    val appliedCount: Int = 1, val lastSeenAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = System.currentTimeMillis(), val rawText: String = ""
 )
 
 @Entity(tableName = "plan_items")
@@ -114,7 +97,7 @@ interface AppDao {
     @Query("SELECT * FROM txs WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp DESC") fun observe(start: Long, end: Long): Flow<List<Tx>>
     @Query("SELECT * FROM txs ORDER BY timestamp DESC") fun observeAll(): Flow<List<Tx>>
     @Query("SELECT * FROM txs ORDER BY timestamp DESC") suspend fun getAllTxs(): List<Tx>
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(tx: Tx)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(tx: Tx): Long
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(txs: List<Tx>)
     @Delete suspend fun delete(tx: Tx)
     @Query("DELETE FROM txs") suspend fun clearTxs()
@@ -160,53 +143,30 @@ interface AppDao {
 
     @Query("SELECT * FROM debts ORDER BY isPaid ASC, dateMillis DESC") fun observeDebts(): Flow<List<DebtEntity>>
     @Query("SELECT * FROM debts") suspend fun getAllDebts(): List<DebtEntity>
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertDebt(debt: DebtEntity)
+    @Query("SELECT * FROM debts WHERE id = :id") suspend fun getDebtById(id: Long): DebtEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertDebt(debt: DebtEntity): Long
     @Delete suspend fun deleteDebt(debt: DebtEntity)
     @Query("DELETE FROM debts") suspend fun clearDebts()
 
-    // === Custom rules ===
     @Query("SELECT * FROM custom_keyword_rules") fun observeCustomRules(): Flow<List<CustomKeywordRule>>
     @Query("SELECT * FROM custom_keyword_rules") suspend fun getAllCustomRules(): List<CustomKeywordRule>
     @Query("SELECT * FROM custom_keyword_rules WHERE id = :id") suspend fun getCustomRuleById(id: Long): CustomKeywordRule?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCustomRule(rule: CustomKeywordRule)
     @Delete suspend fun deleteCustomRule(rule: CustomKeywordRule)
     @Query("DELETE FROM custom_keyword_rules") suspend fun clearCustomRules()
+    @Query("UPDATE custom_keyword_rules SET appliedCount = appliedCount + 1, lastAppliedAt = :ts WHERE id = :id") suspend fun bumpCustomRuleApplied(id: Long, ts: Long)
+    @Query("UPDATE custom_keyword_rules SET rejectedCount = rejectedCount + 1 WHERE id = :id") suspend fun bumpCustomRuleRejected(id: Long)
+    @Query("DELETE FROM custom_keyword_rules WHERE appliedCount = 0") suspend fun deleteUnusedCustomRules()
 
-    @Query("UPDATE custom_keyword_rules SET appliedCount = appliedCount + 1, lastAppliedAt = :ts WHERE id = :id")
-    suspend fun bumpCustomRuleApplied(id: Long, ts: Long)
+    @Query("SELECT * FROM corrections ORDER BY lastSeenAt DESC") fun observeCorrections(): Flow<List<CorrectionEntity>>
+    @Query("SELECT * FROM corrections ORDER BY lastSeenAt DESC") suspend fun getAllCorrections(): List<CorrectionEntity>
+    @Query("SELECT * FROM corrections WHERE merchantHint = :hint AND field = :field AND parsedValue = :parsed LIMIT 1") suspend fun findCorrection(hint: String, field: String, parsed: String): CorrectionEntity?
+    @Query("UPDATE corrections SET appliedCount = appliedCount + 1, lastSeenAt = :ts WHERE id = :id") suspend fun bumpCorrection(id: Long, ts: Long)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCorrection(c: CorrectionEntity): Long
+    @Delete suspend fun deleteCorrection(c: CorrectionEntity)
+    @Query("DELETE FROM corrections") suspend fun clearCorrections()
+    @Query("SELECT * FROM corrections WHERE appliedCount >= 3 AND merchantHint = :hint AND field = :field") suspend fun getStrongCorrections(hint: String, field: String): List<CorrectionEntity>
 
-    @Query("UPDATE custom_keyword_rules SET rejectedCount = rejectedCount + 1 WHERE id = :id")
-    suspend fun bumpCustomRuleRejected(id: Long)
-
-    @Query("DELETE FROM custom_keyword_rules WHERE appliedCount = 0")
-    suspend fun deleteUnusedCustomRules()
-
-    // === Corrections ===
-    @Query("SELECT * FROM corrections ORDER BY lastSeenAt DESC")
-    fun observeCorrections(): Flow<List<CorrectionEntity>>
-
-    @Query("SELECT * FROM corrections ORDER BY lastSeenAt DESC")
-    suspend fun getAllCorrections(): List<CorrectionEntity>
-
-    @Query("SELECT * FROM corrections WHERE merchantHint = :hint AND field = :field AND parsedValue = :parsed LIMIT 1")
-    suspend fun findCorrection(hint: String, field: String, parsed: String): CorrectionEntity?
-
-    @Query("UPDATE corrections SET appliedCount = appliedCount + 1, lastSeenAt = :ts WHERE id = :id")
-    suspend fun bumpCorrection(id: Long, ts: Long)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertCorrection(c: CorrectionEntity): Long
-
-    @Delete
-    suspend fun deleteCorrection(c: CorrectionEntity)
-
-    @Query("DELETE FROM corrections")
-    suspend fun clearCorrections()
-
-    @Query("SELECT * FROM corrections WHERE appliedCount >= 3 AND merchantHint = :hint AND field = :field")
-    suspend fun getStrongCorrections(hint: String, field: String): List<CorrectionEntity>
-
-    // === Plan / Forecast ===
     @Query("SELECT * FROM plan_items") fun observePlanItems(): Flow<List<PlanItemEntity>>
     @Query("SELECT * FROM plan_items") suspend fun getPlanItemsList(): List<PlanItemEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPlanItem(item: PlanItemEntity)
@@ -241,12 +201,11 @@ interface AppDao {
     entities = [
         Tx::class, CardEntity::class, BudgetEntity::class, RecurringEntity::class,
         RecurringConfirmationEntity::class, CategoryEntity::class, SavingsGoalEntity::class,
-        ExchangeRateEntity::class, DebtEntity::class, CustomKeywordRule::class,
-        CorrectionEntity::class,
+        ExchangeRateEntity::class, DebtEntity::class, CustomKeywordRule::class, CorrectionEntity::class,
         PlanItemEntity::class, ForecastPlanEntity::class, ForecastItemEntity::class,
         ForecastDepositEntity::class, ForecastDepositOpEntity::class
     ],
-    version = 16, // ★ Обновлено до 16
+    version = 17,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -282,48 +241,25 @@ abstract class AppDb : RoomDatabase() {
         private val MIGRATION_8_9 = object : Migration(8, 9) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `recurring_confirmations` (`recurringId` INTEGER NOT NULL, `month` TEXT NOT NULL, `status` TEXT NOT NULL, `actualAmountMinor` INTEGER DEFAULT NULL, `lastPostponedDate` TEXT DEFAULT NULL, PRIMARY KEY(`recurringId`, `month`))") } }
         private val MIGRATION_9_10 = object : Migration(9, 10) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `debts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personName` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `type` TEXT NOT NULL, `dateMillis` INTEGER NOT NULL, `isPaid` INTEGER NOT NULL, `description` TEXT NOT NULL, `currency` TEXT NOT NULL)") } }
         private val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `custom_keyword_rules` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `keyword` TEXT NOT NULL, `category` TEXT NOT NULL, `type` TEXT NOT NULL)") } }
-        private val MIGRATION_11_12 = object : Migration(11, 12) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN appliedCount INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN lastAppliedAt INTEGER DEFAULT NULL")
-                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN rejectedCount INTEGER NOT NULL DEFAULT 0")
-            }
-        }
+        private val MIGRATION_11_12 = object : Migration(11, 12) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN appliedCount INTEGER NOT NULL DEFAULT 0"); db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN lastAppliedAt INTEGER DEFAULT NULL"); db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN rejectedCount INTEGER NOT NULL DEFAULT 0") } }
         private val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS `corrections` (
-                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        `source` TEXT NOT NULL,
-                        `merchantHint` TEXT NOT NULL,
-                        `field` TEXT NOT NULL,
-                        `parsedValue` TEXT NOT NULL,
-                        `correctedValue` TEXT NOT NULL,
-                        `appliedCount` INTEGER NOT NULL DEFAULT 1,
-                        `lastSeenAt` INTEGER NOT NULL,
-                        `createdAt` INTEGER NOT NULL
-                    )
-                """.trimIndent())
+                db.execSQL("CREATE TABLE IF NOT EXISTS `corrections` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `source` TEXT NOT NULL, `merchantHint` TEXT NOT NULL, `field` TEXT NOT NULL, `parsedValue` TEXT NOT NULL, `correctedValue` TEXT NOT NULL, `appliedCount` INTEGER NOT NULL DEFAULT 1, `lastSeenAt` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_merchantHint` ON `corrections` (`merchantHint`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_field` ON `corrections` (`field`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_corrections_merchant_field` ON `corrections` (`merchantHint`, `field`)")
             }
         }
-        private val MIGRATION_13_14 = object : Migration(13, 14) {
+        private val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE txs ADD COLUMN rawText TEXT DEFAULT NULL"); db.execSQL("ALTER TABLE corrections ADD COLUMN rawText TEXT NOT NULL DEFAULT ''") } }
+        private val MIGRATION_14_15 = object : Migration(14, 15) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN isIgnored INTEGER NOT NULL DEFAULT 0") } }
+        private val MIGRATION_15_16 = object : Migration(15, 16) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE debts ADD COLUMN cardId TEXT DEFAULT NULL") } }
+        private val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE txs ADD COLUMN rawText TEXT DEFAULT NULL")
-                db.execSQL("ALTER TABLE corrections ADD COLUMN rawText TEXT NOT NULL DEFAULT ''")
-            }
-        }
-        private val MIGRATION_14_15 = object : Migration(14, 15) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE custom_keyword_rules ADD COLUMN isIgnored INTEGER NOT NULL DEFAULT 0")
-            }
-        }
-        // ★ FB-10: миграция 15→16 — добавляем cardId в debts
-        private val MIGRATION_15_16 = object : Migration(15, 16) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE debts ADD COLUMN cardId TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE txs ADD COLUMN linkedDebtId INTEGER DEFAULT NULL")
+                db.execSQL("INSERT OR IGNORE INTO categories (name, type) VALUES ('🤝 Долги', 'EXPENSE')")
+                db.execSQL("INSERT OR IGNORE INTO categories (name, type) VALUES ('🤝 Долги', 'INCOME')")
+                db.execSQL("INSERT OR IGNORE INTO categories (name, type) VALUES ('💸 Возврат долга', 'EXPENSE')")
+                db.execSQL("INSERT OR IGNORE INTO categories (name, type) VALUES ('💸 Возврат долга', 'INCOME')")
             }
         }
 
@@ -333,7 +269,7 @@ abstract class AppDb : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                         MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
-                        MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16
+                        MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17
                     )
                     .build()
                 INSTANCE = instance
