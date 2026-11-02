@@ -40,11 +40,8 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val pendingRecurring: StateFlow<List<RecurringEntity>> = combine(recurring, confirmations) { recs, confs ->
-        val today = LocalDate.now()
-        val todayStr = today.toString()
-        val monthStr = YearMonth.from(today).toString()
-        val daysInMonth = today.lengthOfMonth()
-
+        val today = LocalDate.now(); val todayStr = today.toString()
+        val monthStr = YearMonth.from(today).toString(); val daysInMonth = today.lengthOfMonth()
         recs.filter { r ->
             val effectiveDay = minOf(r.dayOfMonth, daysInMonth)
             if (effectiveDay > today.dayOfMonth) return@filter false
@@ -59,10 +56,7 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
 
     init {
         viewModelScope.launch {
-            seedDefaultCategories()
-            ensureCashAccount()
-            updateRates()
-            migrateLegacyAutoTxs()
+            seedDefaultCategories(); ensureCashAccount(); updateRates(); migrateLegacyAutoTxs()
         }
     }
 
@@ -72,13 +66,9 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             DEFAULT_INCOME_CATEGORIES.forEach { dao.upsertCategory(CategoryEntity(it, TxType.INCOME)) }
         }
     }
-
     private suspend fun ensureCashAccount() {
-        if (cards.first().none { it.id == "CASH" }) {
-            dao.upsertCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
-        }
+        if (cards.first().none { it.id == "CASH" }) dao.upsertCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
     }
-
     fun updateRates() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -88,74 +78,40 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
                 val response = connection.inputStream.bufferedReader().use { it.readText() }
                 val jsonArray = JSONArray(response)
                 for (i in 0 until jsonArray.length()) {
-                    val obj = jsonArray.getJSONObject(i)
-                    val ccy = obj.getString("Ccy")
-                    if (ccy in listOf("USD", "EUR", "RUB")) {
-                        val rate = obj.getString("Rate").toDouble()
-                        dao.upsertRate(ExchangeRateEntity(ccy, rate))
-                    }
+                    val obj = jsonArray.getJSONObject(i); val ccy = obj.getString("Ccy")
+                    if (ccy in listOf("USD", "EUR", "RUB")) dao.upsertRate(ExchangeRateEntity(ccy, obj.getString("Rate").toDouble()))
                 }
             } catch (e: Exception) { e.printStackTrace() }
         }
     }
-
     private suspend fun migrateLegacyAutoTxs() {
-        val recs = dao.getRecurringList()
-        val monthStr = YearMonth.now().toString()
-        recs.forEach { r ->
-            if (r.lastExecutedMonth == monthStr && dao.getConfirmation(r.id, monthStr) == null) {
-                dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = monthStr, status = "CONFIRMED", actualAmountMinor = r.amountMinor))
-            }
-        }
+        val recs = dao.getRecurringList(); val monthStr = YearMonth.now().toString()
+        recs.forEach { r -> if (r.lastExecutedMonth == monthStr && dao.getConfirmation(r.id, monthStr) == null) dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = monthStr, status = "CONFIRMED", actualAmountMinor = r.amountMinor)) }
     }
 
-    // ★ FB-20: Умное сохранение Tx с учетом категории "Долги"
     fun save(t: Tx) {
         viewModelScope.launch {
             if (t.category == "🤝 Долги") {
                 val personName = extractPersonName(t.description)
                 if (t.linkedDebtId == null) {
-                    // Создаем новый долг
                     val debtType = if (t.type == TxType.EXPENSE) DebtType.LENT else DebtType.BORROWED
-                    val debtId = dao.upsertDebt(DebtEntity(
-                        personName = personName,
-                        amountMinor = t.amountMinor,
-                        type = debtType,
-                        dateMillis = t.timestamp,
-                        description = t.description,
-                        currency = t.currency,
-                        cardId = t.cardId
-                    ))
+                    val debtId = dao.upsertDebt(DebtEntity(personName = personName, amountMinor = t.amountMinor, type = debtType, dateMillis = t.timestamp, description = t.description, currency = t.currency, cardId = t.cardId))
                     dao.upsert(t.copy(linkedDebtId = debtId))
                 } else {
-                    // Обновляем существующий долг, если он не оплачен
                     val debt = dao.getDebtById(t.linkedDebtId)
-                    if (debt != null && !debt.isPaid) {
-                        dao.upsertDebt(debt.copy(
-                            personName = personName,
-                            amountMinor = t.amountMinor,
-                            cardId = t.cardId,
-                            dateMillis = t.timestamp
-                        ))
-                    }
+                    if (debt != null && !debt.isPaid) dao.upsertDebt(debt.copy(personName = personName, amountMinor = t.amountMinor, cardId = t.cardId, dateMillis = t.timestamp))
                     dao.upsert(t)
                 }
-            } else {
-                dao.upsert(t)
-            }
+            } else dao.upsert(t)
         }
     }
-
     fun bulkSave(txs: List<Tx>) { viewModelScope.launch { dao.insertAll(txs) } }
 
-    // ★ FB-20: Удаление Tx с каскадным удалением неоплаченного долга
     fun delete(t: Tx) {
         viewModelScope.launch {
             if (t.linkedDebtId != null && t.category == "🤝 Долги") {
                 val debt = dao.getDebtById(t.linkedDebtId)
-                if (debt != null && !debt.isPaid) {
-                    dao.deleteDebt(debt)
-                }
+                if (debt != null && !debt.isPaid) dao.deleteDebt(debt)
             }
             dao.delete(t)
         }
@@ -201,7 +157,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         val tx = Tx(amountMinor = kotlin.math.abs(diffMinor), type = if (diffMinor > 0) TxType.INCOME else TxType.EXPENSE, cardId = cardId, description = "Корректировка баланса", category = "⚙️ Система", timestamp = System.currentTimeMillis(), source = "ADJUSTMENT")
         viewModelScope.launch { dao.upsert(tx) }
     }
-
     fun depositToGoal(goal: SavingsGoalEntity, cardId: String, amountMinor: Long) {
         viewModelScope.launch {
             val tx = Tx(amountMinor = amountMinor, type = TxType.TRANSFER, cardId = cardId, toCardId = "GOAL_${goal.id}", description = goal.name, category = "🏦 Копилка", timestamp = System.currentTimeMillis(), source = "SAVINGS")
@@ -210,11 +165,12 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long) {
+    // ★ FB-20 + совместимость: добавлен параметр skipRecurring (старый StandardForecastScreen его передает)
+    fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long, skipRecurring: Boolean = false) {
+        if (skipRecurring) { postponeRecurring(r); return }
         if (actualAmountMinor <= 0) return
         viewModelScope.launch {
-            val today = LocalDate.now()
-            val monthStr = YearMonth.from(today).toString()
+            val today = LocalDate.now(); val monthStr = YearMonth.from(today).toString()
             val existing = dao.getConfirmation(r.id, monthStr)
             if (existing?.status == "CONFIRMED") return@launch
             val effectiveDay = minOf(r.dayOfMonth, today.lengthOfMonth())
@@ -224,35 +180,20 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = monthStr, status = "CONFIRMED", actualAmountMinor = actualAmountMinor))
         }
     }
-
+    fun skipRecurring(r: RecurringEntity) = postponeRecurring(r)
     fun postponeRecurring(r: RecurringEntity) {
-        viewModelScope.launch {
-            dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = YearMonth.now().toString(), status = "POSTPONED", lastPostponedDate = LocalDate.now().toString()))
-        }
+        viewModelScope.launch { dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = YearMonth.now().toString(), status = "POSTPONED", lastPostponedDate = LocalDate.now().toString())) }
     }
 
-    // ★ FB-20: Возврат долга. Создает Tx с категорией "Возврат долга" и помечает долг оплаченным.
-    // Если BORROWED (я должен) → EXPENSE (я вернул)
-    // Если LENT (мне должны) → INCOME (мне вернули)
     fun repayDebt(debt: DebtEntity, cardId: String?, amountMinor: Long) {
         viewModelScope.launch {
             val txType = if (debt.type == DebtType.BORROWED) TxType.EXPENSE else TxType.INCOME
             val desc = if (debt.type == DebtType.BORROWED) "Вернул долг: ${debt.personName}" else "Мне вернули долг: ${debt.personName}"
-            val tx = Tx(
-                amountMinor = amountMinor,
-                type = txType,
-                cardId = cardId,
-                description = desc,
-                category = "💸 Возврат долга",
-                timestamp = System.currentTimeMillis(),
-                source = "DEBT_REPAY",
-                linkedDebtId = debt.id
-            )
+            val tx = Tx(amountMinor = amountMinor, type = txType, cardId = cardId, description = desc, category = "💸 Возврат долга", timestamp = System.currentTimeMillis(), source = "DEBT_REPAY", linkedDebtId = debt.id)
             dao.upsert(tx)
             dao.upsertDebt(debt.copy(isPaid = true))
         }
     }
-
     fun deleteDebt(debt: DebtEntity) {
         viewModelScope.launch {
             dao.deleteDebt(debt)
@@ -263,79 +204,49 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             }
         }
     }
-
     private fun extractPersonName(description: String): String {
-        // "Дал в долг: Иван" → "Иван"
-        // "Взял в долг: Иван" → "Иван"
         val colonIdx = description.indexOf(':')
         return if (colonIdx >= 0) description.substring(colonIdx + 1).trim() else description.trim()
     }
 
-    // === Custom rules ===
     fun saveCustomRule(keyword: String, category: String, type: TxType, isIgnored: Boolean = false) {
         if (keyword.isBlank()) return
-        viewModelScope.launch {
-            dao.upsertCustomRule(CustomKeywordRule(
-                keyword = keyword.trim().lowercase(),
-                category = if (isIgnored) "IGNORE" else category,
-                type = type,
-                isIgnored = isIgnored
-            ))
-        }
+        viewModelScope.launch { dao.upsertCustomRule(CustomKeywordRule(keyword = keyword.trim().lowercase(), category = if (isIgnored) "IGNORE" else category, type = type, isIgnored = isIgnored)) }
     }
     fun deleteCustomRule(rule: CustomKeywordRule) { viewModelScope.launch { dao.deleteCustomRule(rule) } }
     fun bumpRuleApplied(ruleId: Long) { viewModelScope.launch { dao.bumpCustomRuleApplied(ruleId, System.currentTimeMillis()) } }
     fun bumpRuleRejected(ruleId: Long) { viewModelScope.launch { dao.bumpCustomRuleRejected(ruleId) } }
     fun deleteUnusedRules() { viewModelScope.launch { dao.deleteUnusedCustomRules() } }
 
-    // === Corrections ===
     fun normalizeMerchantHint(s: String): String {
         if (s.isBlank()) return ""
         return s.lowercase().replace(Regex("[^a-zа-яё0-9\\s]"), " ").replace(Regex("\\s+"), " ").trim().take(30)
     }
-
     fun recordCorrection(source: String, merchantHint: String, field: String, parsedValue: String, correctedValue: String, rawText: String = "") {
         if (parsedValue == correctedValue) return
         if (merchantHint.isBlank()) return
         if (correctedValue.isBlank()) return
-        val hint = normalizeMerchantHint(merchantHint)
-        if (hint.isBlank()) return
+        val hint = normalizeMerchantHint(merchantHint); if (hint.isBlank()) return
         viewModelScope.launch {
             try {
                 val existing = dao.findCorrection(hint, field, parsedValue)
                 if (existing != null) {
-                    if (existing.rawText.isBlank() && rawText.isNotBlank()) {
-                        dao.upsertCorrection(existing.copy(rawText = rawText, appliedCount = existing.appliedCount + 1, lastSeenAt = System.currentTimeMillis()))
-                    } else {
-                        dao.bumpCorrection(existing.id, System.currentTimeMillis())
-                    }
-                } else {
-                    dao.upsertCorrection(CorrectionEntity(source = source, merchantHint = hint, field = field, parsedValue = parsedValue, correctedValue = correctedValue, rawText = rawText))
-                }
+                    if (existing.rawText.isBlank() && rawText.isNotBlank()) dao.upsertCorrection(existing.copy(rawText = rawText, appliedCount = existing.appliedCount + 1, lastSeenAt = System.currentTimeMillis()))
+                    else dao.bumpCorrection(existing.id, System.currentTimeMillis())
+                } else dao.upsertCorrection(CorrectionEntity(source = source, merchantHint = hint, field = field, parsedValue = parsedValue, correctedValue = correctedValue, rawText = rawText))
             } catch (e: Exception) { e.printStackTrace() }
         }
     }
-
     fun deleteCorrection(c: CorrectionEntity) { viewModelScope.launch { dao.deleteCorrection(c) } }
     fun clearCorrections() { viewModelScope.launch { dao.clearCorrections() } }
 
     private suspend fun buildBackupJson(): String {
-        val allTx = allTxs.first()
-        val allCards = cards.first()
-        val allBudgets = budgets.first()
-        val allRecurring = dao.getRecurringList()
-        val allCats = dao.getCategoriesList()
-        val allGoals = goals.first()
-        val allPlans = dao.getPlanItemsList()
-        val allForecasts = dao.getForecastsList()
-        val allForecastItems = dao.getAllForecastItems()
-        val allForecastDeposits = dao.getAllForecastDeposits()
-        val allDepositOps = dao.getAllDepositOps()
-        val allConfirmations = dao.getAllConfirmations()
-        val allDebts = dao.getAllDebts()
-        val allRules = dao.getAllCustomRules()
-        val allCorrections = dao.getAllCorrections()
-
+        val allTx = allTxs.first(); val allCards = cards.first(); val allBudgets = budgets.first()
+        val allRecurring = dao.getRecurringList(); val allCats = dao.getCategoriesList(); val allGoals = goals.first()
+        val allPlans = dao.getPlanItemsList(); val allForecasts = dao.getForecastsList()
+        val allForecastItems = dao.getAllForecastItems(); val allForecastDeposits = dao.getAllForecastDeposits()
+        val allDepositOps = dao.getAllDepositOps(); val allConfirmations = dao.getAllConfirmations()
+        val allDebts = dao.getAllDebts(); val allRules = dao.getAllCustomRules(); val allCorrections = dao.getAllCorrections()
         val root = JSONObject()
 
         val txsArray = JSONArray()
@@ -345,15 +256,15 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             put("toAmountMinor", t.toAmountMinor ?: JSONObject.NULL)
             put("description", t.description); put("category", t.category)
             put("timestamp", t.timestamp); put("source", t.source); put("currency", t.currency)
-            put("photoPath", t.photoPath ?: JSONObject.NULL)
-            put("rawText", t.rawText ?: JSONObject.NULL)
-            put("linkedDebtId", t.linkedDebtId ?: JSONObject.NULL) // ★ FB-20
+            put("photoPath", t.photoPath ?: JSONObject.NULL); put("rawText", t.rawText ?: JSONObject.NULL)
+            put("linkedDebtId", t.linkedDebtId ?: JSONObject.NULL)
         }) }
         root.put("txs", txsArray)
 
         val debtsArray = JSONArray()
         allDebts.forEach { d -> debtsArray.put(JSONObject().apply {
-            put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name); put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency)
+            put("id", d.id); put("personName", d.personName); put("amountMinor", d.amountMinor); put("type", d.type.name)
+            put("dateMillis", d.dateMillis); put("isPaid", d.isPaid); put("description", d.description); put("currency", d.currency)
             put("cardId", d.cardId ?: JSONObject.NULL)
         }) }
         root.put("debts", debtsArray)
@@ -361,8 +272,8 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         val rulesArray = JSONArray()
         allRules.forEach { r -> rulesArray.put(JSONObject().apply {
             put("id", r.id); put("keyword", r.keyword); put("category", r.category); put("type", r.type.name)
-            put("appliedCount", r.appliedCount); put("lastAppliedAt", r.lastAppliedAt ?: JSONObject.NULL); put("rejectedCount", r.rejectedCount)
-            put("isIgnored", r.isIgnored)
+            put("appliedCount", r.appliedCount); put("lastAppliedAt", r.lastAppliedAt ?: JSONObject.NULL)
+            put("rejectedCount", r.rejectedCount); put("isIgnored", r.isIgnored)
         }) }
         root.put("custom_rules", rulesArray)
 
@@ -434,161 +345,109 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
 
     private suspend fun applyBackupJson(root: JSONObject) {
         val txsList = mutableListOf<Tx>()
-        root.optJSONArray("txs")?.let { txsArray ->
-            for (i in 0 until txsArray.length()) {
-                val o = txsArray.getJSONObject(i)
-                txsList.add(Tx(
-                    id = o.optLong("id"),
-                    amountMinor = o.getLong("amountMinor"),
-                    type = TxType.valueOf(o.getString("type")),
-                    cardId = if (o.isNull("cardId")) null else o.getString("cardId"),
-                    toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"),
-                    toAmountMinor = if (o.isNull("toAmountMinor")) null else o.optLong("toAmountMinor"),
-                    description = o.optString("description"),
-                    category = o.optString("category"),
-                    timestamp = o.getLong("timestamp"),
-                    source = o.optString("source"),
-                    currency = o.optString("currency", "UZS"),
-                    photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"),
-                    rawText = if (o.isNull("rawText")) null else o.optString("rawText").takeIf { it.isNotBlank() },
-                    linkedDebtId = if (o.isNull("linkedDebtId")) null else o.optLong("linkedDebtId") // ★ FB-20
-                ))
-            }
-        }
+        root.optJSONArray("txs")?.let { txsArray -> for (i in 0 until txsArray.length()) { val o = txsArray.getJSONObject(i)
+            txsList.add(Tx(id = o.optLong("id"), amountMinor = o.getLong("amountMinor"), type = TxType.valueOf(o.getString("type")),
+                cardId = if (o.isNull("cardId")) null else o.getString("cardId"),
+                toCardId = if (o.isNull("toCardId")) null else o.optString("toCardId"),
+                toAmountMinor = if (o.isNull("toAmountMinor")) null else o.optLong("toAmountMinor"),
+                description = o.optString("description"), category = o.optString("category"), timestamp = o.getLong("timestamp"),
+                source = o.optString("source"), currency = o.optString("currency", "UZS"),
+                photoPath = if (o.isNull("photoPath")) null else o.getString("photoPath"),
+                rawText = if (o.isNull("rawText")) null else o.optString("rawText").takeIf { it.isNotBlank() },
+                linkedDebtId = if (o.isNull("linkedDebtId")) null else o.optLong("linkedDebtId")))
+        } }
 
         val debtsList = mutableListOf<DebtEntity>()
-        root.optJSONArray("debts")?.let { debtsArray ->
-            for (i in 0 until debtsArray.length()) {
-                val o = debtsArray.getJSONObject(i)
-                debtsList.add(DebtEntity(
-                    id = o.optLong("id"), personName = o.getString("personName"), amountMinor = o.getLong("amountMinor"),
-                    type = DebtType.valueOf(o.getString("type")), dateMillis = o.getLong("dateMillis"),
-                    isPaid = o.optBoolean("isPaid"), description = o.optString("description"),
-                    currency = o.optString("currency", "UZS"),
-                    cardId = if (o.isNull("cardId")) null else o.optString("cardId")
-                ))
-            }
-        }
+        root.optJSONArray("debts")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            debtsList.add(DebtEntity(id = o.optLong("id"), personName = o.getString("personName"), amountMinor = o.getLong("amountMinor"),
+                type = DebtType.valueOf(o.getString("type")), dateMillis = o.getLong("dateMillis"), isPaid = o.optBoolean("isPaid"),
+                description = o.optString("description"), currency = o.optString("currency", "UZS"),
+                cardId = if (o.isNull("cardId")) null else o.optString("cardId")))
+        } }
 
         val rulesList = mutableListOf<CustomKeywordRule>()
-        root.optJSONArray("custom_rules")?.let { rulesArray ->
-            for (i in 0 until rulesArray.length()) {
-                val o = rulesArray.getJSONObject(i)
-                rulesList.add(CustomKeywordRule(
-                    id = o.optLong("id"), keyword = o.getString("keyword"), category = o.getString("category"),
-                    type = TxType.valueOf(o.getString("type")), appliedCount = o.optInt("appliedCount", 0),
-                    lastAppliedAt = if (o.isNull("lastAppliedAt")) null else o.optLong("lastAppliedAt"),
-                    rejectedCount = o.optInt("rejectedCount", 0), isIgnored = o.optBoolean("isIgnored", false)
-                ))
-            }
-        }
+        root.optJSONArray("custom_rules")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            rulesList.add(CustomKeywordRule(id = o.optLong("id"), keyword = o.getString("keyword"), category = o.getString("category"),
+                type = TxType.valueOf(o.getString("type")), appliedCount = o.optInt("appliedCount", 0),
+                lastAppliedAt = if (o.isNull("lastAppliedAt")) null else o.optLong("lastAppliedAt"),
+                rejectedCount = o.optInt("rejectedCount", 0), isIgnored = o.optBoolean("isIgnored", false)))
+        } }
 
         val correctionsList = mutableListOf<CorrectionEntity>()
-        root.optJSONArray("corrections")?.let { corrArray ->
-            for (i in 0 until corrArray.length()) {
-                val o = corrArray.getJSONObject(i)
-                correctionsList.add(CorrectionEntity(
-                    id = o.optLong("id"), source = o.optString("source", "MANUAL"), merchantHint = o.getString("merchantHint"),
-                    field = o.getString("field"), parsedValue = o.getString("parsedValue"), correctedValue = o.getString("correctedValue"),
-                    appliedCount = o.optInt("appliedCount", 1), lastSeenAt = o.optLong("lastSeenAt", System.currentTimeMillis()),
-                    createdAt = o.optLong("createdAt", System.currentTimeMillis()), rawText = o.optString("rawText", "")
-                ))
-            }
-        }
+        root.optJSONArray("corrections")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            correctionsList.add(CorrectionEntity(id = o.optLong("id"), source = o.optString("source", "MANUAL"), merchantHint = o.getString("merchantHint"),
+                field = o.getString("field"), parsedValue = o.getString("parsedValue"), correctedValue = o.getString("correctedValue"),
+                appliedCount = o.optInt("appliedCount", 1), lastSeenAt = o.optLong("lastSeenAt", System.currentTimeMillis()),
+                createdAt = o.optLong("createdAt", System.currentTimeMillis()), rawText = o.optString("rawText", "")))
+        } }
 
         val cardsList = mutableListOf<CardEntity>()
-        root.optJSONArray("cards")?.let { cardsArray ->
-            for (i in 0 until cardsArray.length()) {
-                val o = cardsArray.getJSONObject(i)
-                cardsList.add(CardEntity(o.getString("id"), o.getString("last4"), o.getString("name"), o.getString("currency"), o.getLong("initialBalanceMinor")))
-            }
-        }
+        root.optJSONArray("cards")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            cardsList.add(CardEntity(o.getString("id"), o.getString("last4"), o.getString("name"), o.getString("currency"), o.getLong("initialBalanceMinor")))
+        } }
 
         val budgetsList = mutableListOf<BudgetEntity>()
-        root.optJSONArray("budgets")?.let { budgetsArray ->
-            for (i in 0 until budgetsArray.length()) {
-                val o = budgetsArray.getJSONObject(i)
-                budgetsList.add(BudgetEntity(o.getString("category"), o.getLong("limitMinor")))
-            }
-        }
+        root.optJSONArray("budgets")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); budgetsList.add(BudgetEntity(o.getString("category"), o.getLong("limitMinor"))) } }
 
         val recurringList = mutableListOf<RecurringEntity>()
-        root.optJSONArray("recurring")?.let { recurringArray ->
-            for (i in 0 until recurringArray.length()) {
-                val o = recurringArray.getJSONObject(i)
-                recurringList.add(RecurringEntity(o.optLong("id"), o.getLong("amountMinor"), TxType.valueOf(o.getString("type")), if (o.isNull("cardId")) null else o.getString("cardId"), o.optString("description"), o.optString("category"), o.getInt("dayOfMonth"), o.optString("lastExecutedMonth")))
-            }
-        }
+        root.optJSONArray("recurring")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            recurringList.add(RecurringEntity(o.optLong("id"), o.getLong("amountMinor"), TxType.valueOf(o.getString("type")),
+                if (o.isNull("cardId")) null else o.getString("cardId"), o.optString("description"), o.optString("category"),
+                o.getInt("dayOfMonth"), o.optString("lastExecutedMonth")))
+        } }
 
         val confirmationsList = mutableListOf<RecurringConfirmationEntity>()
-        root.optJSONArray("recurring_confirmations")?.let { confirmationsArray ->
-            for (i in 0 until confirmationsArray.length()) {
-                val o = confirmationsArray.getJSONObject(i)
-                confirmationsList.add(RecurringConfirmationEntity(o.getLong("recurringId"), o.getString("month"), o.getString("status"), if (o.isNull("actualAmountMinor")) null else o.optLong("actualAmountMinor"), if (o.isNull("lastPostponedDate")) null else o.optString("lastPostponedDate")))
-            }
-        }
+        root.optJSONArray("recurring_confirmations")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            confirmationsList.add(RecurringConfirmationEntity(o.getLong("recurringId"), o.getString("month"), o.getString("status"),
+                if (o.isNull("actualAmountMinor")) null else o.optLong("actualAmountMinor"),
+                if (o.isNull("lastPostponedDate")) null else o.optString("lastPostponedDate")))
+        } }
 
         val catsList = mutableListOf<CategoryEntity>()
-        root.optJSONArray("categories")?.let { catsArray ->
-            for (i in 0 until catsArray.length()) {
-                val o = catsArray.getJSONObject(i)
-                catsList.add(CategoryEntity(o.getString("name"), TxType.valueOf(o.getString("type"))))
-            }
-        }
+        root.optJSONArray("categories")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); catsList.add(CategoryEntity(o.getString("name"), TxType.valueOf(o.getString("type")))) } }
 
         val goalsList = mutableListOf<SavingsGoalEntity>()
-        root.optJSONArray("goals")?.let { goalsArray ->
-            for (i in 0 until goalsArray.length()) {
-                val o = goalsArray.getJSONObject(i)
-                goalsList.add(SavingsGoalEntity(o.optLong("id"), o.getString("name"), o.getLong("targetAmountMinor"), o.getLong("currentAmountMinor")))
-            }
-        }
+        root.optJSONArray("goals")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            goalsList.add(SavingsGoalEntity(o.optLong("id"), o.getString("name"), o.getLong("targetAmountMinor"), o.getLong("currentAmountMinor")))
+        } }
 
         val plansList = mutableListOf<PlanItemEntity>()
-        root.optJSONArray("plan_items")?.let { plansArray ->
-            for (i in 0 until plansArray.length()) {
-                val o = plansArray.getJSONObject(i)
-                plansList.add(PlanItemEntity(o.optLong("id"), o.getString("name"), TxType.valueOf(o.getString("type")), o.getLong("amountMinor"), o.getString("startMonth"), o.getString("endMonth"), o.optBoolean("isFixed", true)))
-            }
-        }
+        root.optJSONArray("plan_items")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            plansList.add(PlanItemEntity(o.optLong("id"), o.getString("name"), TxType.valueOf(o.getString("type")), o.getLong("amountMinor"),
+                o.getString("startMonth"), o.getString("endMonth"), o.optBoolean("isFixed", true)))
+        } }
 
         val forecastList = mutableListOf<ForecastPlanEntity>()
-        root.optJSONArray("forecasts")?.let { forecastArray ->
-            for (i in 0 until forecastArray.length()) {
-                val o = forecastArray.getJSONObject(i)
-                forecastList.add(ForecastPlanEntity(o.optLong("id"), o.getString("name"), o.getInt("months"), o.getString("startMonth"), o.optLong("createdAt", System.currentTimeMillis())))
-            }
-        }
+        root.optJSONArray("forecasts")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            forecastList.add(ForecastPlanEntity(o.optLong("id"), o.getString("name"), o.getInt("months"), o.getString("startMonth"), o.optLong("createdAt", System.currentTimeMillis())))
+        } }
 
         val fiList = mutableListOf<ForecastItemEntity>()
-        root.optJSONArray("forecast_items")?.let { fiArray ->
-            for (i in 0 until fiArray.length()) {
-                val o = fiArray.getJSONObject(i)
-                fiList.add(ForecastItemEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), TxType.valueOf(o.getString("type")), o.getLong("amountMinor"), o.optString("currency", "UZS"), if (o.isNull("originalAmountMinor")) null else o.optLong("originalAmountMinor"), o.getString("startMonth"), o.getString("endMonth"), o.optBoolean("isFixed", true)))
-            }
-        }
+        root.optJSONArray("forecast_items")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            fiList.add(ForecastItemEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), TxType.valueOf(o.getString("type")),
+                o.getLong("amountMinor"), o.optString("currency", "UZS"),
+                if (o.isNull("originalAmountMinor")) null else o.optLong("originalAmountMinor"),
+                o.getString("startMonth"), o.getString("endMonth"), o.optBoolean("isFixed", true)))
+        } }
 
         val fdList = mutableListOf<ForecastDepositEntity>()
-        root.optJSONArray("forecast_deposits")?.let { fdArray ->
-            for (i in 0 until fdArray.length()) {
-                val o = fdArray.getJSONObject(i)
-                val cap = try { CapitalizationType.valueOf(o.optString("capitalization", "MONTHLY")) } catch (e: Exception) { CapitalizationType.MONTHLY }
-                fdList.add(ForecastDepositEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), o.getLong("initialAmountMinor"), o.optString("currency", "UZS"), if (o.isNull("originalInitialAmountMinor")) null else o.optLong("originalInitialAmountMinor"), o.getDouble("annualRatePercent"), o.getString("startMonth"), o.getString("endMonth"), o.optLong("monthlyContributionMinor", 0L), o.optLong("monthlyWithdrawalMinor", 0L), cap))
-            }
-        }
+        root.optJSONArray("forecast_deposits")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            val cap = try { CapitalizationType.valueOf(o.optString("capitalization", "MONTHLY")) } catch (e: Exception) { CapitalizationType.MONTHLY }
+            fdList.add(ForecastDepositEntity(o.optLong("id"), o.getLong("forecastId"), o.getString("name"), o.getLong("initialAmountMinor"),
+                o.optString("currency", "UZS"),
+                if (o.isNull("originalInitialAmountMinor")) null else o.optLong("originalInitialAmountMinor"),
+                o.getDouble("annualRatePercent"), o.getString("startMonth"), o.getString("endMonth"),
+                o.optLong("monthlyContributionMinor", 0L), o.optLong("monthlyWithdrawalMinor", 0L), cap))
+        } }
 
         val opsList = mutableListOf<ForecastDepositOpEntity>()
-        root.optJSONArray("forecast_deposit_ops")?.let { opsArray ->
-            for (i in 0 until opsArray.length()) {
-                val o = opsArray.getJSONObject(i)
-                opsList.add(ForecastDepositOpEntity(o.optLong("id"), o.getLong("depositId"), o.getString("month"), o.getLong("amountMinor"), o.optString("description")))
-            }
-        }
+        root.optJSONArray("forecast_deposit_ops")?.let { arr -> for (i in 0 until arr.length()) { val o = arr.getJSONObject(i)
+            opsList.add(ForecastDepositOpEntity(o.optLong("id"), o.getLong("depositId"), o.getString("month"), o.getLong("amountMinor"), o.optString("description")))
+        } }
 
         db.withTransaction {
             dao.clearTxs(); dao.clearDebts(); dao.clearCustomRules(); dao.clearCorrections(); dao.clearCards(); dao.clearBudgets(); dao.clearRecurring()
             dao.clearConfirmations(); dao.clearCategories(); dao.clearGoals(); dao.clearPlanItems(); dao.clearForecasts()
-
             dao.insertAll(txsList)
             debtsList.forEach { dao.upsertDebt(it) }
             rulesList.forEach { dao.upsertCustomRule(it) }
@@ -611,22 +470,14 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         viewModelScope.launch {
             try {
                 val jsonString = withContext(Dispatchers.Default) { BackupEncryption.decrypt(data, password) }
-                val root = JSONObject(jsonString)
-                applyBackupJson(root)
-                ensureCashAccount()
-                onResult(true)
+                applyBackupJson(JSONObject(jsonString)); ensureCashAccount(); onResult(true)
             } catch (e: Exception) { e.printStackTrace(); onResult(false) }
         }
     }
-
     fun restoreBackupLegacy(jsonString: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
-            try {
-                val root = JSONObject(jsonString)
-                applyBackupJson(root)
-                ensureCashAccount()
-                onResult(true)
-            } catch (e: Exception) { e.printStackTrace(); onResult(false) }
+            try { applyBackupJson(JSONObject(jsonString)); ensureCashAccount(); onResult(true) }
+            catch (e: Exception) { e.printStackTrace(); onResult(false) }
         }
     }
 }
