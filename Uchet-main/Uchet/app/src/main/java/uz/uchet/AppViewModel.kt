@@ -56,7 +56,11 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
 
     init {
         viewModelScope.launch {
-            seedDefaultCategories(); ensureCashAccount(); updateRates(); migrateLegacyAutoTxs()
+            seedDefaultCategories()
+            ensureDebtCategories()   // ★ ДОБАВЛЕНО: гарантированно досоздаёт "🤝 Долги" и "💸 Возврат долга"
+            ensureCashAccount()
+            updateRates()
+            migrateLegacyAutoTxs()
         }
     }
 
@@ -66,6 +70,22 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
             DEFAULT_INCOME_CATEGORIES.forEach { dao.upsertCategory(CategoryEntity(it, TxType.INCOME)) }
         }
     }
+
+    // ★ ДОБАВЛЕНО: для существующих установок и на случай, если пользователь удалил категорию вручную
+    private suspend fun ensureDebtCategories() {
+        val existing = dao.getCategoriesList()
+        val debtName = "🤝 Долги"
+        val repayName = "💸 Возврат долга"
+        if (existing.none { it.name == debtName && it.type == TxType.EXPENSE })
+            dao.upsertCategory(CategoryEntity(debtName, TxType.EXPENSE))
+        if (existing.none { it.name == debtName && it.type == TxType.INCOME })
+            dao.upsertCategory(CategoryEntity(debtName, TxType.INCOME))
+        if (existing.none { it.name == repayName && it.type == TxType.EXPENSE })
+            dao.upsertCategory(CategoryEntity(repayName, TxType.EXPENSE))
+        if (existing.none { it.name == repayName && it.type == TxType.INCOME })
+            dao.upsertCategory(CategoryEntity(repayName, TxType.INCOME))
+    }
+
     private suspend fun ensureCashAccount() {
         if (cards.first().none { it.id == "CASH" }) dao.upsertCard(CardEntity(id = "CASH", last4 = "CASH", name = "Наличные", currency = "UZS", initialBalanceMinor = 0))
     }
@@ -165,7 +185,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         }
     }
 
-    // ★ FB-20 + совместимость: добавлен параметр skipRecurring (старый StandardForecastScreen его передает)
     fun confirmRecurring(r: RecurringEntity, actualAmountMinor: Long, skipRecurring: Boolean = false) {
         if (skipRecurring) { postponeRecurring(r); return }
         if (actualAmountMinor <= 0) return
@@ -185,7 +204,6 @@ class VM(app: Application, private val db: AppDb, private val dao: AppDao) : And
         viewModelScope.launch { dao.upsertConfirmation(RecurringConfirmationEntity(recurringId = r.id, month = YearMonth.now().toString(), status = "POSTPONED", lastPostponedDate = LocalDate.now().toString())) }
     }
 
-    // ★ ДОБАВЛЕНО: сохранение долга из DebtManagerSheet
     fun saveDebt(debt: DebtEntity) {
         viewModelScope.launch { dao.upsertDebt(debt) }
     }
