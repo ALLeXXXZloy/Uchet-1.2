@@ -27,7 +27,13 @@ import java.time.ZoneId
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AnalyticsScreen(txs: List<Tx>, allTxs: List<Tx>, currentLang: AppLanguage, onBack: () -> Unit) {
+fun AnalyticsScreen(
+    txs: List<Tx>, 
+    allTxs: List<Tx>, 
+    currentLang: AppLanguage, 
+    paddingValues: PaddingValues,
+    onBack: () -> Unit
+) {
     val t = { key: String -> Translations.t(key, currentLang) }
     var selectedType by remember { mutableStateOf(TxType.EXPENSE) }
 
@@ -39,15 +45,18 @@ fun AnalyticsScreen(txs: List<Tx>, allTxs: List<Tx>, currentLang: AppLanguage, o
     val filteredAllTxs = allTxs.filter { it.type == selectedType }
     val byCategory = filteredTxs.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(t("analytics")) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) } }
-            )
+    // Используем Column вместо Scaffold, чтобы избежать наложения
+    Column(Modifier.padding(paddingValues).fillMaxSize().verticalScroll(rememberScrollState())) {
+        // Верхняя панель теперь просто Row, так как глобальный TopBar не показывается на этой вкладке
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, t("back")) }
+            Text(t("analytics"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
-    ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             // Сводка
             Card(
                 Modifier.fillMaxWidth(),
@@ -130,6 +139,7 @@ fun AnalyticsScreen(txs: List<Tx>, allTxs: List<Tx>, currentLang: AppLanguage, o
                     CategoryPieChart(byCategory, currentLang)
                 }
             }
+            Spacer(Modifier.height(80.dp)) // Отступ снизу, чтобы последний элемент не прилипал к FAB/панели
         }
     }
 }
