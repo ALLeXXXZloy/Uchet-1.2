@@ -15,19 +15,19 @@ class MerchantCategorizerTest {
     @Test
     fun `standard rule detects korzinka`() {
         val result = MerchantCategorizer.getCategory("Korzinka", categories, emptyList(), TxType.EXPENSE)
-        assertEquals("🛒 Покупки", result)
+        assertEquals("🛒 Покупки", result?.category)
     }
 
     @Test
     fun `standard rule detects kfc`() {
         val result = MerchantCategorizer.getCategory("KFC", categories, emptyList(), TxType.EXPENSE)
-        assertEquals("🍔 Еда", result)
+        assertEquals("🍔 Еда", result?.category)
     }
 
     @Test
     fun `standard rule detects apteka`() {
         val result = MerchantCategorizer.getCategory("Apteka 24", categories, emptyList(), TxType.EXPENSE)
-        assertEquals("💊 Здоровье", result)
+        assertEquals("💊 Здоровье", result?.category)
     }
 
     @Test
@@ -56,7 +56,7 @@ class MerchantCategorizerTest {
             CustomKeywordRule(keyword = "korzinka", category = "🍔 Еда", type = TxType.EXPENSE)
         )
         val result = MerchantCategorizer.getCategory("Korzinka", categories, rules, TxType.EXPENSE)
-        assertEquals("🍔 Еда", result)
+        assertEquals("🍔 Еда", result?.category)
     }
 
     @Test
@@ -67,7 +67,7 @@ class MerchantCategorizerTest {
         )
         val result = MerchantCategorizer.getCategory("UZUM MARKET", categories, rules, TxType.EXPENSE)
         // правило не применилось, сработало стандартное "uzum" → 🛒 Покупки
-        assertEquals("🛒 Покупки", result)
+        assertEquals("🛒 Покупки", result?.category)
     }
 
     // ============================================================
@@ -81,7 +81,7 @@ class MerchantCategorizerTest {
             CustomKeywordRule(keyword = "uzum market", category = "🍔 Еда", type = TxType.EXPENSE)
         )
         val result = MerchantCategorizer.getCategory("UZUM MARKET", categories, rules, TxType.EXPENSE)
-        assertEquals("🍔 Еда", result)
+        assertEquals("🍔 Еда", result?.category)
     }
 
     // ============================================================
@@ -95,7 +95,7 @@ class MerchantCategorizerTest {
         )
         val result = MerchantCategorizer.getCategory("Korzinka", categories, rules, TxType.EXPENSE)
         // правило про KFC не сработало, стандартное правило про korzinka
-        assertEquals("🛒 Покупки", result)
+        assertEquals("🛒 Покупки", result?.category)
     }
 
     // ============================================================
@@ -110,7 +110,7 @@ class MerchantCategorizerTest {
         )
         val result = MerchantCategorizer.getCategory("Korzinka", categories, rules, TxType.EXPENSE)
         // getCategory возвращает rule.category как fallback
-        assertEquals("🎁 Подарки", result)
+        assertEquals("🎁 Подарки", result?.category)
     }
 
     @Test
