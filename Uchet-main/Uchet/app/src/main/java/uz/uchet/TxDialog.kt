@@ -36,8 +36,8 @@ import java.io.File
 import java.math.BigDecimal
 import java.math.RoundingMode
 
-private const val CATEGORY_DEBT = "🤝 Долги"
-private const val CATEGORY_REPAY = "💸 Возврат долга"
+// ★ FIX-A: CATEGORY_DEBT и CATEGORY_REPAY теперь живут в Constants.kt как публичные.
+// Приватные дубликаты удалены, чтобы избежать "Conflicting declarations".
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
