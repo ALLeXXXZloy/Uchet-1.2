@@ -149,6 +149,10 @@ fun App(
 
     var showMenu by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
+    
+    // ★ T-006: диалог выбора периода сканирования SMS
+    var showSmsPeriodDialog by remember { mutableStateOf(false) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val t = { key: String -> Translations.t(key, currentLang.value) }
@@ -456,13 +460,10 @@ fun App(
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text(t("scan_sms")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
+                                // ★ T-006: вместо немедленного сканирования открываем диалог выбора периода
+                                DropdownMenuItem(text = { Text(t("scan_sms_period_title")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
                                     showMenu = false
-                                    scope.launch {
-                                        val found = withContext(Dispatchers.IO) { SmsParser.scanInbox(context, allTxs, customRules) }
-                                        if (found.isNotEmpty()) { reviewTxs = found }
-                                        else snackbarHostState.showSnackbar(t("new_sms_not_found"))
-                                    }
+                                    showSmsPeriodDialog = true
                                 })
                                 DropdownMenuItem(text = { Text(t("import_csv")) }, leadingIcon = { Icon(Icons.Default.FileDownload, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) })
                                 DropdownMenuItem(text = { Text(t("import_pdf")) }, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) }, onClick = { showMenu = false; fileImportLauncher.launch(arrayOf("application/pdf")) })
@@ -616,6 +617,51 @@ fun App(
             text = { Text("${t("bulk_import_done")} $bulkResultCount ${t("bulk_import_suffix")}") },
             confirmButton = { TextButton(onClick = { showBulkResult = false; currentTab = 0 }) { Text(t("open_for_review"), color = GREEN) } },
             dismissButton = { TextButton(onClick = { showBulkResult = false }) { Text(t("close")) } }
+        )
+    }
+
+    // ★ T-006: диалог выбора периода сканирования SMS
+    if (showSmsPeriodDialog) {
+        AlertDialog(
+            onDismissRequest = { showSmsPeriodDialog = false },
+            title = { Text(t("scan_sms_period_title")) },
+            text = {
+                Column {
+                    Text(t("scan_sms_period_hint"), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(16.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(1, 3, 7).forEach { d ->
+                            OutlinedButton(
+                                onClick = {
+                                    showSmsPeriodDialog = false
+                                    scope.launch {
+                                        val found = withContext(Dispatchers.IO) { SmsParser.scanInbox(context, allTxs, customRules, daysBack = d) }
+                                        if (found.isNotEmpty()) { reviewTxs = found } else snackbarHostState.showSnackbar(t("new_sms_not_found"))
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("$d ${t("days_suffix")}") }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(14, 31).forEach { d ->
+                            OutlinedButton(
+                                onClick = {
+                                    showSmsPeriodDialog = false
+                                    scope.launch {
+                                        val found = withContext(Dispatchers.IO) { SmsParser.scanInbox(context, allTxs, customRules, daysBack = d) }
+                                        if (found.isNotEmpty()) { reviewTxs = found } else snackbarHostState.showSnackbar(t("new_sms_not_found"))
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("$d ${t("days_suffix")}") }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showSmsPeriodDialog = false }) { Text(t("cancel")) } }
         )
     }
 
