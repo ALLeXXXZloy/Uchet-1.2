@@ -207,6 +207,9 @@ object Translations {
             "scan_sms_period_title" to "Сканировать СМС за период",
             "scan_sms_period_hint" to "Выберите период, за который нужно найти транзакции:",
             "days_suffix" to "дн.",
+            // --- T-004/T-005: Аналитика ---
+            "overall" to "Общая",
+            "daily_dynamics" to "Динамика по дням",
             // --- Новые ключи для очистки хардкода ---
             "pdf_saved" to "PDF отчет сохранен",
             "imported_count" to "Импортировано: %s",
@@ -449,6 +452,9 @@ object Translations {
             "scan_sms_period_title" to "SMSni davr bo'yicha skanerlash",
             "scan_sms_period_hint" to "Operatsiyalarni qaysi davr uchun topish kerakligini tanlang:",
             "days_suffix" to "kun",
+            // --- T-004/T-005: Аналитика ---
+            "overall" to "Umumiy",
+            "daily_dynamics" to "Kunlik dinamika",
             // --- Новые ключи для очистки хардкода ---
             "pdf_saved" to "PDF hisobot saqlandi",
             "imported_count" to "Import qilindi: %s",
@@ -691,6 +697,9 @@ object Translations {
             "scan_sms_period_title" to "Scan SMS for period",
             "scan_sms_period_hint" to "Select the period to search for transactions:",
             "days_suffix" to "days",
+            // --- T-004/T-005: Analytics ---
+            "overall" to "Overall",
+            "daily_dynamics" to "Daily dynamics",
             // --- New keys for hardcode cleanup ---
             "pdf_saved" to "PDF report saved",
             "imported_count" to "Imported: %s",
@@ -933,6 +942,9 @@ object Translations {
             "scan_sms_period_title" to "Сканкунии СМС барои давра",
             "scan_sms_period_hint" to "Давраеро интихоб кунед, ки барои он транзаксияҳоро ҷустуҷӯ кунед:",
             "days_suffix" to "рӯз",
+            // --- T-004/T-005: Analytics ---
+            "overall" to "Умумӣ",
+            "daily_dynamics" to "Динамикаи рӯзона",
             // --- New keys for hardcode cleanup ---
             "pdf_saved" to "Ҳисоти PDF нигоҳ дошта шуд",
             "imported_count" to "Ворид карда шуд: %s",
@@ -1175,6 +1187,9 @@ object Translations {
             "scan_sms_period_title" to "SMS ti dáwir boyınsha skanerlew",
             "scan_sms_period_hint" to "Operatsiyalardı qaysı dáwir ushın tabıw kerekligin saylań:",
             "days_suffix" to "kún",
+            // --- T-004/T-005: Analytics ---
+            "overall" to "Ulıwma",
+            "daily_dynamics" to "Kúnlik dinamika",
             // --- New keys for hardcode cleanup ---
             "pdf_saved" to "PDF esabat saqlandı",
             "imported_count" to "Import qılındı: %s",
@@ -1417,6 +1432,9 @@ object Translations {
             "scan_sms_period_title" to "СМС-ті кезең бойынша сканерлеу",
             "scan_sms_period_hint" to "Транзакцияларды қай кезең үшін табу керектігін таңдаңыз:",
             "days_suffix" to "күн",
+            // --- T-004/T-005: Analytics ---
+            "overall" to "Жалпы",
+            "daily_dynamics" to "Күнделікті динамика",
             // --- New keys for hardcode cleanup ---
             "pdf_saved" to "PDF есеп сақталды",
             "imported_count" to "Импортталды: %s",
