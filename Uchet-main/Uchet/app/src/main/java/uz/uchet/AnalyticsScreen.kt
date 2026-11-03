@@ -50,13 +50,15 @@ fun AnalyticsScreen(
     
     var selectedMode by remember { mutableStateOf(AnalyticsMode.EXPENSE) }
 
-    val incomeTotal = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-    val expenseTotal = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
+    // ★ ИСПРАВЛЕНО: Исключаем корректировки баланса из доходов и расходов
+    val incomeTotal = txs.filter { it.type == TxType.INCOME && it.source != "ADJUSTMENT" }.sumOf { it.amountMinor }
+    val expenseTotal = txs.filter { it.type == TxType.EXPENSE && it.source != "ADJUSTMENT" }.sumOf { it.amountMinor }
     val netTotal = incomeTotal - expenseTotal
 
+    // ★ ИСПРАВЛЕНО: Исключаем корректировки баланса из графиков по категориям
     val categoryData = when (selectedMode) {
-        AnalyticsMode.EXPENSE -> txs.filter { it.type == TxType.EXPENSE }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
-        AnalyticsMode.INCOME -> txs.filter { it.type == TxType.INCOME }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
+        AnalyticsMode.EXPENSE -> txs.filter { it.type == TxType.EXPENSE && it.source != "ADJUSTMENT" }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
+        AnalyticsMode.INCOME -> txs.filter { it.type == TxType.INCOME && it.source != "ADJUSTMENT" }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
         AnalyticsMode.OVERALL -> emptyMap()
     }
 
@@ -74,7 +76,6 @@ fun AnalyticsScreen(
         }
 
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            // 3 режима
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                 SegmentedButton(
                     selected = selectedMode == AnalyticsMode.EXPENSE,
@@ -93,7 +94,6 @@ fun AnalyticsScreen(
                 ) { Text(t("overall")) }
             }
 
-            // Сводка
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -144,7 +144,6 @@ fun AnalyticsScreen(
                     Text(t("no_found"), color = Color.Gray)
                 }
             } else {
-                // График по дням
                 Text(
                     when (selectedMode) {
                         AnalyticsMode.EXPENSE -> t("daily_chart")
@@ -163,7 +162,6 @@ fun AnalyticsScreen(
                 )
                 Spacer(Modifier.height(32.dp))
 
-                // График по месяцам (показываем для всех трёх режимов)
                 Text(
                     when (selectedMode) {
                         AnalyticsMode.EXPENSE -> t("monthly_chart")
@@ -176,7 +174,6 @@ fun AnalyticsScreen(
                 MonthlyChart(allTxs = allTxs, mode = selectedMode, currentLang = currentLang)
                 Spacer(Modifier.height(32.dp))
 
-                // Пирог по категориям
                 if (categoryData.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -212,7 +209,7 @@ fun AnalyticsScreen(
 
     if (selectedCategoryDetails != null) {
         val cat = selectedCategoryDetails!!
-        val catTxs = txs.filter { it.category == cat }.sortedByDescending { it.timestamp }
+        val catTxs = txs.filter { it.category == cat && it.source != "ADJUSTMENT" }.sortedByDescending { it.timestamp }
         
         AlertDialog(
             onDismissRequest = { selectedCategoryDetails = null },
@@ -310,7 +307,6 @@ fun AnalyticsScreen(
     }
 }
 
-// ★ T-005: Диалог "Динамика по дням"
 @Composable
 fun DailyDynamicsDialog(
     txs: List<Tx>,
@@ -324,7 +320,10 @@ fun DailyDynamicsDialog(
     val zone = ZoneId.systemDefault()
     
     val dailyData = (1..daysInMonth).associateWith { day ->
-        val dayTxs = txs.filter { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate().dayOfMonth == day }
+        val dayTxs = txs.filter { 
+            val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
+            d.dayOfMonth == day && it.source != "ADJUSTMENT" 
+        }
         val inc = dayTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
         val exp = dayTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
         inc to exp
@@ -376,7 +375,6 @@ fun DailyDynamicsDialog(
     )
 }
 
-// ★ T-005: График по дням с двумя столбиками для режима Общая
 @Composable
 fun DailyChart(
     txs: List<Tx>, 
@@ -391,13 +389,13 @@ fun DailyChart(
     val dailyIncome = (1..daysInMonth).associateWith { day ->
         txs.filter { 
             val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
-            d.dayOfMonth == day && it.type == TxType.INCOME
+            d.dayOfMonth == day && it.type == TxType.INCOME && it.source != "ADJUSTMENT"
         }.sumOf { it.amountMinor }
     }
     val dailyExpense = (1..daysInMonth).associateWith { day ->
         txs.filter { 
             val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
-            d.dayOfMonth == day && it.type == TxType.EXPENSE
+            d.dayOfMonth == day && it.type == TxType.EXPENSE && it.source != "ADJUSTMENT"
         }.sumOf { it.amountMinor }
     }
     
@@ -457,7 +455,6 @@ fun DailyChart(
                     }
                 }
                 AnalyticsMode.OVERALL -> {
-                    // Два столбика на каждый день
                     val barWidth = step * 0.3f
                     val gap = step * 0.05f
                     dailyIncome.forEach { (day, amount) ->
@@ -536,7 +533,6 @@ fun DailyChart(
     }
 }
 
-// ★ T-005: График по месяцам с двумя столбиками для режима Общая
 @Composable
 fun MonthlyChart(allTxs: List<Tx>, mode: AnalyticsMode, currentLang: AppLanguage) {
     val currentYear = Year.now()
@@ -545,13 +541,13 @@ fun MonthlyChart(allTxs: List<Tx>, mode: AnalyticsMode, currentLang: AppLanguage
     val monthlyIncome = (1..12).associateWith { m ->
         allTxs.filter {
             val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
-            d.year == currentYear.value && d.monthValue == m && it.type == TxType.INCOME
+            d.year == currentYear.value && d.monthValue == m && it.type == TxType.INCOME && it.source != "ADJUSTMENT"
         }.sumOf { it.amountMinor }
     }
     val monthlyExpense = (1..12).associateWith { m ->
         allTxs.filter {
             val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
-            d.year == currentYear.value && d.monthValue == m && it.type == TxType.EXPENSE
+            d.year == currentYear.value && d.monthValue == m && it.type == TxType.EXPENSE && it.source != "ADJUSTMENT"
         }.sumOf { it.amountMinor }
     }
     
