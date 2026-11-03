@@ -27,7 +27,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp // ★ ИСПРАВЛЕНО: добавлен импорт для sp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import java.time.Instant
@@ -48,27 +48,23 @@ fun AnalyticsScreen(
 ) {
     val t = { key: String -> Translations.t(key, currentLang) }
     
-    // ★ T-004: Единый переключатель на 3 режима
     var selectedMode by remember { mutableStateOf(AnalyticsMode.EXPENSE) }
 
     val incomeTotal = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
     val expenseTotal = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
     val netTotal = incomeTotal - expenseTotal
 
-    // Для графиков по категориям (только для Расходов и Доходов)
     val categoryData = when (selectedMode) {
         AnalyticsMode.EXPENSE -> txs.filter { it.type == TxType.EXPENSE }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
         AnalyticsMode.INCOME -> txs.filter { it.type == TxType.INCOME }.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountMinor } }
-        AnalyticsMode.OVERALL -> emptyMap() // В общем режиме пирог не нужен, чтобы не путать
+        AnalyticsMode.OVERALL -> emptyMap()
     }
 
-    // Состояния для диалогов
     var selectedCategoryDetails by remember { mutableStateOf<String?>(null) }
     var showFullscreenPie by remember { mutableStateOf(false) }
-    var showDailyDynamics by remember { mutableStateOf(false) } // ★ T-005
+    var showDailyDynamics by remember { mutableStateOf(false) }
 
     Column(Modifier.padding(paddingValues).fillMaxSize().verticalScroll(rememberScrollState())) {
-        // Верхняя панель
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -78,7 +74,7 @@ fun AnalyticsScreen(
         }
 
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            // ★ T-004: 3 режима (Расходы, Доходы, Общая)
+            // 3 режима
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                 SegmentedButton(
                     selected = selectedMode == AnalyticsMode.EXPENSE,
@@ -132,7 +128,6 @@ fun AnalyticsScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // Проверка на пустоту
             val hasData = when (selectedMode) {
                 AnalyticsMode.EXPENSE -> expenseTotal > 0
                 AnalyticsMode.INCOME -> incomeTotal > 0
@@ -149,7 +144,7 @@ fun AnalyticsScreen(
                     Text(t("no_found"), color = Color.Gray)
                 }
             } else {
-                // ★ T-005: График по дням с кнопкой "Подробнее"
+                // График по дням
                 Text(
                     when (selectedMode) {
                         AnalyticsMode.EXPENSE -> t("daily_chart")
@@ -164,22 +159,24 @@ fun AnalyticsScreen(
                     yearMonth = YearMonth.now(), 
                     mode = selectedMode, 
                     currentLang = currentLang,
-                    onShowDetails = { showDailyDynamics = true } // ★ Вызов окна T-005
+                    onShowDetails = { showDailyDynamics = true }
                 )
                 Spacer(Modifier.height(32.dp))
 
-                // График по месяцам
-                if (selectedMode != AnalyticsMode.OVERALL) {
-                    Text(
-                        if (selectedMode == AnalyticsMode.INCOME) t("monthly_chart_inc") else t("monthly_chart"),
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    MonthlyChart(allTxs = allTxs, type = if (selectedMode == AnalyticsMode.INCOME) TxType.INCOME else TxType.EXPENSE, currentLang = currentLang)
-                    Spacer(Modifier.height(32.dp))
-                }
+                // График по месяцам (показываем для всех трёх режимов)
+                Text(
+                    when (selectedMode) {
+                        AnalyticsMode.EXPENSE -> t("monthly_chart")
+                        AnalyticsMode.INCOME -> t("monthly_chart_inc")
+                        AnalyticsMode.OVERALL -> t("monthly_chart")
+                    },
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(16.dp))
+                MonthlyChart(allTxs = allTxs, mode = selectedMode, currentLang = currentLang)
+                Spacer(Modifier.height(32.dp))
 
-                // Пирог по категориям (только для Расходов и Доходов)
+                // Пирог по категориям
                 if (categoryData.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -203,7 +200,6 @@ fun AnalyticsScreen(
         }
     }
 
-    // ★ T-005: Диалог "Динамика по дням"
     if (showDailyDynamics) {
         DailyDynamicsDialog(
             txs = txs,
@@ -214,7 +210,6 @@ fun AnalyticsScreen(
         )
     }
 
-    // Диалог детализации (Drill-down)
     if (selectedCategoryDetails != null) {
         val cat = selectedCategoryDetails!!
         val catTxs = txs.filter { it.category == cat }.sortedByDescending { it.timestamp }
@@ -257,7 +252,6 @@ fun AnalyticsScreen(
         )
     }
 
-    // Полноэкранный диалог пирога
     if (showFullscreenPie) {
         Dialog(
             onDismissRequest = { showFullscreenPie = false },
@@ -316,7 +310,7 @@ fun AnalyticsScreen(
     }
 }
 
-// ★ T-005: Новый диалог "Динамика по дням"
+// ★ T-005: Диалог "Динамика по дням"
 @Composable
 fun DailyDynamicsDialog(
     txs: List<Tx>,
@@ -329,7 +323,6 @@ fun DailyDynamicsDialog(
     val daysInMonth = yearMonth.lengthOfMonth()
     val zone = ZoneId.systemDefault()
     
-    // Группируем по дням
     val dailyData = (1..daysInMonth).associateWith { day ->
         val dayTxs = txs.filter { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate().dayOfMonth == day }
         val inc = dayTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
@@ -364,12 +357,12 @@ fun DailyDynamicsDialog(
                                 Text("$day ${getMonthName(yearMonth.monthValue, currentLang).take(3)}", fontWeight = FontWeight.Medium)
                                 
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    if (mode == AnalyticsMode.EXPENSE || mode == AnalyticsMode.OVERALL) {
-                                        if (exp > 0) Text("-${exp.money()}", color = RED, fontWeight = FontWeight.Bold)
-                                        else if (mode == AnalyticsMode.OVERALL) Text("—", color = Color.Gray)
-                                    }
                                     if (mode == AnalyticsMode.INCOME || mode == AnalyticsMode.OVERALL) {
                                         if (inc > 0) Text("+${inc.money()}", color = GREEN, fontWeight = FontWeight.Bold)
+                                        else if (mode == AnalyticsMode.OVERALL) Text("—", color = Color.Gray)
+                                    }
+                                    if (mode == AnalyticsMode.EXPENSE || mode == AnalyticsMode.OVERALL) {
+                                        if (exp > 0) Text("-${exp.money()}", color = RED, fontWeight = FontWeight.Bold)
                                         else if (mode == AnalyticsMode.OVERALL) Text("—", color = Color.Gray)
                                     }
                                 }
@@ -383,6 +376,7 @@ fun DailyDynamicsDialog(
     )
 }
 
+// ★ T-005: График по дням с двумя столбиками для режима Общая
 @Composable
 fun DailyChart(
     txs: List<Tx>, 
@@ -394,24 +388,29 @@ fun DailyChart(
     val daysInMonth = yearMonth.lengthOfMonth()
     val zone = ZoneId.systemDefault()
     
-    // Если режим "Общая", показываем суммарный график (доход + расход) или только расход, чтобы не путать
-    val dailyAmounts = (1..daysInMonth).associateWith { day ->
-        val dayTxs = txs.filter { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate().dayOfMonth == day }
-        when (mode) {
-            AnalyticsMode.EXPENSE -> dayTxs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
-            AnalyticsMode.INCOME -> dayTxs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-            AnalyticsMode.OVERALL -> dayTxs.sumOf { if (it.type == TxType.EXPENSE) -it.amountMinor else it.amountMinor } // Для общего графика можно показывать сальдо, но это сложно. Сделаем просто сумму всех транзакций по модулю.
-        }
+    val dailyIncome = (1..daysInMonth).associateWith { day ->
+        txs.filter { 
+            val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
+            d.dayOfMonth == day && it.type == TxType.INCOME
+        }.sumOf { it.amountMinor }
     }
-    val maxAmount = (dailyAmounts.values.maxOrNull() ?: 1L).toFloat()
-
-    val barColor = when (mode) {
-        AnalyticsMode.EXPENSE -> RED
-        AnalyticsMode.INCOME -> GREEN
-        AnalyticsMode.OVERALL -> BLUE
+    val dailyExpense = (1..daysInMonth).associateWith { day ->
+        txs.filter { 
+            val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
+            d.dayOfMonth == day && it.type == TxType.EXPENSE
+        }.sumOf { it.amountMinor }
     }
+    
+    val maxAmount = if (mode == AnalyticsMode.OVERALL) {
+        val maxInc = dailyIncome.values.maxOrNull() ?: 0L
+        val maxExp = dailyExpense.values.maxOrNull() ?: 0L
+        maxOf(maxInc, maxExp).coerceAtLeast(1L).toFloat()
+    } else {
+        (if (mode == AnalyticsMode.EXPENSE) dailyExpense.values.maxOrNull() else dailyIncome.values.maxOrNull())?.coerceAtLeast(1L)?.toFloat() ?: 1f
+    }
+    
     var selectedDay by remember { mutableStateOf<Int?>(null) }
-
+    
     Column {
         Canvas(modifier = Modifier.fillMaxWidth().height(120.dp).pointerInput(mode) {
             detectTapGestures { offset ->
@@ -422,34 +421,107 @@ fun DailyChart(
         }) {
             val width = size.width
             val height = size.height
-            val barWidth = (width / daysInMonth) * 0.6f
             val step = width / daysInMonth
-            dailyAmounts.forEach { (day, amount) ->
-                if (amount > 0) {
-                    val alpha = if (selectedDay == null || selectedDay == day) 1f else 0.4f
-                    val barHeight = (amount / maxAmount) * height
-                    val x = (day - 1) * step + (step - barWidth) / 2
-                    drawRoundRect(
-                        color = barColor.copy(alpha = alpha),
-                        topLeft = Offset(x, height - barHeight),
-                        size = Size(barWidth, barHeight),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                    )
+            
+            when (mode) {
+                AnalyticsMode.EXPENSE -> {
+                    val barWidth = step * 0.6f
+                    dailyExpense.forEach { (day, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedDay == null || selectedDay == day) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (day - 1) * step + (step - barWidth) / 2
+                            drawRoundRect(
+                                color = RED.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
+                }
+                AnalyticsMode.INCOME -> {
+                    val barWidth = step * 0.6f
+                    dailyIncome.forEach { (day, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedDay == null || selectedDay == day) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (day - 1) * step + (step - barWidth) / 2
+                            drawRoundRect(
+                                color = GREEN.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
+                }
+                AnalyticsMode.OVERALL -> {
+                    // Два столбика на каждый день
+                    val barWidth = step * 0.3f
+                    val gap = step * 0.05f
+                    dailyIncome.forEach { (day, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedDay == null || selectedDay == day) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (day - 1) * step + (step - barWidth * 2 - gap) / 2
+                            drawRoundRect(
+                                color = GREEN.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
+                    dailyExpense.forEach { (day, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedDay == null || selectedDay == day) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (day - 1) * step + (step - barWidth * 2 - gap) / 2 + barWidth + gap
+                            drawRoundRect(
+                                color = RED.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
         
-        // Вывод выбранного дня + Кнопка "Подробнее"
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             if (selectedDay != null) {
-                val amount = dailyAmounts[selectedDay] ?: 0L
-                Text(
-                    "${Translations.t("day", currentLang)}: $selectedDay — ${amount.money()} UZS",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = barColor
-                )
+                val day = selectedDay!!
+                when (mode) {
+                    AnalyticsMode.EXPENSE -> {
+                        val amount = dailyExpense[day] ?: 0L
+                        Text(
+                            "${Translations.t("day", currentLang)}: $day — ${amount.money()} UZS",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = RED
+                        )
+                    }
+                    AnalyticsMode.INCOME -> {
+                        val amount = dailyIncome[day] ?: 0L
+                        Text(
+                            "${Translations.t("day", currentLang)}: $day — ${amount.money()} UZS",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = GREEN
+                        )
+                    }
+                    AnalyticsMode.OVERALL -> {
+                        val inc = dailyIncome[day] ?: 0L
+                        val exp = dailyExpense[day] ?: 0L
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("+${inc.money()}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = GREEN)
+                            Text("-${exp.money()}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = RED)
+                        }
+                    }
+                }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
@@ -464,23 +536,37 @@ fun DailyChart(
     }
 }
 
+// ★ T-005: График по месяцам с двумя столбиками для режима Общая
 @Composable
-fun MonthlyChart(allTxs: List<Tx>, type: TxType, currentLang: AppLanguage) {
+fun MonthlyChart(allTxs: List<Tx>, mode: AnalyticsMode, currentLang: AppLanguage) {
     val currentYear = Year.now()
     val zone = ZoneId.systemDefault()
-    val monthlyAmounts = (1..12).associateWith { m ->
+    
+    val monthlyIncome = (1..12).associateWith { m ->
         allTxs.filter {
             val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
-            d.year == currentYear.value && d.monthValue == m && it.type == type
+            d.year == currentYear.value && d.monthValue == m && it.type == TxType.INCOME
         }.sumOf { it.amountMinor }
     }
-    val maxAmount = (monthlyAmounts.values.maxOrNull() ?: 1L).toFloat()
-
-    val barColor = if (type == TxType.INCOME) GREEN else RED
+    val monthlyExpense = (1..12).associateWith { m ->
+        allTxs.filter {
+            val d = Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
+            d.year == currentYear.value && d.monthValue == m && it.type == TxType.EXPENSE
+        }.sumOf { it.amountMinor }
+    }
+    
+    val maxAmount = if (mode == AnalyticsMode.OVERALL) {
+        val maxInc = monthlyIncome.values.maxOrNull() ?: 0L
+        val maxExp = monthlyExpense.values.maxOrNull() ?: 0L
+        maxOf(maxInc, maxExp).coerceAtLeast(1L).toFloat()
+    } else {
+        (if (mode == AnalyticsMode.EXPENSE) monthlyExpense.values.maxOrNull() else monthlyIncome.values.maxOrNull())?.coerceAtLeast(1L)?.toFloat() ?: 1f
+    }
+    
     var selectedMonth by remember { mutableStateOf<Int?>(null) }
-
+    
     Column {
-        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp).pointerInput(type) {
+        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp).pointerInput(mode) {
             detectTapGestures { offset ->
                 val step = size.width / 12
                 val clicked = ((offset.x / step).toInt() + 1).coerceIn(1, 12)
@@ -490,29 +576,97 @@ fun MonthlyChart(allTxs: List<Tx>, type: TxType, currentLang: AppLanguage) {
             val width = size.width
             val height = size.height
             val step = width / 12
-            val barWidth = step * 0.6f
-            monthlyAmounts.forEach { (month, amount) ->
-                if (amount > 0) {
-                    val alpha = if (selectedMonth == null || selectedMonth == month) 1f else 0.4f
-                    val barHeight = (amount / maxAmount) * height
-                    val x = (month - 1) * step + (step - barWidth) / 2
-                    drawRoundRect(
-                        color = barColor.copy(alpha = alpha),
-                        topLeft = Offset(x, height - barHeight),
-                        size = Size(barWidth, barHeight),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                    )
+            
+            when (mode) {
+                AnalyticsMode.EXPENSE -> {
+                    val barWidth = step * 0.6f
+                    monthlyExpense.forEach { (month, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedMonth == null || selectedMonth == month) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (month - 1) * step + (step - barWidth) / 2
+                            drawRoundRect(
+                                color = RED.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
+                }
+                AnalyticsMode.INCOME -> {
+                    val barWidth = step * 0.6f
+                    monthlyIncome.forEach { (month, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedMonth == null || selectedMonth == month) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (month - 1) * step + (step - barWidth) / 2
+                            drawRoundRect(
+                                color = GREEN.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
+                }
+                AnalyticsMode.OVERALL -> {
+                    val barWidth = step * 0.3f
+                    val gap = step * 0.05f
+                    monthlyIncome.forEach { (month, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedMonth == null || selectedMonth == month) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (month - 1) * step + (step - barWidth * 2 - gap) / 2
+                            drawRoundRect(
+                                color = GREEN.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
+                    monthlyExpense.forEach { (month, amount) ->
+                        if (amount > 0) {
+                            val alpha = if (selectedMonth == null || selectedMonth == month) 1f else 0.4f
+                            val barHeight = (amount / maxAmount) * height
+                            val x = (month - 1) * step + (step - barWidth * 2 - gap) / 2 + barWidth + gap
+                            drawRoundRect(
+                                color = RED.copy(alpha = alpha),
+                                topLeft = Offset(x, height - barHeight),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
         if (selectedMonth != null) {
-            Text(
-                "${getMonthName(selectedMonth!!, currentLang)}: ${monthlyAmounts[selectedMonth]?.money()} UZS",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = barColor
-            )
+            val month = selectedMonth!!
+            when (mode) {
+                AnalyticsMode.EXPENSE -> {
+                    Text(
+                        "${getMonthName(month, currentLang)}: ${monthlyExpense[month]?.money()} UZS",
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = RED
+                    )
+                }
+                AnalyticsMode.INCOME -> {
+                    Text(
+                        "${getMonthName(month, currentLang)}: ${monthlyIncome[month]?.money()} UZS",
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = GREEN
+                    )
+                }
+                AnalyticsMode.OVERALL -> {
+                    val inc = monthlyIncome[month] ?: 0L
+                    val exp = monthlyExpense[month] ?: 0L
+                    Text(
+                        "${getMonthName(month, currentLang)}: +${inc.money()} / -${exp.money()}",
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("1", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
