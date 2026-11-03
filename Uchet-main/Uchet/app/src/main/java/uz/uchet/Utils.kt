@@ -35,11 +35,10 @@ class CoordinateTextStripper : PDFTextStripper() {
         if (text.isBlank() || textPositions.isEmpty()) return
         val first = textPositions.first()
         val last = textPositions.last()
-        // PDFBox: getXDirAdj(), getYDirAdj(), getWidthDirAdj() — есть, getHeightDirAdj() — НЕТ
         val x = first.xDirAdj
         val y = first.yDirAdj
         val w = (last.xDirAdj + last.widthDirAdj) - x
-        val h = first.heightDir   // ← исправлено
+        val h = first.heightDir
         lines.add(PdfLine(text.trim(), x, y, w, h, currentPageNo))
     }
 }
@@ -113,16 +112,35 @@ fun cropBitmapByLine(original: Bitmap, line: PdfLine, padding: Int = 10): Bitmap
     }
 }
 
-fun parseCardsFromScreenshot(text: String): List<CardEntity> {
+// ★ T-003: Улучшенный парсер карт (убрана отбраковка масок, добавлена очистка OCR)
+fun parseCardsFromScreenshot(rawText: String): List<CardEntity> {
     val result = mutableListOf<CardEntity>()
-    val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
-    val amountRegex = Regex("""([0-9Oo\s\u00A0]+(?:[.,]\d{1,2})?)\s*(?:cyM|сум|UZS|USD|EUR|RUB|so['`]?m)""", RegexOption.IGNORE_CASE)
-    val cardRegex = Regex("""\b([0-9Oo]{4})\b""")
+    
+    // Очистка текста от частых ошибок OCR
+    val sanitized = rawText
+        .replace("O", "0")
+        .replace("o", "0")
+        .replace("UZs", "UZS")
+        .replace("Uzs", "UZS")
+        .replace("uZS", "UZS")
+        .replace("cyM", "сум")
+        .replace("cум", "сум")
+        .replace("UZS", "UZS") // Сброс после замен
+
+    val lines = sanitized.lines().map { it.trim() }.filter { it.isNotBlank() }
+    
+    // Улучшенная регулярка для сумм (ловит "2 907 018.89 UZS")
+    val amountRegex = Regex("""([0-9\s\u00A0]+(?:[.,]\d{1,2})?)\s*(?:UZS|USD|EUR|RUB|сум)""", RegexOption.IGNORE_CASE)
+    
+    // Регулярка для 4-значных номеров карт
+    val cardRegex = Regex("""\b([0-9]{4})\b""")
+    
     val pendingAmounts = mutableListOf<Long>()
     var currentBank = "Bank"
     var currentCurrency = "UZS"
 
     for (line in lines) {
+        // Определение банка
         if (line.contains("ANORBANK", ignoreCase = true)) currentBank = "Anorbank"
         else if (line.contains("UZUM", ignoreCase = true)) currentBank = "Uzum"
         else if (line.contains("KAPITAL", ignoreCase = true)) currentBank = "Kapitalbank"
@@ -130,30 +148,52 @@ fun parseCardsFromScreenshot(text: String): List<CardEntity> {
         else if (line.contains("HUMO", ignoreCase = true)) currentBank = "Humo"
         else if (line.contains("VISA", ignoreCase = true)) currentBank = "Visa"
         else if (line.contains("MULTI", ignoreCase = true)) currentBank = "Multi"
-        if (line.contains("/")) continue
+
+        // Пропускаем строки с датами (чтобы не спутать с картой)
+        if (line.contains("/") && !line.contains("UZS")) continue
+
+        // Поиск суммы
         val amtMatch = amountRegex.find(line)
         if (amtMatch != null) {
             if (line.contains("USD", true)) currentCurrency = "USD"
             else if (line.contains("EUR", true)) currentCurrency = "EUR"
             else if (line.contains("RUB", true)) currentCurrency = "RUB"
             else currentCurrency = "UZS"
-            val amtStr = amtMatch.groupValues[1].replace(" ", "").replace("\u00A0", "").replace(",", ".").replace('O', '0').replace('o', '0')
+            
+            val amtStr = amtMatch.groupValues[1]
+                .replace(" ", "")
+                .replace("\u00A0", "")
+                .replace(",", ".")
+            
+            // Если дробная часть 1 цифра (например ".5"), дополняем нулем
             val normalizedAmt = if (amtStr.contains(".") && amtStr.substringAfter(".").length == 1) "${amtStr}0" else amtStr
-            val parsedAmount = normalizedAmt.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong()
+            
+            val parsedAmount = normalizedAmt.toBigDecimalOrNull()
+                ?.movePointRight(2)
+                ?.setScale(0, RoundingMode.HALF_UP)
+                ?.toLong()
+                
             if (parsedAmount != null) pendingAmounts.add(parsedAmount)
             continue
         }
+
+        // Поиск карты (4 цифры)
         val cardMatch = cardRegex.find(line)
         if (cardMatch != null) {
-            val startIndex = cardMatch.range.first
-            val prefix = line.substring(0, startIndex)
-            if (prefix.contains("****")) continue
             val rawLast4 = cardMatch.groupValues[1]
-            val last4 = rawLast4.replace('O', '0').replace('o', '0')
-            if (last4.startsWith("20")) continue
+            val last4 = rawLast4
+            
+            // Отсекаем года (2024, 2025, 2026...)
+            if (last4.startsWith("20") || last4.startsWith("19")) continue
+            
+            // Отсекаем 4-значные суммы (например, если сумма 5000 написана слитно)
+            // (Эвристика: если в строке уже была найдена сумма, это вряд ли карта, но мы уже сделали continue выше)
+            
             val shortName = getShortBankName(currentBank)
             val finalName = "$shortName $last4"
+            
             if (result.none { it.last4 == last4 }) {
+                // Если есть отложенная сумма, забираем её. Если нет — ставим 0.
                 val amountToAssign = if (pendingAmounts.isNotEmpty()) pendingAmounts.removeAt(0) else 0L
                 result.add(CardEntity(id = "${last4}_$currentCurrency", last4 = last4, name = finalName, currency = currentCurrency, initialBalanceMinor = amountToAssign))
             }
