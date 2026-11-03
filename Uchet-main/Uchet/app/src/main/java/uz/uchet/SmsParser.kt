@@ -73,6 +73,36 @@ object SmsParser {
         return result
     }
 
+    // ★ ВОССТАНОВЛЕНО: для импорта CSV/текста (вызывается в App.kt)
+    fun parseImportedFile(text: String, existing: List<Tx> = emptyList(), customRules: List<CustomKeywordRule> = emptyList()): List<Tx> {
+        val clean = text.removePrefix("\uFEFF")
+        val lines = clean.lines()
+        val headerIdx = lines.indexOfFirst { line -> val l = line.trim().lowercase(); l.startsWith("datetime") && l.contains("direction") && l.contains("content") }
+        val parsed = if (headerIdx >= 0) {
+            parseCsvExport(lines.subList(headerIdx, lines.size).joinToString("\n"), customRules)
+        } else {
+            val fakePdfLines = clean.lines().map { PdfLine(it, 0f, 0f, 0f, 0f, 1) }
+            parseGenericPdfLines(fakePdfLines, customRules).map { it.first }
+        }
+
+        if (existing.isEmpty()) return parsed
+        return parsed.filterNot { newTx -> existing.any { old -> old.amountMinor == newTx.amountMinor && old.type == newTx.type && old.cardId == newTx.cardId && kotlin.math.abs(old.timestamp - newTx.timestamp) < 60_000L } }
+    }
+
+    // ★ ВОССТАНОВЛЕНО: для OCR (вызывается в Utils.kt)
+    fun parseForOcr(text: String, customRules: List<CustomKeywordRule> = emptyList()): ParsedSms? {
+        val (cat, tx) = classify("", text, System.currentTimeMillis(), customRules)
+        if (cat == SmsCategory.TRANSACTION && tx != null) return ParsedSms(BigDecimal(tx.amountMinor).movePointLeft(2).stripTrailingZeros().toPlainString(), tx.cardLast4, tx.merchant, tx.category)
+        val totalRegex = Regex("""(?:jami|итого|total|к оплате|сумма)[:\s=]*([\d \u00A0.,]+)""", RegexOption.IGNORE_CASE)
+        val m = totalRegex.find(text)
+        if (m != null) {
+            val amount = normalizeAmount(m.groupValues[1]) ?: return null
+            return ParsedSms(BigDecimal(amount).movePointLeft(2).stripTrailingZeros().toPlainString(), null, text.take(60).replace("\n", " ").trim(), "📦 Другое")
+        }
+        val last = extractAmounts(text).lastOrNull() ?: return null
+        return ParsedSms(BigDecimal(last.value).movePointLeft(2).stripTrailingZeros().toPlainString(), null, text.take(60).replace("\n", " ").trim(), "📦 Другое")
+    }
+
     // ★ T-001: Парсинг PDF с координатами
     fun parsePdfLines(lines: List<PdfLine>, existing: List<Tx> = emptyList(), customRules: List<CustomKeywordRule> = emptyList()): List<Pair<Tx, PdfLine>> {
         val fullText = lines.joinToString("\n") { it.text }
@@ -102,12 +132,9 @@ object SmsParser {
         val result = mutableListOf<Pair<Tx, PdfLine>>()
         val cardRegex = Regex("""Номер карты:\s*\d+\*+(\d{4})""")
         var cardLast4 = "0000"
-        for (line in lines.take(30)) {
-            cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] }
-        }
+        for (line in lines.take(30)) { cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] } }
         val cardId = "${cardLast4}_UZS"
         
-        // Регулярка для Anorbank: дата (dd.MM.yyyy HH:mm), номер док (может быть слитно с суммой), сумма (+/- 100 000), описание
         val txRegex = Regex("""(?<date>\d{2}\.\d{2}\.\d{4})\s+(?<time>\d{2}:\d{2})\s*\d*\s*(?<sign>[+-])\s*(?<amount>\d{1,3}(?:\s\d{3})*)\s*(?<desc>.+?)$""")
 
         for (line in lines) {
@@ -121,9 +148,7 @@ object SmsParser {
             val cleanAmount = amountStr.replace(" ", "")
             val amountMinor = (cleanAmount.toDoubleOrNull() ?: continue).times(100).toLong()
             val type = if (sign == "+") TxType.INCOME else TxType.EXPENSE
-            val ts = try {
-                LocalDateTime.parse("$dateStr $timeStr", DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            } catch (e: Exception) { System.currentTimeMillis() }
+            val ts = try { LocalDateTime.parse("$dateStr $timeStr", DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (e: Exception) { System.currentTimeMillis() }
             val category = guessCategory(desc.lowercase(), desc, customRules, type).category
 
             result.add(Tx(
@@ -139,12 +164,9 @@ object SmsParser {
         val result = mutableListOf<Pair<Tx, PdfLine>>()
         val cardRegex = Regex("""Номер карты:\s*\d+\*+(\d{4})""")
         var cardLast4 = "0000"
-        for (line in lines.take(30)) {
-            cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] }
-        }
+        for (line in lines.take(30)) { cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] } }
         val cardId = "${cardLast4}_UZS"
 
-        // Регулярка: дата (dd.MM.yyyy), сумма (может быть без +, но с -), описание
         val txRegex = Regex("""(?<date>\d{2}\.\d{2}\.\d{4})\s+(?<amount>[+-]?\d{1,3}(?:\s\d{3})*[,.]\d{2})\s*(?<desc>.+?)$""")
 
         for (line in lines) {
@@ -156,13 +178,10 @@ object SmsParser {
             val cleanAmount = amountStr.replace(" ", "").replace(",", ".")
             val amountMinor = cleanAmount.toBigDecimalOrNull()?.movePointRight(2)?.setScale(0, RoundingMode.HALF_UP)?.toLong() ?: continue
             
-            // Определяем тип по знаку или по контексту описания
             val isExpense = amountStr.startsWith("-") || desc.lowercase().contains("списание") || desc.lowercase().contains("оплата")
             val type = if (isExpense) TxType.EXPENSE else TxType.INCOME
             
-            val ts = try {
-                LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("dd.MM.yyyy")).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            } catch (e: Exception) { System.currentTimeMillis() }
+            val ts = try { LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("dd.MM.yyyy")).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (e: Exception) { System.currentTimeMillis() }
             val category = guessCategory(desc.lowercase(), desc, customRules, type).category
 
             result.add(Tx(
@@ -178,12 +197,9 @@ object SmsParser {
         val result = mutableListOf<Pair<Tx, PdfLine>>()
         val cardRegex = Regex("""Номер карты:\s*\d+\*+(\d{4})""")
         var cardLast4 = "0000"
-        for (line in lines.take(30)) {
-            cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] }
-        }
+        for (line in lines.take(30)) { cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] } }
         val cardId = "${cardLast4}_UZS"
 
-        // Регулярка: дата (yyyy-MM-dd HH:mm:ss), номер, сумма (1700.00), описание
         val txRegex = Regex("""(?<date>\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s+\d{2}\.\d{2}\.\d{4}\s+\d+\s+(?<amount>\d+\.\d{2})\s+(?<desc>.+?)$""")
 
         for (line in lines) {
@@ -194,14 +210,11 @@ object SmsParser {
 
             val amountMinor = amountStr.replace(".", "").toLongOrNull() ?: continue
             
-            // В Uzum нет знака, тип по описанию
             val lowerDesc = desc.lowercase()
             val isExpense = lowerDesc.contains("оплата") || lowerDesc.contains("списание") || lowerDesc.contains("покупка")
             val type = if (isExpense) TxType.EXPENSE else TxType.INCOME
             
-            val ts = try {
-                LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            } catch (e: Exception) { System.currentTimeMillis() }
+            val ts = try { LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (e: Exception) { System.currentTimeMillis() }
             val category = guessCategory(desc.lowercase(), desc, customRules, type).category
 
             result.add(Tx(
@@ -220,7 +233,6 @@ object SmsParser {
         for (line in lines.take(20)) { cardRegex.find(line.text)?.let { cardLast4 = it.groupValues[1] } }
         val cardId = "${cardLast4}_UZS"
 
-        // Формат: 01-06-2026 08:19:54 +15 000,00 -15 000,00 ...
         val txRegex = Regex("""(?<date>\d{2}-\d{2}-\d{4})\s+(?<time>\d{2}:\d{2}:\d{2})\s*(?<desc>.*?)(?<sign>[+-])(?<amount>\d{1,3}(?:\s\d{3})*[,.]\d{2})""")
 
         for (line in lines) {
@@ -237,9 +249,7 @@ object SmsParser {
             val cleanAmount = amountStr.replace(" ", "").replace(",", ".")
             val amountMinor = (cleanAmount.toDoubleOrNull() ?: continue).times(100).toLong()
             val type = if (sign == "+") TxType.INCOME else TxType.EXPENSE
-            val ts = try {
-                LocalDateTime.parse("$dateStr $timeStr", DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            } catch (e: Exception) { System.currentTimeMillis() }
+            val ts = try { LocalDateTime.parse("$dateStr $timeStr", DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (e: Exception) { System.currentTimeMillis() }
             val category = guessCategory(lowerDesc, desc, customRules, type).category
 
             result.add(Tx(
@@ -284,6 +294,51 @@ object SmsParser {
             ) to line)
         }
         return result
+    }
+
+    private fun parseCsvExport(csv: String, customRules: List<CustomKeywordRule>): List<Tx> {
+        val rows = parseCsvRecords(csv)
+        if (rows.isEmpty()) return emptyList()
+        val header = rows.first().map { it.trim().lowercase() }
+        val idxDate = header.indexOf("datetime").takeIf { it >= 0 } ?: 0
+        val idxDir = header.indexOf("direction").takeIf { it >= 0 } ?: 1
+        val idxContact = header.indexOf("contact").takeIf { it >= 0 } ?: 2
+        val idxContent = header.indexOf("content").takeIf { it >= 0 } ?: 4
+        val result = mutableListOf<Tx>()
+        val seen = mutableSetOf<String>()
+        for (row in rows.drop(1)) {
+            if (row.size <= idxContent) continue
+            val dtStr = row.getOrNull(idxDate)?.trim() ?: continue
+            val dir = row.getOrNull(idxDir)?.trim() ?: ""
+            val sender = row.getOrNull(idxContact)?.trim() ?: ""
+            val content = row.getOrNull(idxContent) ?: continue
+            if (dir.isNotEmpty() && !dir.equals("Received", true)) continue
+            if (content.isBlank()) continue
+            val ts = parseDateTime(dtStr) ?: continue
+            val (cat, tx) = classify(sender, content, ts, customRules)
+            if (cat != SmsCategory.TRANSACTION || tx == null) continue
+            val key = "${tx.amountMinor}_${tx.type}_${tx.cardLast4}_${ts}_${tx.merchant.take(20)}"
+            if (!seen.add(key)) continue
+            result.add(tx.toTx("IMPORT"))
+        }
+        return result
+    }
+
+    private fun parseCsvRecords(text: String): List<List<String>> {
+        val records = mutableListOf<List<String>>(); val current = mutableListOf<String>(); val sb = StringBuilder(); var inQuotes = false; var i = 0; val n = text.length
+        while (i < n) {
+            val ch = text[i]
+            when {
+                inQuotes -> { if (ch == '"') { if (i + 1 < n && text[i + 1] == '"') { sb.append('"'); i += 2 } else { inQuotes = false; i++ } } else { sb.append(ch); i++ } }
+                ch == '"' -> { inQuotes = true; i++ }
+                ch == ',' -> { current.add(sb.toString()); sb.clear(); i++ }
+                ch == '\r' -> i++
+                ch == '\n' -> { current.add(sb.toString()); sb.clear(); records.add(current.toList()); current.clear(); i++ }
+                else -> { sb.append(ch); i++ }
+            }
+        }
+        if (current.isNotEmpty() || sb.isNotEmpty()) { current.add(sb.toString()); records.add(current.toList()) }
+        return records.filter { it.isNotEmpty() }
     }
 
     private fun tryParseTransaction(sender: String, body: String, timestamp: Long, lower: String, customRules: List<CustomKeywordRule>): BankTx? {
@@ -356,6 +411,16 @@ object SmsParser {
         if (!OTP_MARKERS.any { lower.contains(it) }) return false
         return Regex("""\b\d{4,8}\b""").containsMatchIn(lower) || Regex("""\b[A-Z]*\d[A-Z0-9]{3,6}\b""").containsMatchIn(lower.uppercase())
     }
+
+    private fun parseDateTime(str: String): Long? {
+        val s = str.trim()
+        for (fmt in DATE_FORMATS) try { return LocalDateTime.parse(s, fmt).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (_: Exception) {}
+        try { return LocalDate.parse(s, DateTimeFormatter.ofPattern("dd.MM.yyyy")).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (_: Exception) {}
+        try { return LocalDate.parse(s, DateTimeFormatter.ofPattern("yyyy-MM-dd")).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (_: Exception) {}
+        return null
+    }
+
+    private fun normalizeAmount(str: String): Long? = try { BigDecimal(str.replace(Regex("[^\\d.,]"), "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() } catch (_: Exception) { null }
 
     private fun BankTx.toTx(source: String) = Tx(
         amountMinor = amountMinor, type = type,
