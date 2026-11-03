@@ -235,7 +235,14 @@ object Translations {
             "approx_uzs" to "≈ %s UZS",
             "edit_operation" to "Редактировать операцию",
             "expected_day" to "Ожидается %s числа",
-            "confirmed_amount" to "Подтверждено: %s"
+            "confirmed_amount" to "Подтверждено: %s",
+            "skipped" to "Пропущено",
+            "no_data" to "Нет данных",
+            "time_just_now" to "только что",
+            "time_min_ago" to "%d мин назад",
+            "time_hour_ago" to "%d ч назад",
+            "time_day_ago" to "%d дн назад",
+            "time_month_ago" to "%d мес назад"
         ),
         "uz" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalarni boshqarish", "scan_sms" to "SMS skanerlash (100)",
@@ -470,7 +477,14 @@ object Translations {
             "approx_uzs" to "≈ %s UZS",
             "edit_operation" to "Operatsiyani tahrirlash",
             "expected_day" to "%s kuni kutilmoqda",
-            "confirmed_amount" to "Tasdiqlangan: %s"
+            "confirmed_amount" to "Tasdiqlangan: %s",
+            "skipped" to "O'tkazib yuborilgan",
+            "no_data" to "Ma'lumot yo'q",
+            "time_just_now" to "hozirgina",
+            "time_min_ago" to "%d daqiqa oldin",
+            "time_hour_ago" to "%d soat oldin",
+            "time_day_ago" to "%d kun oldin",
+            "time_month_ago" to "%d oy oldin"
         ),
         "en" to mapOf(
             "my_accounts" to "Cards", "manage_cards" to "Manage cards", "scan_sms" to "Scan SMS (100)",
@@ -705,7 +719,14 @@ object Translations {
             "approx_uzs" to "≈ %s UZS",
             "edit_operation" to "Edit operation",
             "expected_day" to "Expected on day %s",
-            "confirmed_amount" to "Confirmed: %s"
+            "confirmed_amount" to "Confirmed: %s",
+            "skipped" to "Skipped",
+            "no_data" to "No data",
+            "time_just_now" to "just now",
+            "time_min_ago" to "%d min ago",
+            "time_hour_ago" to "%d hour ago",
+            "time_day_ago" to "%d day ago",
+            "time_month_ago" to "%d month ago"
         ),
         "tg" to mapOf(
             "my_accounts" to "Кортҳо", "manage_cards" to "Идоракунии кортҳо", "scan_sms" to "Сканкунии СМС (100)",
@@ -940,7 +961,14 @@ object Translations {
             "approx_uzs" to "≈ %s UZS",
             "edit_operation" to "Тағири амалиёт",
             "expected_day" to "Интизор меравад дар рӯзи %s",
-            "confirmed_amount" to "Тасдиқшуда: %s"
+            "confirmed_amount" to "Тасдиқшуда: %s",
+            "skipped" to "Гузаронида шуд",
+            "no_data" to "Маълумот нест",
+            "time_just_now" to "ҳозир",
+            "time_min_ago" to "%d дақиқа пеш",
+            "time_hour_ago" to "%d соат пеш",
+            "time_day_ago" to "%d рӯз пеш",
+            "time_month_ago" to "%d моҳ пеш"
         ),
         "kaa" to mapOf(
             "my_accounts" to "Kartalar", "manage_cards" to "Kartalardı basqarıw", "scan_sms" to "SMS skanerlew (100)",
@@ -1175,7 +1203,14 @@ object Translations {
             "approx_uzs" to "≈ %s UZS",
             "edit_operation" to "Operatsiyanı redaktorlaw",
             "expected_day" to "%s kúni kútilmekte",
-            "confirmed_amount" to "Tastıyıqlanǵan: %s"
+            "confirmed_amount" to "Tastıyıqlanǵan: %s",
+            "skipped" to "Ótkerip jiberilgen",
+            "no_data" to "Maǵlıwmat joq",
+            "time_just_now" to "házir",
+            "time_min_ago" to "%d minut aldın",
+            "time_hour_ago" to "%d saat aldın",
+            "time_day_ago" to "%d kún aldın",
+            "time_month_ago" to "%d ay aldın"
         ),
         "kk" to mapOf(
             "my_accounts" to "Карталар", "manage_cards" to "Карталарды басқару", "scan_sms" to "СМС скандау (100)",
@@ -1410,7 +1445,14 @@ object Translations {
             "approx_uzs" to "≈ %s UZS",
             "edit_operation" to "Операцияны өңдеу",
             "expected_day" to "%s күні күтілуде",
-            "confirmed_amount" to "Расталды: %s"
+            "confirmed_amount" to "Расталды: %s",
+            "skipped" to "Өткізіп жіберілді",
+            "no_data" to "Деректер жоқ",
+            "time_just_now" to "жаңа ғана",
+            "time_min_ago" to "%d мин бұрын",
+            "time_hour_ago" to "%d сағат бұрын",
+            "time_day_ago" to "%d күн бұрын",
+            "time_month_ago" to "%d ай бұрын"
         )
     )
 
