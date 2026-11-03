@@ -106,11 +106,11 @@ fun GoalManagerSheet(goals: List<SavingsGoalEntity>, cards: List<CardEntity>, la
 @Composable
 fun CardManagerSheet(
     cards: List<CardEntity>,
-    cardBalancesInCurrency: Map<String, Long>,  // ★ в валюте карты, не в UZS
+    cardBalancesInCurrency: Map<String, Long>,
     allTxs: List<Tx>,
     onSave: (CardEntity) -> Unit,
     onDelete: (String) -> Unit,
-    onAdjustBalance: (String, Long) -> Unit,     // ★ diff в валюте карты
+    onAdjustBalance: (String, Long) -> Unit,
     currentLang: AppLanguage,
     rates: List<ExchangeRateEntity>,
     onDismiss: () -> Unit
@@ -176,7 +176,7 @@ fun CardManagerSheet(
                     Spacer(Modifier.height(16.dp))
                     Text("${t("current_bal")} ${currentBalInCurrency.money()} ${card.currency}", style = MaterialTheme.typography.bodyMedium)
                     if (card.currency != "UZS") {
-                        Text("≈ ${balanceInUzs.money()} UZS", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        Text(t("approx_uzs").format(balanceInUzs.money()), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("${t("enter_fact")} (${card.currency})", style = MaterialTheme.typography.bodyMedium)
@@ -195,7 +195,6 @@ fun CardManagerSheet(
                 TextButton(onClick = {
                     val actualMinor = runCatching { BigDecimal(actualBalanceInput.replace(" ", "").replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong() }.getOrNull()
                     if (editName.isNotBlank() && editName != card.name) onSave(card.copy(name = editName.trim()))
-                    // ★ diff в валюте карты
                     if (actualMinor != null && actualMinor != currentBalInCurrency) onAdjustBalance(card.id, actualMinor - currentBalInCurrency)
                     editingCard = null; editName = ""; actualBalanceInput = ""
                 }) { Text(t("save")) }
@@ -255,7 +254,7 @@ fun CardManagerSheet(
                             Text("${c.name} (${c.currency})", fontWeight = FontWeight.Bold)
                             Text("${currentBalInCurrency.money()} ${c.currency}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                             if (c.currency != "UZS") {
-                                Text("≈ ${balanceInUzs.money()} UZS", style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.7f))
+                                Text(t("approx_uzs").format(balanceInUzs.money()), style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.7f))
                             }
                         }
                         IconButton(onClick = {
@@ -510,7 +509,7 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
         val timePickerState = rememberTimePickerState(initialHour = reminderHour, initialMinute = reminderMinute, is24Hour = true)
         AlertDialog(
             onDismissRequest = { showTimePicker = false },
-            title = { Text("Время напоминания") },
+            title = { Text(t("reminder_time")) },
             text = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimeInput(state = timePickerState) } },
             confirmButton = {
                 TextButton(onClick = {
@@ -520,7 +519,7 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
                     showTimePicker = false
                 }) { Text("OK") }
             },
-            dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text("Отмена") } }
+            dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text(t("cancel")) } }
         )
     }
 
@@ -588,8 +587,8 @@ fun SettingsSheet(context: android.content.Context, onDismiss: () -> Unit, snack
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Ежедневные напоминания", style = MaterialTheme.typography.titleSmall)
-                    Text(text = "Каждый день в %02d:%02d".format(reminderHour, reminderMinute), style = MaterialTheme.typography.bodySmall, color = if (dailyReminder) MaterialTheme.colorScheme.primary else Color.Gray, modifier = Modifier.clickable { showTimePicker = true })
+                    Text(t("daily_reminders"), style = MaterialTheme.typography.titleSmall)
+                    Text(text = t("daily_reminders_desc").format(reminderHour, reminderMinute), style = MaterialTheme.typography.bodySmall, color = if (dailyReminder) MaterialTheme.colorScheme.primary else Color.Gray, modifier = Modifier.clickable { showTimePicker = true })
                 }
                 Switch(checked = dailyReminder, onCheckedChange = { isChecked ->
                     dailyReminder = isChecked
@@ -647,14 +646,14 @@ fun DebtManagerSheet(
 
         AlertDialog(
             onDismissRequest = { debtToRepay = null },
-            title = { Text(if (isBorrowed) "Вернуть долг" else "Получить возврат") },
+            title = { Text(if (isBorrowed) t("return_debt") else t("receive_return")) },
             text = {
                 Column {
-                    Text("${if (isBorrowed) "Вы должны" else "Вам должны"}: ${debt.personName}", fontWeight = FontWeight.Bold)
+                    Text("${if (isBorrowed) t("debt_you_owe") else t("debt_owed_to_you")}: ${debt.personName}", fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Сумма: ${debt.amountMinor.money()} UZS", color = if (isBorrowed) RED else GREEN, fontWeight = FontWeight.Bold)
+                    Text(t("debt_sum").format("${debt.amountMinor.money()} UZS"), color = if (isBorrowed) RED else GREEN, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(16.dp))
-                    Text("Как был осуществлён возврат?", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text(t("how_was_repaid"), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         cards.forEach { c ->
@@ -667,8 +666,8 @@ fun DebtManagerSheet(
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        if (isBorrowed) "Будет создан Расход на ${debt.amountMinor.money()} с категорией «Возврат долга»"
-                        else "Будет создан Доход на ${debt.amountMinor.money()} с категорией «Возврат долга»",
+                        if (isBorrowed) "${t("debt_create_expense")} ${t("debt_sum").format("${debt.amountMinor.money()} UZS")} ${t("debt_with_category_return")}"
+                        else "${t("debt_create_income")} ${t("debt_sum").format("${debt.amountMinor.money()} UZS")} ${t("debt_with_category_return")}",
                         style = MaterialTheme.typography.bodySmall, color = Color.Gray
                     )
                 }
@@ -677,7 +676,7 @@ fun DebtManagerSheet(
                 TextButton(onClick = {
                     onRepay(debt, if (repayCardId == "CASH") null else repayCardId, debt.amountMinor)
                     debtToRepay = null
-                }) { Text("Подтвердить", color = GREEN) }
+                }) { Text(t("debt_confirm"), color = GREEN) }
             },
             dismissButton = { TextButton(onClick = { debtToRepay = null }) { Text(t("cancel")) } }
         )
@@ -704,9 +703,9 @@ fun DebtManagerSheet(
 
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
 
-            Text("Добавить долг (вручную):", style = MaterialTheme.typography.titleSmall)
+            Text(t("debt_add_manually"), style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(4.dp))
-            Text("Совет: проще создать долг через операцию с категорией «🤝 Долги»", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            Text(t("debt_hint_create_via_tx"), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 SegmentedButton(isOwedToMe, { isOwedToMe = true }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(t("owed_to_me")) }
@@ -737,10 +736,10 @@ fun DebtManagerSheet(
                     ))
                     personName = ""; amountInput = ""; desc = ""
                 }
-            }, modifier = Modifier.fillMaxWidth()) { Text("Добавить") }
+            }, modifier = Modifier.fillMaxWidth()) { Text(t("add")) }
 
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-            Text("Активные долги:", style = MaterialTheme.typography.titleSmall)
+            Text(t("debt_active_list"), style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
 
             val activeDebts = debts.filter { !it.isPaid }
@@ -761,7 +760,7 @@ fun DebtManagerSheet(
                         Column(horizontalAlignment = Alignment.End) {
                             Text("${if (d.type == DebtType.LENT) "+" else "-"}${d.amountMinor.money()}", color = if (d.type == DebtType.LENT) GREEN else RED, fontWeight = FontWeight.Bold)
                             TextButton(onClick = { debtToRepay = d }) {
-                                Text(if (d.type == DebtType.BORROWED) "Вернуть" else "Получено", fontSize = 12.sp)
+                                Text(if (d.type == DebtType.BORROWED) t("debt_return_btn") else t("debt_received_btn"), fontSize = 12.sp)
                             }
                         }
                         IconButton(onClick = { debtToDelete = d }) { Icon(Icons.Default.Delete, null, tint = RED) }
@@ -828,7 +827,7 @@ fun RuleManagerSheet(
         AlertDialog(
             onDismissRequest = { showConfirmDeleteUnused = false },
             title = { Text(t("rule_delete_unused")) },
-            text = { Text("Будет удалено $unusedCount правил, которые ещё ни разу не сработали.") },
+            text = { Text("${t("rule_delete_unused")} ($unusedCount)") },
             confirmButton = { TextButton(onClick = { onDeleteUnused(); showConfirmDeleteUnused = false }) { Text(t("yes"), color = RED) } },
             dismissButton = { TextButton(onClick = { showConfirmDeleteUnused = false }) { Text(t("no")) } }
         )
@@ -838,10 +837,10 @@ fun RuleManagerSheet(
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text(t("learned_rules"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
-            Text("При встрече слова в СМС, чеке или голосовой команде категория выбирается автоматически", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text(t("correction_hint"), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             Spacer(Modifier.height(16.dp))
             if (rules.isEmpty()) {
-                Text("Пока нет выученных правил.\nОтредактируйте операцию и отметьте «Запомнить для будущего».", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(t("empty_tx"), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             } else {
                 rules.forEach { rule ->
                     Card(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
@@ -852,8 +851,8 @@ fun RuleManagerSheet(
                                     if (rule.appliedCount > 0) { Spacer(Modifier.width(8.dp)); Text("×${rule.appliedCount}", style = MaterialTheme.typography.labelSmall, color = GREEN, fontWeight = FontWeight.Bold) }
                                     if (rule.rejectedCount > 0) { Spacer(Modifier.width(4.dp)); Text("✕${rule.rejectedCount}", style = MaterialTheme.typography.labelSmall, color = RED) }
                                 }
-                                Text(if (rule.isIgnored) "→ 🚫 Игнорировать (спам/реклама)" else "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                                rule.lastAppliedAt?.let { ts -> Text(formatLastApplied(ts), style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.8f)) }
+                                Text(if (rule.isIgnored) "→ 🚫 ${t("ignore_as_spam")}" else "→ ${Translations.translateCategory(rule.category, currentLang)} (${rule.type.localizedLabel(currentLang)})", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                rule.lastAppliedAt?.let { ts -> Text(formatLastApplied(ts, currentLang), style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.8f)) }
                             }
                             IconButton(onClick = { ruleToDelete = rule }) { Icon(Icons.Default.Delete, null, tint = RED) }
                         }
@@ -869,11 +868,11 @@ fun RuleManagerSheet(
                 }
             }
             Spacer(Modifier.height(24.dp)); HorizontalDivider(); Spacer(Modifier.height(16.dp))
-            Text("Добавить правило вручную:", style = MaterialTheme.typography.titleSmall)
+            Text(t("add"), style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isIgnored = !isIgnored }.padding(vertical = 4.dp)) {
                 Checkbox(checked = isIgnored, onCheckedChange = { isIgnored = it })
-                Text("Игнорировать (спам, реклама, ОТП)", style = MaterialTheme.typography.bodyMedium)
+                Text(t("ignore_as_spam"), style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(8.dp))
             if (!isIgnored) {
@@ -883,7 +882,7 @@ fun RuleManagerSheet(
                 }
                 Spacer(Modifier.height(8.dp))
             }
-            OutlinedTextField(value = keyword, onValueChange = { keyword = it }, label = { Text("Ключевое слово") }, placeholder = { Text("Например: Uzum, Шаурма, Акция") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(value = keyword, onValueChange = { keyword = it }, label = { Text(t("keyword")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             if (!isIgnored) {
                 Spacer(Modifier.height(8.dp))
                 Box(Modifier.fillMaxWidth()) {
@@ -910,14 +909,14 @@ fun RuleManagerSheet(
     }
 }
 
-private fun formatLastApplied(ts: Long): String {
+private fun formatLastApplied(ts: Long, lang: AppLanguage): String {
     val diffMin = (System.currentTimeMillis() - ts) / 60_000L
     return when {
-        diffMin < 1 -> "сработало только что"
-        diffMin < 60 -> "сработало ${diffMin} мин назад"
-        diffMin < 60 * 24 -> "сработало ${diffMin / 60} ч назад"
-        diffMin < 60 * 24 * 30 -> "сработало ${diffMin / (60 * 24)} дн назад"
-        else -> "сработало ${diffMin / (60 * 24 * 30)} мес назад"
+        diffMin < 1 -> Translations.t("time_just_now", lang)
+        diffMin < 60 -> Translations.t("time_min_ago", lang).format(diffMin)
+        diffMin < 60 * 24 -> Translations.t("time_hour_ago", lang).format(diffMin / 60)
+        diffMin < 60 * 24 * 30 -> Translations.t("time_day_ago", lang).format(diffMin / (60 * 24))
+        else -> Translations.t("time_month_ago", lang).format(diffMin / (60 * 24 * 30))
     }
 }
 
@@ -987,7 +986,7 @@ fun CorrectionManagerSheet(
                                         }
                                         Text("${formatParsedValue(c.field, c.parsedValue)} → ${formatParsedValue(c.field, c.correctedValue)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
                                         if (c.rawText.isNotBlank()) Text(c.rawText.take(80).replace("\n", " ") + if (c.rawText.length > 80) "…" else "", style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.6f), maxLines = 1)
-                                        Text(relativeTime(c.lastSeenAt), style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.7f))
+                                        Text(relativeTime(c.lastSeenAt, currentLang), style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.7f))
                                     }
                                     IconButton(onClick = { onDelete(c) }, modifier = Modifier.size(32.dp)) {
                                         Icon(Icons.Default.Close, null, tint = RED.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
@@ -1024,8 +1023,8 @@ private fun fieldLabel(field: String, lang: AppLanguage): String = when (field) 
     "card" -> Translations.t("field_card", lang)
     "category" -> Translations.t("field_category", lang)
     "merchant" -> Translations.t("field_merchant", lang)
-    "toCardId" -> "Счет получателя"
-    "is_spam" -> "Спам / Не операция"
+    "toCardId" -> Translations.t("to_account", lang)
+    "is_spam" -> Translations.t("this_is_spam", lang)
     else -> field
 }
 
@@ -1038,14 +1037,14 @@ private fun formatParsedValue(field: String, value: String): String = when (fiel
     else -> value
 }
 
-private fun relativeTime(ts: Long): String {
+private fun relativeTime(ts: Long, lang: AppLanguage): String {
     val diffMin = (System.currentTimeMillis() - ts) / 60_000L
     return when {
-        diffMin < 1 -> "только что"
-        diffMin < 60 -> "$diffMin мин назад"
-        diffMin < 60 * 24 -> "${diffMin / 60} ч назад"
-        diffMin < 60 * 24 * 30 -> "${diffMin / (60 * 24)} дн назад"
-        else -> "${diffMin / (60 * 24 * 30)} мес назад"
+        diffMin < 1 -> Translations.t("time_just_now", lang)
+        diffMin < 60 -> Translations.t("time_min_ago", lang).format(diffMin)
+        diffMin < 60 * 24 -> Translations.t("time_hour_ago", lang).format(diffMin / 60)
+        diffMin < 60 * 24 * 30 -> Translations.t("time_day_ago", lang).format(diffMin / (60 * 24))
+        else -> Translations.t("time_month_ago", lang).format(diffMin / (60 * 24 * 30))
     }
 }
 
