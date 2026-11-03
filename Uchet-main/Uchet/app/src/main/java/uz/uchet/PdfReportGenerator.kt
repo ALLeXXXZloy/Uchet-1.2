@@ -47,8 +47,9 @@ object PdfReportGenerator {
         canvas.drawText("Uchet - ${getMonthName(month.monthValue, currentLang)} ${month.year}", marginLeft, y, paintTitle)
         y += 30f
 
-        val income = txs.filter { it.type == TxType.INCOME }.sumOf { it.amountMinor }
-        val expense = txs.filter { it.type == TxType.EXPENSE }.sumOf { it.amountMinor }
+        // ★ ИСПРАВЛЕНО: Исключаем корректировки баланса из сводки доходов и расходов
+        val income = txs.filter { it.type == TxType.INCOME && it.source != "ADJUSTMENT" }.sumOf { it.amountMinor }
+        val expense = txs.filter { it.type == TxType.EXPENSE && it.source != "ADJUSTMENT" }.sumOf { it.amountMinor }
         val net = income - expense
 
         canvas.drawText("${t("income")}: +${income.money()} UZS", marginLeft, y, paintSubtitle)
