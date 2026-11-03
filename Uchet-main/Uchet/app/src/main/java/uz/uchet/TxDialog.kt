@@ -35,6 +35,10 @@ import coil.compose.AsyncImage
 import java.io.File
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 // ★ FIX-A: CATEGORY_DEBT и CATEGORY_REPAY теперь живут в Constants.kt как публичные.
 // Приватные дубликаты удалены, чтобы избежать "Conflicting declarations".
@@ -74,8 +78,17 @@ fun TxDialog(
     var toCardId by remember { mutableStateOf(initial?.toCardId ?: "CASH") }
     var category by remember { mutableStateOf(initial?.category ?: quickTemplate?.category ?: (if (type == TxType.EXPENSE) expenseCategories.firstOrNull() ?: "" else incomeCategories.firstOrNull() ?: "")) }
     var description by remember { mutableStateOf(initial?.description ?: "") }
-    val dateMillis = initial?.timestamp ?: System.currentTimeMillis()
     val currency = initial?.currency ?: "UZS"
+
+    // ★ НОВОЕ: Выбор даты
+    val zone = ZoneId.systemDefault()
+    val originalTimestamp = initial?.timestamp ?: System.currentTimeMillis()
+    var selectedDate by remember { mutableStateOf(Instant.ofEpochMilli(originalTimestamp).atZone(zone).toLocalDate()) }
+    val originalTime = remember { Instant.ofEpochMilli(originalTimestamp).atZone(zone).toLocalTime() }
+    val dateMillis = remember(selectedDate, originalTime) {
+        selectedDate.atTime(originalTime).atZone(zone).toInstant().toEpochMilli()
+    }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     // ★ FB-20: Имя человека для долга
     var personName by remember {
@@ -135,6 +148,30 @@ fun TxDialog(
                 putExtra(RecognizerIntent.EXTRA_PROMPT, t("voice_prompt"))
             }
             try { voiceLauncher.launch(intent) } catch (e: Exception) {}
+        }
+    }
+
+    // ★ Date picker dialog
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        // DatePickerState возвращает millis в UTC для выбранной даты
+                        selectedDate = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                    }
+                    showDatePicker = false
+                }) { Text(t("save")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text(t("cancel")) }
+            }
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 
@@ -248,7 +285,7 @@ fun TxDialog(
                     }
                 }
 
-                // ★ Переключатель тип (если категория долга, нельзя переключать тип — иначе сломается связь)
+                // Переключатель тип
                 if (initial?.linkedDebtId == null) {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                         SegmentedButton(type == TxType.EXPENSE, {
@@ -264,7 +301,6 @@ fun TxDialog(
                         }, SegmentedButtonDefaults.itemShape(2, 3)) { Text(t("transfer")) }
                     }
                 } else {
-                    // Для связанного долга показываем только тип (без возможности переключения)
                     Text(
                         t("type_locked").format(type.localizedLabel(currentLang)),
                         style = MaterialTheme.typography.bodySmall,
@@ -272,6 +308,20 @@ fun TxDialog(
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
                 }
+
+                // ★ НОВОЕ: Поле выбора даты
+                OutlinedTextField(
+                    value = selectedDate.format(DATE_FMT),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(t("date")) },
+                    trailingIcon = {
+                        IconButton(onClick = { showDatePicker = true }) {
+                            Icon(Icons.Default.DateRange, contentDescription = t("date"), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                )
 
                 // Сумма
                 OutlinedTextField(
@@ -349,7 +399,7 @@ fun TxDialog(
                     }
                 }
 
-                // ★ FB-20: Поле "Имя человека" для долга
+                // Поле "Имя человека" для долга
                 if (category == CATEGORY_DEBT) {
                     OutlinedTextField(
                         value = personName,
@@ -368,7 +418,7 @@ fun TxDialog(
                     )
                 }
 
-                // Описание (скрываем для "Долги" — оно формируется автоматически)
+                // Описание
                 if (category != CATEGORY_DEBT) {
                     OutlinedTextField(
                         value = description,
@@ -379,7 +429,7 @@ fun TxDialog(
                     )
                 }
 
-                // Чекбокс "Запомнить для будущего" (скрываем для долгов)
+                // Чекбокс "Запомнить для будущего"
                 if (type != TxType.TRANSFER && category != CATEGORY_DEBT && category != CATEGORY_REPAY) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveRule = !saveRule }.padding(vertical = 4.dp)) {
                         Checkbox(checked = saveRule, onCheckedChange = { saveRule = it })
@@ -425,7 +475,6 @@ fun TxDialog(
                                 return@Button
                             }
 
-                            // ★ FB-20: валидация имени для долга
                             if (category == CATEGORY_DEBT && personName.isBlank()) {
                                 nameError = true
                                 return@Button
@@ -433,7 +482,6 @@ fun TxDialog(
 
                             val finalAmountMinor = parsedAmount.movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
 
-                            // ★ FB-20: формируем финальное описание и категорию
                             val finalCategory = when {
                                 type == TxType.TRANSFER -> "💸 Перевод"
                                 category == CATEGORY_DEBT -> CATEGORY_DEBT
@@ -455,12 +503,12 @@ fun TxDialog(
                                 toCardId = if (type == TxType.TRANSFER) (if (toCardId == "CASH") null else toCardId) else null,
                                 description = finalDescription,
                                 category = finalCategory,
-                                timestamp = dateMillis,
+                                timestamp = dateMillis, // ★ НОВОЕ: берем из выбранной даты
                                 source = initial?.source ?: if (isPendingSms) "SMS" else "MANUAL",
                                 currency = currency,
                                 rawText = finalRawText,
                                 photoPath = photoPath,
-                                linkedDebtId = initial?.linkedDebtId // сохраняем связь
+                                linkedDebtId = initial?.linkedDebtId
                             )
 
                             if (initial != null) {
