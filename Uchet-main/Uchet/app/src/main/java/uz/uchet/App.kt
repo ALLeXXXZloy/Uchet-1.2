@@ -276,7 +276,7 @@ fun App(
         uri?.let {
             scope.launch {
                 val success = withContext(Dispatchers.IO) { PdfReportGenerator.generateReport(context, it, txs, month, currentLang.value) }
-                if (success) snackbarHostState.showSnackbar("PDF отчет сохранен") else snackbarHostState.showSnackbar(t("error"))
+                if (success) snackbarHostState.showSnackbar(t("pdf_saved")) else snackbarHostState.showSnackbar(t("error"))
             }
         }
     }
@@ -391,7 +391,7 @@ fun App(
             vm = vm,
             onSave = { finalTxs ->
                 vm.bulkSave(finalTxs)
-                scope.launch { snackbarHostState.showSnackbar("Импортировано: ${finalTxs.size}") }
+                scope.launch { snackbarHostState.showSnackbar(t("imported_count").format(finalTxs.size)) }
                 reviewTxs = null
             },
             onCancel = { reviewTxs = null }
@@ -460,7 +460,6 @@ fun App(
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                // ★ T-006: вместо немедленного сканирования открываем диалог выбора периода
                                 DropdownMenuItem(text = { Text(t("scan_sms_period_title")) }, leadingIcon = { Icon(Icons.Default.Message, null) }, onClick = {
                                     showMenu = false
                                     showSmsPeriodDialog = true
@@ -517,7 +516,6 @@ fun App(
     if (showSettings) SettingsSheet(context, { showSettings = false }, snackbarHostState, scope, currentTheme, currentLang, vm)
     if (showCategoryManager) CategoryManagerSheet(categories, currentLang.value, { vm.saveCategory(it) }, { vm.deleteCategory(it) }, { showCategoryManager = false })
     if (showGoalManager) GoalManagerSheet(goals, cards, currentLang.value, { vm.saveGoal(it) }, { vm.deleteGoal(it) }, { g, c, a -> vm.depositToGoal(g, c, a) }, { showGoalManager = false })
-    // ★ FIX-CURRENCY: передаём cardBalancesInCurrency (в валюте карты), а не в UZS
     if (showCardManager) CardManagerSheet(cards, cardBalancesInCurrency, allTxs, { vm.saveCard(it) }, { vm.deleteCard(it) }, { id, diff -> vm.adjustBalance(id, diff) }, currentLang.value, rates, { showCardManager = false })
     if (showBudgetManager) BudgetManagerSheet(budgets, expenseCategories, { vm.saveBudget(it) }, { vm.deleteBudget(it) }, currentLang.value, { showBudgetManager = false })
     if (showRecurringManager) RecurringManagerSheet(recurring, cards, expenseCategories, incomeCategories, currentLang.value, { vm.saveRecurring(it) }, { vm.deleteRecurring(it) }, { showRecurringManager = false })
@@ -678,7 +676,7 @@ fun App(
                         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
                                 Text("${c.name} (${c.currency})", fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-                                if (c.currency != "UZS") Text("≈ ${balInUzs.money()} UZS", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                if (c.currency != "UZS") Text(t("approx_uzs").format(balInUzs.money()), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                             }
                             Text(
                                 "${balInCurrency.money()} ${c.currency}",
