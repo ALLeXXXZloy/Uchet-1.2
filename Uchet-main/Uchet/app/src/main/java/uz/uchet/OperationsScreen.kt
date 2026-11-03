@@ -54,14 +54,15 @@ fun OperationsScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var filterType by remember { mutableStateOf<TxType?>(null) }
-    var filterImportedOnly by remember { mutableStateOf(false) } // ★ FB-06
+    var filterImportedOnly by remember { mutableStateOf(false) }
 
-    // ★ FB-09: Исключаем долги из подсчета доходов и расходов
-    val income = txs.filter { it.type == TxType.INCOME && it.source != "DEBT" }.sumOf { it.amountMinor }
-    val expense = txs.filter { it.type == TxType.EXPENSE && it.source != "DEBT" }.sumOf { it.amountMinor }
+    // ★ ИСПРАВЛЕНО: Исключаем корректировки баланса из сводки доходов и расходов
+    val income = txs.filter { it.type == TxType.INCOME && it.source != "ADJUSTMENT" && it.source != "DEBT" }.sumOf { it.amountMinor }
+    val expense = txs.filter { it.type == TxType.EXPENSE && it.source != "ADJUSTMENT" && it.source != "DEBT" }.sumOf { it.amountMinor }
 
+    // ★ ИСПРАВЛЕНО: Исключаем корректировки баланса из быстрых шаблонов
     val quickTemplates = remember(txs) {
-        val grouped = txs.filter { it.type == TxType.EXPENSE && it.source != "DEBT" }
+        val grouped = txs.filter { it.type == TxType.EXPENSE && it.source != "DEBT" && it.source != "ADJUSTMENT" }
             .groupBy { it.category }
             .mapValues { (_, list) -> list.size to list.sumOf { it.amountMinor } / list.size }
         grouped.entries
@@ -82,7 +83,6 @@ fun OperationsScreen(
                 
                 val matchesType = filterType == null || tx.type == filterType
                 
-                // ★ FB-06: Фильтр по источнику
                 val matchesImport = if (filterImportedOnly) {
                     tx.source in listOf("SMS", "IMPORT", "OCR", "NOTIF")
                 } else true
@@ -110,7 +110,6 @@ fun OperationsScreen(
     }
     val totalLiquidBalanceUzs = cardBalancesInUzs.values.sum()
 
-    // ★ FB-09: Расчеты по долгам для сводки
     val totalOwedToMe = debts.filter { !it.isPaid && it.type == DebtType.LENT }.sumOf { it.amountMinor }
     val totalIOwe = debts.filter { !it.isPaid && it.type == DebtType.BORROWED }.sumOf { it.amountMinor }
 
@@ -153,17 +152,15 @@ fun OperationsScreen(
             )
             Spacer(Modifier.height(8.dp))
             
-            // ★ Чипы фильтров
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = filterType == null && !filterImportedOnly, onClick = { filterType = null; filterImportedOnly = false }, label = { Text(t("all")) })
                 FilterChip(selected = filterType == TxType.INCOME, onClick = { filterType = TxType.INCOME; filterImportedOnly = false }, label = { Text(t("income")) })
                 FilterChip(selected = filterType == TxType.EXPENSE, onClick = { filterType = TxType.EXPENSE; filterImportedOnly = false }, label = { Text(t("expense")) })
                 
-                // ★ FB-06: Фильтр импортированных
                 FilterChip(
                     selected = filterImportedOnly, 
                     onClick = { filterImportedOnly = !filterImportedOnly; filterType = null }, 
-                    label = { Text("Только импортированные") },
+                    label = { Text(t("import_data")) },
                     leadingIcon = { if (filterImportedOnly) Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp)) else Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp)) }
                 )
             }
@@ -172,7 +169,7 @@ fun OperationsScreen(
 
         if (quickTemplates.isNotEmpty() && !filterImportedOnly) {
             item {
-                Text("Быстрый ввод", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                Text(t("hold_to_voice").split("\n").firstOrNull() ?: "Быстрый ввод", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                     items(quickTemplates) { template ->
                         Card(
@@ -217,7 +214,6 @@ fun OperationsScreen(
             Spacer(Modifier.height(16.dp))
         }
 
-        // ★ FB-09: Отдельный блок «Текущая задолженность»
         if (totalOwedToMe > 0 || totalIOwe > 0) {
             item {
                 Card(
@@ -266,7 +262,8 @@ fun OperationsScreen(
                     Column(Modifier.padding(16.dp)) {
                         Text(t("budgets_month"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(12.dp))
                         budgets.forEach { b ->
-                            val spent = txs.filter { it.type == TxType.EXPENSE && it.category == b.category }.sumOf { it.amountMinor }
+                            // ★ ИСПРАВЛЕНО: корректировки баланса не считаем в бюджетах (у них категория "⚙️ Система", тут и так не попадет, но на всякий случай)
+                            val spent = txs.filter { it.type == TxType.EXPENSE && it.category == b.category && it.source != "ADJUSTMENT" }.sumOf { it.amountMinor }
                             val progress = if (b.limitMinor > 0) spent.toFloat() / b.limitMinor.toFloat() else 0f
                             val pColor = when { progress >= 1f -> RED; progress >= 0.8f -> YELLOW; else -> GREEN }
                             Column(Modifier.padding(vertical = 4.dp)) {
@@ -281,7 +278,7 @@ fun OperationsScreen(
             }
         }
 
-        // ★ Сводка по доходам и расходам (без долгов)
+        // ★ Сводка по доходам и расходам (без корректировок и долгов)
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
@@ -298,7 +295,7 @@ fun OperationsScreen(
                     Icon(Icons.Default.Inbox, null, modifier = Modifier.size(64.dp), tint = Color.Gray.copy(alpha = 0.5f))
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        if (filterImportedOnly) "Импортированных операций нет" 
+                        if (filterImportedOnly) t("no_found") 
                         else if (searchQuery.isEmpty()) t("empty_tx") 
                         else t("no_found"), 
                         style = MaterialTheme.typography.bodyLarge, color = Color.Gray, textAlign = TextAlign.Center
