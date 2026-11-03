@@ -186,11 +186,11 @@ fun StandardForecastScreen(
                             }
                             // Кнопка редактирования
                             IconButton(onClick = { editingRecurring = r }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Edit, contentDescription = "Редактировать", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Edit, contentDescription = t("edit"), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             }
                         }
                         Text(
-                            Translations.translateCategory(r.category, currentLang) + " · " + r.dayOfMonth + " число",
+                            Translations.translateCategory(r.category, currentLang) + " · " + r.dayOfMonth,
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
@@ -217,7 +217,7 @@ fun StandardForecastScreen(
                                     )
                                     Spacer(Modifier.width(4.dp))
                                     Text(
-                                        text = if (isConfirmed) "Подтверждено (${actualAmount.money()})" else if (isSkipped) "Пропущено" else "Нет данных",
+                                        text = if (isConfirmed) t("confirmed_amount").format(actualAmount.money()) else if (isSkipped) t("skipped") else t("no_data"),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = if (isConfirmed) GREEN else Color.Gray
                                     )
@@ -230,7 +230,7 @@ fun StandardForecastScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Default.CheckCircle, null, tint = GREEN, modifier = Modifier.size(16.dp))
                                             Spacer(Modifier.width(4.dp))
-                                            Text("Подтверждено: ${actualAmount.money()}", style = MaterialTheme.typography.bodySmall, color = GREEN)
+                                            Text(t("confirmed_amount").format(actualAmount.money()), style = MaterialTheme.typography.bodySmall, color = GREEN)
                                         }
                                     }
                                     isPostponed -> {
@@ -260,7 +260,7 @@ fun StandardForecastScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Default.Schedule, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
                                             Spacer(Modifier.width(4.dp))
-                                            Text("Ожидается ${r.dayOfMonth} числа", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                            Text(t("expected_day").format(r.dayOfMonth), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                                         }
                                     }
                                 }
@@ -362,7 +362,7 @@ private fun EditRecurringDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Редактировать операцию") },
+        title = { Text(t("edit_operation")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
