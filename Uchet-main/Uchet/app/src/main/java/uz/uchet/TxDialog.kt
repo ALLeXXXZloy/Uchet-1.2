@@ -157,7 +157,7 @@ fun TxDialog(
                 }
 
                 if (isPendingSms) {
-                    Text("Данные из СМС/Уведомления", color = YELLOW, style = MaterialTheme.typography.bodySmall)
+                    Text(t("sms_data"), color = YELLOW, style = MaterialTheme.typography.bodySmall)
                 }
 
                 // ★ Бейдж "Связано с долгом"
@@ -170,11 +170,11 @@ fun TxDialog(
                             Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
                             Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("Связано с долгом", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                Text(t("debt_linked_badge"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
                                 Text("ID: #${initial.linkedDebtId}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
                             }
                             TextButton(onClick = { showLinkedDebtInfo = true }) {
-                                Text("Инфо")
+                                Text(t("info"))
                             }
                         }
                     }
@@ -190,7 +190,7 @@ fun TxDialog(
                             Icon(Icons.Default.Info, contentDescription = null, tint = YELLOW)
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "Возврат долга лучше оформлять через менеджер долгов (кнопка «Оплачено»). Здесь операция создастся без привязки к долгу.",
+                                t("debt_repay_warning"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = YELLOW
                             )
@@ -205,23 +205,23 @@ fun TxDialog(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("Источник данных", style = MaterialTheme.typography.labelMedium)
+                            Text(t("source_data"), style = MaterialTheme.typography.labelMedium)
                             if (photoPath != null && File(photoPath).exists()) {
                                 Spacer(Modifier.height(8.dp))
                                 AsyncImage(
                                     model = File(photoPath),
-                                    contentDescription = "Скриншот из источника",
+                                    contentDescription = t("source_data"),
                                     modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp).clickable { showPhotoDialog = true },
                                     contentScale = ContentScale.Crop
                                 )
-                                Text("Нажмите на фото, чтобы увеличить", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                Text(t("click_photo_to_zoom"), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                                 Spacer(Modifier.height(8.dp))
                             }
                             if (!finalRawText.isNullOrBlank()) {
                                 OutlinedButton(onClick = { showRawTextDialog = true }, modifier = Modifier.fillMaxWidth()) {
                                     Icon(Icons.Default.Info, contentDescription = "Оригинал")
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Посмотреть текст")
+                                    Text(t("view_text"))
                                 }
                             }
                         }
@@ -236,14 +236,14 @@ fun TxDialog(
                     ) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Применено правило: $appliedRuleKeyword", color = Color(0xFF2E7D32), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text(t("rule_applied").format(appliedRuleKeyword ?: ""), color = Color(0xFF2E7D32), fontSize = 12.sp, modifier = Modifier.weight(1f))
                         IconButton(onClick = {
                             appliedRuleId?.let { onRuleRejected(it) }
                             appliedRuleId = null
                             appliedRuleKeyword = null
                             category = if (type == TxType.EXPENSE) expenseCategories.firstOrNull() ?: "" else incomeCategories.firstOrNull() ?: ""
                         }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Cancel, contentDescription = "Отменить правило", tint = Color.Red)
+                            Icon(Icons.Default.Cancel, contentDescription = t("cancel_rule"), tint = Color.Red)
                         }
                     }
                 }
@@ -266,7 +266,7 @@ fun TxDialog(
                 } else {
                     // Для связанного долга показываем только тип (без возможности переключения)
                     Text(
-                        "Тип: ${type.localizedLabel(currentLang)} (нельзя изменить — связано с долгом)",
+                        t("type_locked").format(type.localizedLabel(currentLang)),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.Gray,
                         modifier = Modifier.padding(vertical = 8.dp)
@@ -354,12 +354,12 @@ fun TxDialog(
                     OutlinedTextField(
                         value = personName,
                         onValueChange = { personName = it; nameError = false },
-                        label = { Text("Имя человека (кому/у кого долг)") },
+                        label = { Text(t("debt_person_name_label")) },
                         isError = nameError,
                         supportingText = {
-                            if (nameError) Text("Введите имя", color = RED)
+                            if (nameError) Text(t("debt_name_required"), color = RED)
                             else Text(
-                                if (type == TxType.EXPENSE) "Вы дали в долг" else "Вы взяли в долг",
+                                if (type == TxType.EXPENSE) t("debt_you_lent") else t("debt_you_borrowed"),
                                 color = Color.Gray
                             )
                         },
@@ -383,13 +383,13 @@ fun TxDialog(
                 if (type != TxType.TRANSFER && category != CATEGORY_DEBT && category != CATEGORY_REPAY) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveRule = !saveRule }.padding(vertical = 4.dp)) {
                         Checkbox(checked = saveRule, onCheckedChange = { saveRule = it })
-                        Text("Запомнить для будущего", style = MaterialTheme.typography.bodyMedium)
+                        Text(t("remember_for_future"), style = MaterialTheme.typography.bodyMedium)
                     }
                     if (saveRule) {
                         OutlinedTextField(
                             value = ruleKeyword,
                             onValueChange = { ruleKeyword = it },
-                            label = { Text("Ключевое слово для правила") },
+                            label = { Text(t("rule_keyword")) },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                             singleLine = true
                         )
@@ -410,7 +410,7 @@ fun TxDialog(
                             TextButton(onClick = { showSpamDialog = true }, colors = ButtonDefaults.textButtonColors(contentColor = RED)) {
                                 Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Это спам", fontSize = 12.sp)
+                                Text(t("this_is_spam"), fontSize = 12.sp)
                             }
                         }
                     }
@@ -441,8 +441,8 @@ fun TxDialog(
                             }
                             val finalDescription = when {
                                 category == CATEGORY_DEBT -> {
-                                    if (type == TxType.EXPENSE) "Дал в долг: ${personName.trim()}"
-                                    else "Взял в долг: ${personName.trim()}"
+                                    if (type == TxType.EXPENSE) t("debt_created_lent").format(personName.trim())
+                                    else t("debt_created_borrowed").format(personName.trim())
                                 }
                                 else -> description
                             }
@@ -495,16 +495,15 @@ fun TxDialog(
     if (showLinkedDebtInfo && initial?.linkedDebtId != null) {
         AlertDialog(
             onDismissRequest = { showLinkedDebtInfo = false },
-            title = { Text("Связанный долг") },
+            title = { Text(t("debt_linked_info_title")) },
             text = {
                 Column {
                     Text("ID: #${initial.linkedDebtId}")
                     Spacer(Modifier.height(4.dp))
-                    Text("Изменения синхронизируются с менеджером долгов, пока долг не оплачен.")
-                    Text("Для полной информации откройте менеджер долгов.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    Text(t("debt_linked_info_desc"))
                 }
             },
-            confirmButton = { TextButton(onClick = { showLinkedDebtInfo = false }) { Text("Закрыть") } }
+            confirmButton = { TextButton(onClick = { showLinkedDebtInfo = false }) { Text(t("close")) } }
         )
     }
 
@@ -513,7 +512,7 @@ fun TxDialog(
         Dialog(onDismissRequest = { showPhotoDialog = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(modifier = Modifier.fillMaxSize(), color = Color.Black.copy(alpha = 0.9f)) {
                 Box(Modifier.fillMaxSize().clickable { showPhotoDialog = false }, contentAlignment = Alignment.Center) {
-                    AsyncImage(model = File(photoPath), contentDescription = "Скриншот", modifier = Modifier.fillMaxWidth().padding(16.dp), contentScale = ContentScale.Fit)
+                    AsyncImage(model = File(photoPath), contentDescription = t("source_data"), modifier = Modifier.fillMaxWidth().padding(16.dp), contentScale = ContentScale.Fit)
                 }
             }
         }
@@ -523,7 +522,7 @@ fun TxDialog(
     if (showRawTextDialog && !finalRawText.isNullOrBlank()) {
         AlertDialog(
             onDismissRequest = { showRawTextDialog = false },
-            title = { Text("Оригинальный текст", style = MaterialTheme.typography.titleMedium) },
+            title = { Text(t("original_text"), style = MaterialTheme.typography.titleMedium) },
             text = {
                 Box(Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     SelectionContainer {
@@ -531,12 +530,12 @@ fun TxDialog(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showRawTextDialog = false }) { Text("Закрыть") } },
+            confirmButton = { TextButton(onClick = { showRawTextDialog = false }) { Text(t("close")) } },
             dismissButton = {
                 TextButton(onClick = {
                     clipboardManager.setText(AnnotatedString(finalRawText))
-                    Toast.makeText(context, "Текст скопирован", Toast.LENGTH_SHORT).show()
-                }) { Text("Копировать") }
+                    Toast.makeText(context, t("text_copied"), Toast.LENGTH_SHORT).show()
+                }) { Text(t("copy")) }
             }
         )
     }
@@ -545,15 +544,15 @@ fun TxDialog(
     if (showSpamDialog) {
         AlertDialog(
             onDismissRequest = { showSpamDialog = false },
-            title = { Text("Игнорировать как спам") },
+            title = { Text(t("ignore_as_spam")) },
             text = {
                 Column {
-                    Text("Приложение больше не будет создавать операции, если встретит это слово в СМС или уведомлении.")
+                    Text(t("ignore_spam_desc"))
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = spamKeyword,
                         onValueChange = { spamKeyword = it },
-                        label = { Text("Ключевое слово") },
+                        label = { Text(t("keyword")) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -566,9 +565,9 @@ fun TxDialog(
                         onRecordCorrection(initial?.description ?: "СПАМ", "is_spam", "TRANSACTION", "IGNORED", finalRawText ?: "")
                         if (onDelete != null) onDelete() else onDismiss()
                     }
-                }) { Text("Игнорировать и удалить", color = RED) }
+                }) { Text(t("ignore_and_delete"), color = RED) }
             },
-            dismissButton = { TextButton(onClick = { showSpamDialog = false }) { Text("Отмена") } }
+            dismissButton = { TextButton(onClick = { showSpamDialog = false }) { Text(t("cancel")) } }
         )
     }
 }
